@@ -1,20 +1,20 @@
 type SectionProps = {
   children: React.ReactNode;
-  className?: string;
-  tone?: "default" | "soft" | "dark";
   tight?: boolean;
+  tone?: "default" | "soft" | "dark";
 };
 
 export default function Section({
   children,
-  className = "",
-  tone = "default",
   tight = false,
+  tone = "default",
 }: SectionProps) {
-  const toneClass =
-    tone === "soft" ? "section--soft" : tone === "dark" ? "section--dark" : "";
+  const className =
+    tone === "soft"
+      ? `section ${tight ? "section--tight" : ""} section--soft`.trim()
+      : tone === "dark"
+      ? `section ${tight ? "section--tight" : ""} section--dark`.trim()
+      : `section ${tight ? "section--tight" : ""}`.trim();
 
-  const tightClass = tight ? "section--tight" : "";
-
-  return <section className={`section ${toneClass} ${tightClass} ${className}`.trim()}>{children}</section>;
+  return <section className={className}>{children}</section>;
 }

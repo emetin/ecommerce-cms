@@ -7,6 +7,7 @@ import {
 } from "../lib/cache";
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
+const FORMS_SHEET_ID = process.env.GOOGLE_FORMS_SHEET_ID;
 const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
@@ -41,6 +42,18 @@ function getSheetsClient() {
     version: "v4",
     auth,
   });
+}
+
+function getSpreadsheetId(mode: "catalog" | "forms" = "catalog") {
+  if (mode === "forms") {
+    if (!FORMS_SHEET_ID) {
+      throw new Error("Missing GOOGLE_FORMS_SHEET_ID.");
+    }
+
+    return FORMS_SHEET_ID;
+  }
+
+  return SHEET_ID!;
 }
 
 function sleep(ms: number) {
@@ -115,7 +128,7 @@ export async function getSheetRows(
 
   const rows = await withRetry(async () => {
     const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID,
+      spreadsheetId: getSpreadsheetId("catalog"),
       range: `${sheetName}!A:ZZ`,
     });
 
@@ -178,7 +191,7 @@ export async function appendSheetRow(sheetName: string, row: string[]) {
 
   await withRetry(async () => {
     await sheets.spreadsheets.values.append({
-      spreadsheetId: SHEET_ID,
+      spreadsheetId: getSpreadsheetId("catalog"),
       range: `${sheetName}!A:ZZ`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
@@ -201,7 +214,7 @@ export async function appendSheetRows(sheetName: string, rows: string[][]) {
 
   await withRetry(async () => {
     await sheets.spreadsheets.values.append({
-      spreadsheetId: SHEET_ID,
+      spreadsheetId: getSpreadsheetId("catalog"),
       range: `${sheetName}!A:ZZ`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
@@ -213,6 +226,38 @@ export async function appendSheetRows(sheetName: string, rows: string[][]) {
   clearSheetCache(sheetName);
 
   return { ok: true };
+}
+
+export async function appendFormSheetRow(sheetName: string, row: string[]) {
+  const sheets = getSheetsClient();
+
+  await withRetry(async () => {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: getSpreadsheetId("forms"),
+      range: `${sheetName}!A:ZZ`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: [row],
+      },
+    });
+  });
+
+  return { ok: true };
+}
+
+export async function getFormSheetData(sheetName: string) {
+  const sheets = getSheetsClient();
+
+  const rows = await withRetry(async () => {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: getSpreadsheetId("forms"),
+      range: `${sheetName}!A:ZZ`,
+    });
+
+    return (response.data.values || []) as string[][];
+  });
+
+  return rowsToObjects(rows);
 }
 
 function columnNumberToLetter(columnNumber: number) {
@@ -329,7 +374,7 @@ export async function updateSheetRowByRowNumber(
 
   await withRetry(async () => {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: SHEET_ID,
+      spreadsheetId: getSpreadsheetId("catalog"),
       range: `${sheetName}!A${rowNumber}:${lastColumnLetter}${rowNumber}`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
@@ -377,7 +422,7 @@ export async function getSheetMetaByTitle(
 
   const meta = await withRetry(async () => {
     const response = await sheets.spreadsheets.get({
-      spreadsheetId: SHEET_ID,
+      spreadsheetId: getSpreadsheetId("catalog"),
     });
 
     const sheet = response.data.sheets?.find(
@@ -411,7 +456,7 @@ export async function deleteSheetRowBySlug(sheetName: string, slug: string) {
 
   await withRetry(async () => {
     await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SHEET_ID,
+      spreadsheetId: getSpreadsheetId("catalog"),
       requestBody: {
         requests: [
           {
@@ -489,7 +534,7 @@ export async function deleteSheetRowsByField(
 
   await withRetry(async () => {
     await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SHEET_ID,
+      spreadsheetId: getSpreadsheetId("catalog"),
       requestBody: {
         requests: sorted.map((item) => ({
           deleteDimension: {
@@ -509,4 +554,3 @@ export async function deleteSheetRowsByField(
 
   return { ok: true, deleted: rows.length };
 }
-

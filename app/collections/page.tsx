@@ -23,7 +23,7 @@ type CollectionItem = {
 export const metadata: Metadata = buildPageMetadata({
   title: "Collections",
   description:
-    "Explore curated hospitality textile collections for hotels, resorts, residences and premium accommodation projects by Patak Textile.",
+    "Explore Patak Textile collections organized to support a clearer and more corporate hospitality textile catalog experience.",
   path: "/collections",
 });
 
@@ -48,17 +48,60 @@ export default async function CollectionsPage() {
 
   return (
     <>
-      <section className="page-hero">
+      <section
+        style={{
+          background:
+            "linear-gradient(180deg, #f8f4ed 0%, #f3eee6 60%, #ffffff 100%)",
+          borderBottom: "1px solid #ede3d7",
+          padding: "84px 0 64px",
+        }}
+      >
         <Container>
-          <div className="page-hero__inner">
-            <div className="page-hero__kicker">Collections</div>
-            <h1 className="page-hero__title">
-              Curated hospitality textile collections
+          <div style={{ maxWidth: 880 }}>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                minHeight: 34,
+                padding: "0 14px",
+                borderRadius: 999,
+                background: "#e9e2d6",
+                color: "#5f564c",
+                fontSize: 12,
+                fontWeight: 800,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                marginBottom: 18,
+              }}
+            >
+              Collections
+            </div>
+
+            <h1
+              style={{
+                margin: "0 0 18px",
+                fontSize: "clamp(2.5rem, 4.8vw, 4.6rem)",
+                lineHeight: 1.02,
+                fontWeight: 800,
+                letterSpacing: "-0.03em",
+                color: "#171717",
+              }}
+            >
+              The main navigation layer for a stronger textile catalog experience
             </h1>
-            <p className="page-hero__text">
-              Explore collection groups built for hotels, residences, resorts and
-              premium accommodation projects. This structure helps visitors move
-              through textile families in a cleaner and more trusted way.
+
+            <p
+              style={{
+                margin: 0,
+                maxWidth: 760,
+                color: "#5d554a",
+                fontSize: 17,
+                lineHeight: 1.9,
+              }}
+            >
+              Collections organize the brand presentation around textile families,
+              helping visitors explore categories in a more confident and more
+              structured corporate flow.
             </p>
           </div>
         </Container>
@@ -94,9 +137,9 @@ export default async function CollectionsPage() {
         <Section>
           <Container>
             <SectionHeading
-              kicker="All Collections"
-              title="The main navigation layer for the hospitality catalog"
-              text="Collection pages organize the product world more clearly and help users move through hospitality textile categories with greater confidence."
+              kicker="Collection Directory"
+              title="Curated textile families presented with a more corporate tone"
+              text="This area should help users navigate product groups clearly while reinforcing Patak Textile’s manufacturing strength and category structure."
             />
 
             <div className="cards-grid cards-grid--3">
@@ -105,7 +148,8 @@ export default async function CollectionsPage() {
                   key={`${collection.slug || collection.title || "collection"}-${index}`}
                   title={collection.title || "Untitled Collection"}
                   description={
-                    collection.description || "No description added yet."
+                    collection.description ||
+                    "Explore this textile collection within the Patak Textile catalog."
                   }
                   image={collection.image || ""}
                   href={`/collections/${collection.slug || ""}`}

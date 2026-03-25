@@ -258,7 +258,7 @@ export default async function ProductDetailPage({
 
   return (
     <>
-      <Section tight>
+      <Section>
         <Container>
           <div
             style={{
@@ -267,6 +267,7 @@ export default async function ProductDetailPage({
               gap: 16,
               flexWrap: "wrap",
               alignItems: "center",
+              marginBottom: 24,
             }}
           >
             <ButtonLink href="/products" variant="secondary">
@@ -283,16 +284,12 @@ export default async function ProductDetailPage({
               Home / Products / {product.title || "Product"}
             </div>
           </div>
-        </Container>
-      </Section>
 
-      <Section>
-        <Container>
           <div
             style={{
               display: "grid",
               gridTemplateColumns: "1.05fr 0.95fr",
-              gap: 44,
+              gap: 42,
               alignItems: "start",
             }}
           >
@@ -301,45 +298,64 @@ export default async function ProductDetailPage({
               images={galleryImages}
             />
 
-            <div>
+            <div
+              style={{
+                display: "grid",
+                gap: 22,
+              }}
+            >
               <div
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  padding: "8px 12px",
-                  borderRadius: 999,
-                  background: "#f3efe8",
-                  color: "#2f6f59",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  marginBottom: 16,
+                  display: "grid",
+                  gap: 14,
                 }}
               >
-                {collectionLabel}
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    minHeight: 32,
+                    width: "fit-content",
+                    padding: "0 12px",
+                    borderRadius: 999,
+                    background: "#f3ede3",
+                    color: "#2f7d62",
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {collectionLabel}
+                </div>
+
+                <h1
+                  style={{
+                    margin: 0,
+                    fontSize: "clamp(2rem, 3.2vw, 3.4rem)",
+                    lineHeight: 1.04,
+                    fontWeight: 800,
+                    letterSpacing: "-0.03em",
+                    color: "#171717",
+                  }}
+                >
+                  {product.title || "Untitled Product"}
+                </h1>
+
+                <p
+                  style={{
+                    margin: 0,
+                    color: "#5d554a",
+                    fontSize: 16,
+                    lineHeight: 1.85,
+                    maxWidth: 680,
+                  }}
+                >
+                  {product.short_description ||
+                    product.description ||
+                    "Explore this textile product within the Patak Textile catalog structure."}
+                </p>
               </div>
-
-              <h1
-                style={{
-                  margin: "0 0 18px",
-                  fontSize: "clamp(2.1rem, 4vw, 3.8rem)",
-                  lineHeight: 1.04,
-                }}
-              >
-                {product.title || "Untitled Product"}
-              </h1>
-
-              <p
-                style={{
-                  margin: "0 0 24px",
-                  fontSize: 18,
-                  lineHeight: 1.85,
-                  color: "#5f574c",
-                }}
-              >
-                {product.short_description ||
-                  product.description ||
-                  "No description added yet."}
-              </p>
 
               <ProductPurchasePanel
                 product={{
@@ -349,6 +365,49 @@ export default async function ProductDetailPage({
                 }}
                 variants={variants}
               />
+
+              <div
+                style={{
+                  padding: 24,
+                  borderRadius: 24,
+                  border: "1px solid #e5ddd2",
+                  background: "#faf8f4",
+                  display: "grid",
+                  gap: 12,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 12,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: "#7b7367",
+                    fontWeight: 700,
+                  }}
+                >
+                  Product Details
+                </div>
+
+                <DetailRow
+                  label="Collection"
+                  value={collectionLabel}
+                />
+
+                <DetailRow
+                  label="Category"
+                  value={product.product_category || "-"}
+                />
+
+                <DetailRow
+                  label="Type"
+                  value={product.type || "-"}
+                />
+
+                <DetailRow
+                  label="Vendor"
+                  value={product.vendor || "Patak Textile"}
+                />
+              </div>
             </div>
           </div>
         </Container>
@@ -359,14 +418,14 @@ export default async function ProductDetailPage({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1.2fr 0.8fr",
+              gridTemplateColumns: "1.15fr 0.85fr",
               gap: 24,
               alignItems: "start",
             }}
           >
             <div
               style={{
-                padding: 30,
+                padding: 32,
                 borderRadius: 28,
                 border: "1px solid #e5ddd2",
                 background: "#faf8f4",
@@ -374,8 +433,8 @@ export default async function ProductDetailPage({
             >
               <SectionHeading
                 kicker="Product Description"
-                title="Detailed product information"
-                text="A structured product detail section built around a more classic ecommerce layout."
+                title="Crafted presentation for hospitality-focused textile projects"
+                text="Explore the product with a cleaner and more refined presentation structure tailored for premium textile collections."
               />
 
               <div
@@ -394,44 +453,32 @@ export default async function ProductDetailPage({
 
             <div
               style={{
-                padding: 24,
+                padding: 28,
                 borderRadius: 28,
                 border: "1px solid #e5ddd2",
                 background: "#fff",
               }}
             >
-              <div style={{ ...infoLabelStyle, marginBottom: 14 }}>
-                Product Highlights
+              <div
+                style={{
+                  fontSize: 12,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "#7b7367",
+                  fontWeight: 700,
+                  marginBottom: 14,
+                }}
+              >
+                Why this product page works
               </div>
 
-              <div style={sideInfoRowStyle}>
-                <span style={sideInfoKeyStyle}>Collection</span>
-                <span style={sideInfoValueStyle}>{collectionLabel}</span>
-              </div>
-
-              <div style={sideInfoRowStyle}>
-                <span style={sideInfoKeyStyle}>Application</span>
-                <span style={sideInfoValueStyle}>Hotels, Residences, Projects</span>
-              </div>
-
-              <div style={sideInfoRowStyle}>
-                <span style={sideInfoKeyStyle}>Presentation</span>
-                <span style={sideInfoValueStyle}>Premium Textile Product</span>
-              </div>
-
-              <div style={sideInfoRowStyle}>
-                <span style={sideInfoKeyStyle}>Variants</span>
-                <span style={sideInfoValueStyle}>{variants.length || 1}</span>
-              </div>
-
-              <div style={sideInfoRowStyle}>
-                <span style={sideInfoKeyStyle}>Gallery Images</span>
-                <span style={sideInfoValueStyle}>{galleryImages.length}</span>
-              </div>
+              <InfoCard text="The page opens directly with the product, creating a more familiar ecommerce experience without a separate hero block." />
+              <InfoCard text="Gallery, purchase actions, options, and product details are organized into a cleaner and more premium structure." />
+              <InfoCard text="The layout keeps your future ecommerce functionality while presenting the product in a more elegant and client-friendly way." />
 
               <div style={{ marginTop: 20 }}>
-                <ButtonLink href="/contact-us" variant="accent">
-                  Contact Sales
+                <ButtonLink href="/about-us" variant="secondary">
+                  Learn About Patak Textile
                 </ButtonLink>
               </div>
             </div>
@@ -445,7 +492,7 @@ export default async function ProductDetailPage({
             <SectionHeading
               kicker="Related Products"
               title="Other products from the same collection"
-              text="Continue browsing similar products within the same textile family."
+              text="Continue exploring similar textile presentations from the same collection family."
             />
 
             <div className="cards-grid cards-grid--3">
@@ -460,7 +507,6 @@ export default async function ProductDetailPage({
                   }
                   image={item.image || ""}
                   href={`/products/${item.slug || ""}`}
-                  collectionLabel={formatCollectionLabel(item.collection_slug)}
                 />
               ))}
             </div>
@@ -471,30 +517,60 @@ export default async function ProductDetailPage({
   );
 }
 
-const infoLabelStyle: React.CSSProperties = {
-  fontSize: 12,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-  color: "#7b7367",
-  marginBottom: 8,
-  fontWeight: 700,
-};
+function DetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 14,
+        padding: "10px 0",
+        borderBottom: "1px solid #eee5d9",
+      }}
+    >
+      <span
+        style={{
+          color: "#7b7367",
+          fontWeight: 700,
+        }}
+      >
+        {label}
+      </span>
 
-const sideInfoRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 14,
-  padding: "12px 0",
-  borderBottom: "1px solid #eee5d9",
-};
+      <span
+        style={{
+          color: "#171717",
+          fontWeight: 800,
+          textAlign: "right",
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
 
-const sideInfoKeyStyle: React.CSSProperties = {
-  color: "#7b7367",
-  fontWeight: 700,
-};
-
-const sideInfoValueStyle: React.CSSProperties = {
-  color: "#1a1a1a",
-  fontWeight: 800,
-  textAlign: "right",
-};
+function InfoCard({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        padding: "14px 16px",
+        borderRadius: 18,
+        background: "#faf7f1",
+        border: "1px solid #e7decf",
+        color: "#50493f",
+        lineHeight: 1.8,
+        fontSize: 15,
+        marginBottom: 12,
+      }}
+    >
+      {text}
+    </div>
+  );
+}

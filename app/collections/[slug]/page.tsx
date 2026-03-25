@@ -38,26 +38,6 @@ type ProductItem = {
   seo_description?: string;
 };
 
-type CollectionProductItem = {
-  id?: string;
-  collection_slug?: string;
-  product_slug?: string;
-  sort_order?: string;
-  featured?: string;
-  status?: string;
-  created_at?: string;
-  updated_at?: string;
-};
-
-function toBool(value?: string) {
-  return String(value || "").trim().toLowerCase() === "true";
-}
-
-function toNumber(value?: string, fallback = 999999) {
-  const num = Number(String(value || "").trim());
-  return Number.isFinite(num) ? num : fallback;
-}
-
 export async function generateMetadata({
   params,
 }: {
@@ -68,6 +48,7 @@ export async function generateMetadata({
 
   try {
     const items = (await getSheetData("collections")) as CollectionItem[];
+
     const collection =
       items.find(
         (item) =>
@@ -88,14 +69,14 @@ export async function generateMetadata({
       description:
         collection.seo_description ||
         collection.description ||
-        "Explore this hospitality textile collection by Patak Textile.",
+        "Explore this hospitality textile collection.",
       image: collection.image || "",
       path: `/collections/${decodedSlug}`,
     });
   } catch {
     return buildPageMetadata({
       title: "Collections",
-      description: "Explore hospitality textile collections by Patak Textile.",
+      description: "Explore hospitality textile collections.",
       path: `/collections/${decodedSlug}`,
     });
   }
@@ -111,19 +92,16 @@ export default async function CollectionDetailPage({
 
   let collection: CollectionItem | null = null;
   let products: ProductItem[] = [];
-  let featuredProducts: ProductItem[] = [];
   let errorMessage = "";
 
   try {
-    const [collectionItems, productItems, relationItems] = await Promise.all([
+    const [collectionItems, productItems] = await Promise.all([
       getSheetData("collections"),
       getSheetData("products"),
-      getSheetData("collection_products"),
     ]);
 
     const collections = collectionItems as CollectionItem[];
     const allProducts = productItems as ProductItem[];
-    const relations = relationItems as CollectionProductItem[];
 
     collection =
       collections.find(
@@ -133,63 +111,14 @@ export default async function CollectionDetailPage({
       ) || null;
 
     if (collection) {
-      const publishedProducts = allProducts.filter(
-        (item) => String(item.status || "").trim().toLowerCase() === "published"
-      );
+      products = allProducts.filter((item) => {
+        const itemStatus = String(item.status || "").trim().toLowerCase();
+        const itemCollectionSlug = String(item.collection_slug || "")
+          .trim()
+          .toLowerCase();
 
-      const productMap = new Map(
-        publishedProducts.map((item) => [
-          String(item.slug || "").trim().toLowerCase(),
-          item,
-        ])
-      );
-
-      const validRelations = relations
-        .filter((item) => {
-          const relationCollectionSlug = String(item.collection_slug || "")
-            .trim()
-            .toLowerCase();
-          const relationStatus = String(item.status || "")
-            .trim()
-            .toLowerCase();
-
-          return (
-            relationCollectionSlug === decodedSlug &&
-            (relationStatus === "published" || relationStatus === "")
-          );
-        })
-        .sort(
-          (a, b) => toNumber(a.sort_order, 999999) - toNumber(b.sort_order, 999999)
-        );
-
-      const relationBasedProducts = validRelations
-        .map((relation) =>
-          productMap.get(String(relation.product_slug || "").trim().toLowerCase())
-        )
-        .filter(Boolean) as ProductItem[];
-
-      if (relationBasedProducts.length > 0) {
-        products = relationBasedProducts;
-        featuredProducts = validRelations
-          .filter((item) => toBool(item.featured))
-          .map((relation) =>
-            productMap.get(String(relation.product_slug || "").trim().toLowerCase())
-          )
-          .filter(Boolean)
-          .slice(0, 3) as ProductItem[];
-      } else {
-        products = publishedProducts.filter((item) => {
-          const itemCollectionSlug = String(item.collection_slug || "")
-            .trim()
-            .toLowerCase();
-
-          return itemCollectionSlug === decodedSlug;
-        });
-
-        featuredProducts = products
-          .filter((item) => toBool(item.featured))
-          .slice(0, 3);
-      }
+        return itemStatus === "published" && itemCollectionSlug === decodedSlug;
+      });
     }
   } catch (error) {
     errorMessage =
@@ -200,7 +129,15 @@ export default async function CollectionDetailPage({
     return (
       <Section>
         <Container>
-          <div className="empty-state">
+          <div
+            style={{
+              borderRadius: 20,
+              border: "1px solid #f1c7c7",
+              background: "#fff4f4",
+              color: "#b42318",
+              padding: 20,
+            }}
+          >
             <strong>Error:</strong> {errorMessage}
           </div>
         </Container>
@@ -214,109 +151,68 @@ export default async function CollectionDetailPage({
 
   const heroImage =
     collection.image?.trim() ||
-    "https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=1600&q=80";
+    "https://images.unsplash.com/photo-1524758631624-e2822e304c36";
+
+  const collectionTitle = collection.title?.trim() || "Collection";
+  const collectionDescription =
+    collection.description?.trim() ||
+    "Explore this collection of hospitality textiles.";
 
   return (
     <>
-      <Section tight>
-        <Container>
-          <ButtonLink href="/collections" variant="secondary">
-            ← Back to Collections
-          </ButtonLink>
-        </Container>
-      </Section>
-
       <DetailHero
         kicker="Collection"
-        title={collection.title || "Untitled Collection"}
-        text={
-          collection.description ||
-          "No description has been added for this collection yet."
-        }
+        title={collectionTitle}
+        text={collectionDescription}
         image={heroImage}
-        stats={[
-          {
-            label: "Slug",
-            value: collection.slug || "-",
-          },
-          {
-            label: "Status",
-            value: collection.status || "-",
-          },
-          {
-            label: "Products",
-            value: products.length,
-          },
-        ]}
         actions={
           <>
-            <ButtonLink href="/products" variant="secondary">
-              Browse Products
+            <ButtonLink href="/collections" variant="secondary">
+              ← Back to Collections
             </ButtonLink>
-            <ButtonLink href="/contact-us" variant="accent">
-              Contact Us
+            <ButtonLink href="/contact-us">
+              Request Information
             </ButtonLink>
           </>
         }
       />
 
-      {featuredProducts.length > 0 ? (
-        <Section tone="soft">
-          <Container>
-            <SectionHeading
-              kicker="Featured Products"
-              title="Highlighted published products from this collection"
-              text="Featured items give a stronger introduction to this textile family."
-            />
-
-            <div className="cards-grid cards-grid--3">
-              {featuredProducts.map((item, index) => (
-                <ProductCard
-                  key={`${item.slug || item.title || "featured-product"}-${index}`}
-                  title={item.title || "Untitled Product"}
-                  description={
-                    item.short_description ||
-                    item.description ||
-                    "No description has been added yet."
-                  }
-                  image={item.image || ""}
-                  href={`/products/${item.slug || ""}`}
-                  collectionLabel={collection.title || "Featured Product"}
-                />
-              ))}
-            </div>
-          </Container>
-        </Section>
-      ) : null}
-
       <Section>
         <Container>
           <SectionHeading
-            kicker="All Products"
-            title={`Published products in ${collection.title || "this collection"}`}
-            text="These are the published items currently assigned to this collection."
+            kicker="Collection Products"
+            title="Products in this collection"
+            text="Browse all products in this category."
           />
 
           {products.length > 0 ? (
             <div className="cards-grid cards-grid--3">
               {products.map((item, index) => (
                 <ProductCard
-                  key={`${item.slug || item.title || "collection-product"}-${index}`}
-                  title={item.title || "Untitled Product"}
+                  key={item.slug || `${item.title}-${index}`}
+                  title={item.title || "Product"}
                   description={
                     item.short_description ||
                     item.description ||
-                    "No description has been added yet."
+                    "Product detail"
                   }
                   image={item.image || ""}
                   href={`/products/${item.slug || ""}`}
-                  collectionLabel={collection.title || "Collection"}
+                  collectionLabel={collectionTitle}
                 />
               ))}
             </div>
           ) : (
-            <div className="empty-state">
-              No published products were found in this collection.
+            <div
+              style={{
+                borderRadius: 20,
+                border: "1px solid #e8ddd0",
+                background: "#fff",
+                padding: 24,
+                color: "#5d554a",
+              }}
+            >
+              No products found in this collection.
             </div>
           )}
         </Container>

@@ -51,7 +51,30 @@ type CartItem = {
 };
 
 function parsePrice(value?: string) {
-  const num = Number(String(value || "").replace(/[^0-9.-]/g, ""));
+  const raw = String(value || "").trim();
+
+  if (!raw) return 0;
+
+  const cleaned = raw.replace(/[^\d.,-]/g, "");
+  const hasComma = cleaned.includes(",");
+  const hasDot = cleaned.includes(".");
+
+  let normalized = cleaned;
+
+  if (hasComma && hasDot) {
+    const lastComma = cleaned.lastIndexOf(",");
+    const lastDot = cleaned.lastIndexOf(".");
+
+    if (lastComma > lastDot) {
+      normalized = cleaned.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = cleaned.replace(/,/g, "");
+    }
+  } else if (hasComma) {
+    normalized = cleaned.replace(",", ".");
+  }
+
+  const num = Number(normalized);
   return Number.isFinite(num) ? num : 0;
 }
 
@@ -253,14 +276,9 @@ export default function ProductPurchasePanel({
       const v2 = normalize(variant.option2_value);
       const v3 = normalize(variant.option3_value);
 
-      const option1Matches =
-        !option1.values.length || v1 === selectedOption1;
-
-      const option2Matches =
-        !option2.values.length || v2 === selectedOption2;
-
-      const option3Matches =
-        !option3.values.length || v3 === selectedOption3;
+      const option1Matches = !option1.values.length || v1 === selectedOption1;
+      const option2Matches = !option2.values.length || v2 === selectedOption2;
+      const option3Matches = !option3.values.length || v3 === selectedOption3;
 
       return option1Matches && option2Matches && option3Matches;
     });

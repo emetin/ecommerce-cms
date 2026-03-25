@@ -15,8 +15,8 @@ export default function ButtonLink({
     variant === "secondary"
       ? "button-link btn-secondary"
       : variant === "accent"
-        ? "button-link btn-accent"
-        : "button-link btn-primary";
+      ? "button-link btn-accent"
+      : "button-link btn-primary";
 
   return (
     <Link href={href} className={className}>

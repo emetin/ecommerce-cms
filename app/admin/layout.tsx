@@ -1,7 +1,12 @@
+"use client";
+
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+
   return (
     <div
       style={{
@@ -29,6 +34,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             alignItems: "center",
             justifyContent: "space-between",
             gap: 20,
+            flexWrap: "wrap",
           }}
         >
           <div>
@@ -44,6 +50,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             >
               Patak Textile
             </div>
+
             <div
               style={{
                 fontSize: 32,
@@ -53,6 +60,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             >
               Patak Admin
             </div>
+
             <div
               style={{
                 marginTop: 8,
@@ -64,24 +72,24 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <Link
-            href="/"
+          <div
             style={{
-              display: "inline-flex",
+              display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              minHeight: 46,
-              padding: "0 18px",
-              borderRadius: 999,
-              textDecoration: "none",
-              background: "#2f7d62",
-              color: "#fff",
-              fontWeight: 700,
-              border: "1px solid #2f7d62",
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
-            View Public Site
-          </Link>
+            <Link href="/" style={viewSiteButtonStyle}>
+              View Public Site
+            </Link>
+
+            <form method="POST" action="/api/admin-auth/logout" style={{ margin: 0 }}>
+              <button type="submit" style={logoutButtonStyle}>
+                Logout
+              </button>
+            </form>
+          </div>
         </div>
 
         <div
@@ -98,10 +106,18 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               gap: 12,
             }}
           >
-            <AdminNavLink href="/admin">Dashboard</AdminNavLink>
-            <AdminNavLink href="/admin/products">Products</AdminNavLink>
-            <AdminNavLink href="/admin/collections">Collections</AdminNavLink>
-            <AdminNavLink href="/admin/blog">Blog</AdminNavLink>
+            <AdminNavLink href="/admin" currentPath={pathname}>
+              Dashboard
+            </AdminNavLink>
+            <AdminNavLink href="/admin/products" currentPath={pathname}>
+              Products
+            </AdminNavLink>
+            <AdminNavLink href="/admin/collections" currentPath={pathname}>
+              Collections
+            </AdminNavLink>
+            <AdminNavLink href="/admin/blog" currentPath={pathname}>
+              Blog
+            </AdminNavLink>
           </nav>
         </div>
       </header>
@@ -121,11 +137,18 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
 function AdminNavLink({
   href,
+  currentPath,
   children,
 }: {
   href: string;
+  currentPath: string;
   children: ReactNode;
 }) {
+  const isActive =
+    href === "/admin"
+      ? currentPath === "/admin"
+      : currentPath === href || currentPath.startsWith(`${href}/`);
+
   return (
     <Link
       href={href}
@@ -137,10 +160,10 @@ function AdminNavLink({
         padding: "0 18px",
         borderRadius: 999,
         textDecoration: "none",
-        background: "#fff",
-        color: "#171717",
+        background: isActive ? "#2f7d62" : "#fff",
+        color: isActive ? "#fff" : "#171717",
         fontWeight: 700,
-        border: "1px solid #ddd3c5",
+        border: isActive ? "1px solid #2f7d62" : "1px solid #ddd3c5",
         boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
       }}
     >
@@ -148,3 +171,31 @@ function AdminNavLink({
     </Link>
   );
 }
+
+const viewSiteButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 46,
+  padding: "0 18px",
+  borderRadius: 999,
+  textDecoration: "none",
+  background: "#2f7d62",
+  color: "#fff",
+  fontWeight: 700,
+  border: "1px solid #2f7d62",
+};
+
+const logoutButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 46,
+  padding: "0 18px",
+  borderRadius: 999,
+  background: "#fff",
+  color: "#171717",
+  fontWeight: 700,
+  border: "1px solid #ddd3c5",
+  cursor: "pointer",
+};

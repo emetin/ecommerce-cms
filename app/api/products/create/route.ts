@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { appendSheetRow, getSheetData } from "../../../../lib/sheets";
+import { SHEET_CONFIG } from "../../../../lib/import-export";
 
 type ProductRecord = {
   id?: string;
@@ -12,10 +13,10 @@ type ProductRecord = {
   collection_slug?: string;
   status?: string;
   featured?: string;
-  created_at?: string;
-  updated_at?: string;
   seo_title?: string;
   seo_description?: string;
+  created_at?: string;
+  updated_at?: string;
   vendor?: string;
   product_category?: string;
   type?: string;
@@ -27,7 +28,7 @@ const ALLOWED_FEATURED = ["true", "false"];
 const SHEET_NAME = "products";
 
 function makeSlug(text: string) {
-  return text
+  return String(text || "")
     .toLowerCase()
     .trim()
     .replace(/ğ/g, "g")
@@ -76,10 +77,7 @@ export async function POST(req: Request) {
 
     if (!title) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Title is required.",
-        },
+        { ok: false, error: "Title is required." },
         { status: 400 }
       );
     }
@@ -88,10 +86,7 @@ export async function POST(req: Request) {
 
     if (!finalSlug) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "A valid slug could not be generated.",
-        },
+        { ok: false, error: "A valid slug could not be generated." },
         { status: 400 }
       );
     }
@@ -127,10 +122,7 @@ export async function POST(req: Request) {
 
     if (slugExists) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "This slug is already in use.",
-        },
+        { ok: false, error: "This slug is already in use." },
         { status: 400 }
       );
     }
@@ -141,10 +133,7 @@ export async function POST(req: Request) {
 
     if (titleExists) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "A product with this title already exists.",
-        },
+        { ok: false, error: "A product with this title already exists." },
         { status: 400 }
       );
     }
@@ -152,54 +141,38 @@ export async function POST(req: Request) {
     const now = new Date().toISOString();
     const id = `prd_${Date.now()}`;
 
-    const finalSeoTitle = seoTitle || title;
-    const finalSeoDescription = seoDescription || shortDescription || description;
-
-    await appendSheetRow(SHEET_NAME, [
+    const item: Record<string, string> = {
       id,
       title,
-      finalSlug,
+      slug: finalSlug,
       description,
-      shortDescription,
+      short_description: shortDescription,
       image,
       gallery,
-      collectionSlug,
+      collection_slug: collectionSlug,
       status,
       featured,
-      now,
-      now,
-      finalSeoTitle,
-      finalSeoDescription,
+      seo_title: seoTitle || title,
+      seo_description: seoDescription || shortDescription || description,
+      created_at: now,
+      updated_at: now,
       vendor,
-      productCategory,
+      product_category: productCategory,
       type,
       tags,
-    ]);
+    };
+
+    const rowValues = SHEET_CONFIG.products.headers.map(
+      (header) => item[header] || ""
+    );
+
+    await appendSheetRow(SHEET_NAME, rowValues);
 
     return NextResponse.json(
       {
         ok: true,
         message: "Product created successfully.",
-        item: {
-          id,
-          title,
-          slug: finalSlug,
-          description,
-          short_description: shortDescription,
-          image,
-          gallery,
-          collection_slug: collectionSlug,
-          status,
-          featured,
-          created_at: now,
-          updated_at: now,
-          seo_title: finalSeoTitle,
-          seo_description: finalSeoDescription,
-          vendor,
-          product_category: productCategory,
-          type,
-          tags,
-        },
+        item,
       },
       { status: 201 }
     );

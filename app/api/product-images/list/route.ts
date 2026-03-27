@@ -6,36 +6,44 @@ type ProductImageItem = Record<string, string>;
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
+
     const productSlug = String(searchParams.get("product_slug") || "")
       .trim()
       .toLowerCase();
 
-    const items = (await getSheetData("product_images")) as ProductImageItem[];
+    const images = (await getSheetData("product_images")) as ProductImageItem[];
 
-    let filtered = items.filter((item) => item && item.id);
+    let items = images.filter((item) => item && item.id);
 
     if (productSlug) {
-      filtered = filtered.filter(
+      items = items.filter(
         (item) =>
           String(item.product_slug || "").trim().toLowerCase() === productSlug
       );
     }
 
-    filtered = filtered.sort((a, b) => {
+    items = items.sort((a, b) => {
+      const aMain = String(a.is_main || "").trim().toLowerCase() === "true";
+      const bMain = String(b.is_main || "").trim().toLowerCase() === "true";
+
+      if (aMain !== bMain) {
+        return aMain ? -1 : 1;
+      }
+
       const aOrder = Number(String(a.sort_order || "").trim());
       const bOrder = Number(String(b.sort_order || "").trim());
 
-      const aValue = Number.isFinite(aOrder) ? aOrder : 999999;
-      const bValue = Number.isFinite(bOrder) ? bOrder : 999999;
+      const safeA = Number.isFinite(aOrder) ? aOrder : 999999;
+      const safeB = Number.isFinite(bOrder) ? bOrder : 999999;
 
-      return aValue - bValue;
+      return safeA - safeB;
     });
 
     return NextResponse.json(
       {
         ok: true,
-        total: filtered.length,
-        items: filtered,
+        total: items.length,
+        items,
       },
       {
         headers: {

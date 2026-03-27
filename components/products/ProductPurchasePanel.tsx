@@ -38,18 +38,6 @@ type ProductPurchasePanelProps = {
   variants: VariantItem[];
 };
 
-type CartItem = {
-  product_slug: string;
-  product_title: string;
-  product_image: string;
-  variant_id: string;
-  variant_label: string;
-  sku: string;
-  price: number;
-  compare_at_price: number;
-  quantity: number;
-};
-
 function parsePrice(value?: string) {
   const raw = String(value || "").trim();
 
@@ -187,8 +175,6 @@ export default function ProductPurchasePanel({
   const [selectedOption1, setSelectedOption1] = useState("");
   const [selectedOption2, setSelectedOption2] = useState("");
   const [selectedOption3, setSelectedOption3] = useState("");
-  const [quantity, setQuantity] = useState(1);
-  const [feedback, setFeedback] = useState("");
 
   useEffect(() => {
     setSelectedOption1(option1.values[0] || "");
@@ -301,48 +287,9 @@ export default function ProductPurchasePanel({
     ? Math.round(((compareAtPrice - price) / compareAtPrice) * 100)
     : 0;
 
-  function addToCart() {
-    if (!selectedVariant) {
-      setFeedback("No variant selected.");
-      return;
-    }
-
-    const cartItem: CartItem = {
-      product_slug: String(product.slug || ""),
-      product_title: String(product.title || "Product"),
-      product_image: String(selectedVariant.variant_image || product.image || ""),
-      variant_id: String(
-        selectedVariant.id ||
-          `${product.slug}-${buildVariantLabel(selectedVariant)}`
-      ),
-      variant_label: buildVariantLabel(selectedVariant),
-      sku: String(selectedVariant.sku || ""),
-      price,
-      compare_at_price: compareAtPrice,
-      quantity,
-    };
-
-    const raw = localStorage.getItem("ptx_cart");
-    const currentCart: CartItem[] = raw ? JSON.parse(raw) : [];
-
-    const existingIndex = currentCart.findIndex(
-      (item) => item.variant_id === cartItem.variant_id
-    );
-
-    if (existingIndex > -1) {
-      currentCart[existingIndex].quantity += quantity;
-    } else {
-      currentCart.push(cartItem);
-    }
-
-    localStorage.setItem("ptx_cart", JSON.stringify(currentCart));
-    setFeedback("Added to cart.");
-  }
-
-  function buyNow() {
-    addToCart();
-    window.location.href = "/contact-us";
-  }
+  const inquiryHref = `/contact-us?product=${encodeURIComponent(
+    product.title || "Product"
+  )}&variant=${encodeURIComponent(buildVariantLabel(selectedVariant || {}))}`;
 
   if (!activeVariants.length) {
     return (
@@ -368,11 +315,17 @@ export default function ProductPurchasePanel({
         <div
           style={{
             color: "#6f6559",
-            lineHeight: 1.7,
+            lineHeight: 1.75,
+            marginBottom: 18,
           }}
         >
-          No purchasing variants are currently available for this product.
+          This product is currently presented as part of the catalog structure.
+          Contact our team for pricing, quantities, and project-based inquiries.
         </div>
+
+        <a href="/contact-us" style={primaryLinkStyle}>
+          Contact Sales
+        </a>
       </div>
     );
   }
@@ -463,58 +416,6 @@ export default function ProductPurchasePanel({
         />
       ) : null}
 
-      <div style={{ marginTop: 18 }}>
-        <div
-          style={{
-            fontSize: 13,
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            color: "#7b7367",
-            fontWeight: 700,
-            marginBottom: 10,
-          }}
-        >
-          Quantity
-        </div>
-
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            border: "1px solid #ddd3c5",
-            borderRadius: 999,
-            overflow: "hidden",
-            background: "#fff",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setQuantity((prev) => Math.max(1, prev - 1))}
-            style={qtyButtonStyle}
-          >
-            −
-          </button>
-
-          <div
-            style={{
-              minWidth: 56,
-              textAlign: "center",
-              fontWeight: 800,
-            }}
-          >
-            {quantity}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setQuantity((prev) => prev + 1)}
-            style={qtyButtonStyle}
-          >
-            +
-          </button>
-        </div>
-      </div>
-
       <div
         style={{
           display: "grid",
@@ -522,13 +423,13 @@ export default function ProductPurchasePanel({
           marginTop: 24,
         }}
       >
-        <button type="button" onClick={addToCart} style={addToCartStyle}>
-          Add to Cart
-        </button>
+        <a href={inquiryHref} style={primaryLinkStyle}>
+          Request Quote
+        </a>
 
-        <button type="button" onClick={buyNow} style={buyNowStyle}>
-          Buy Now
-        </button>
+        <a href="/contact-us" style={secondaryLinkStyle}>
+          Contact Sales
+        </a>
       </div>
 
       <div
@@ -545,22 +446,6 @@ export default function ProductPurchasePanel({
           value={String(selectedVariant?.box_quantity || "-")}
         />
       </div>
-
-      {feedback ? (
-        <div
-          style={{
-            marginTop: 16,
-            padding: 12,
-            borderRadius: 14,
-            background: "#eef8f0",
-            border: "1px solid #cfe5d4",
-            color: "#245843",
-            fontWeight: 700,
-          }}
-        >
-          {feedback}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -639,17 +524,10 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-const qtyButtonStyle: React.CSSProperties = {
-  width: 46,
-  height: 46,
-  border: "none",
-  background: "#fff",
-  cursor: "pointer",
-  fontSize: 20,
-  fontWeight: 800,
-};
-
-const addToCartStyle: React.CSSProperties = {
+const primaryLinkStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
   minHeight: 52,
   borderRadius: 999,
   border: "1px solid #171717",
@@ -658,9 +536,13 @@ const addToCartStyle: React.CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
   fontSize: 15,
+  textDecoration: "none",
 };
 
-const buyNowStyle: React.CSSProperties = {
+const secondaryLinkStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
   minHeight: 52,
   borderRadius: 999,
   border: "1px solid #d8cebf",
@@ -669,4 +551,5 @@ const buyNowStyle: React.CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
   fontSize: 15,
+  textDecoration: "none",
 };

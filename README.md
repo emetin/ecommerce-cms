@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Patak Textile CMS
 
-## Getting Started
+Patak Textile CMS is a lightweight Next.js-based catalog website with an internal admin panel.  
+It is designed for a listing and catalog structure, not a full ecommerce checkout system.
 
-First, run the development server:
+The project uses:
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Next.js App Router
+- TypeScript
+- Google Sheets as the main content source
+- Internal admin panel for products, collections, and blog
+- CSV / JSON / XML import-export support
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Project Purpose
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+This project is intended as a clean and manageable starting point for:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- product listing pages
+- collection pages
+- blog pages
+- product detail pages
+- admin-based content management
 
-## Learn More
+The current structure is focused on a premium catalog presentation.  
+It is not intended to behave like a full Shopify-style store at this stage.
 
-To learn more about Next.js, take a look at the following resources:
+## Main Data Sources
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The project reads data from Google Sheets.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Required sheet names:
 
-## Deploy on Vercel
+- `products`
+- `collections`
+- `blog`
+- `product_variants`
+- `product_images`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Products Sheet Header Order
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The `products` sheet must use this exact header order:
+
+```txt
+id
+title
+slug
+description
+short_description
+image
+gallery
+collection_slug
+status
+featured
+seo_title
+seo_description
+created_at
+updated_at
+vendor
+product_category
+type
+tags

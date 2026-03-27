@@ -24,6 +24,10 @@ export const SHEET_CONFIG = {
       "seo_description",
       "created_at",
       "updated_at",
+      "vendor",
+      "product_category",
+      "type",
+      "tags",
     ],
     xmlRoot: "products",
     xmlItem: "product",
@@ -84,8 +88,23 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function makeId() {
-  return `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+function makeId(prefix = "row") {
+  return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+}
+
+function normalizeBooleanString(value: string, fallback = "false") {
+  const normalized = String(value || fallback).trim().toLowerCase();
+  return normalized === "true" ? "true" : "false";
+}
+
+function normalizeStatus(value: string, fallback = "draft") {
+  const normalized = String(value || fallback).trim().toLowerCase();
+
+  if (["draft", "published", "archived"].includes(normalized)) {
+    return normalized;
+  }
+
+  return fallback;
 }
 
 export function normalizeRecord(
@@ -103,28 +122,31 @@ export function normalizeRecord(
   });
 
   if (!record.id) {
-    record.id = existingItem?.id || makeId();
+    record.id =
+      existingItem?.id ||
+      makeId(
+        type === "products"
+          ? "prd"
+          : type === "collections"
+          ? "col"
+          : "blog"
+      );
   }
 
   if (!record.slug && record.title) {
     record.slug = makeSlug(record.title);
   }
 
-  if (type === "products" || type === "blog") {
-    if (!record.featured) {
-      record.featured = existingItem?.featured || "false";
-    }
-
-    record.featured =
-      String(record.featured).toLowerCase() === "true" ? "true" : "false";
-  }
-
   if (!record.status) {
     record.status = existingItem?.status || "draft";
   }
 
-  if (!["draft", "published", "archived"].includes(record.status)) {
-    record.status = "draft";
+  record.status = normalizeStatus(record.status);
+
+  if (type === "products" || type === "blog") {
+    record.featured = normalizeBooleanString(
+      record.featured || existingItem?.featured || "false"
+    );
   }
 
   if (type === "products") {
@@ -134,7 +156,10 @@ export function normalizeRecord(
 
     if (!record.seo_description) {
       record.seo_description =
-        existingItem?.seo_description || record.short_description || "";
+        existingItem?.seo_description ||
+        record.short_description ||
+        record.description ||
+        "";
     }
   }
 

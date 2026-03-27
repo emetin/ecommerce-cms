@@ -12,7 +12,19 @@ export async function GET(req: NextRequest) {
     await validateSheetHeaders("products");
 
     const { searchParams } = new URL(req.url);
-    const format = String(searchParams.get("format") || "csv").toLowerCase();
+    const format = String(searchParams.get("format") || "csv")
+      .trim()
+      .toLowerCase();
+
+    if (!["csv", "json", "xml"].includes(format)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Invalid export format. Use "csv", "json", or "xml".',
+        },
+        { status: 400 }
+      );
+    }
 
     const { headers, items, xmlRoot, xmlItem } = await getExportData("products");
 

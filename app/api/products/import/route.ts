@@ -11,8 +11,18 @@ export async function POST(req: NextRequest) {
     await validateSheetHeaders("products");
 
     const body = await req.json();
-    const format = String(body?.format || "csv").toLowerCase();
+    const format = String(body?.format || "csv").trim().toLowerCase();
     const text = String(body?.text || "");
+
+    if (!["csv", "json"].includes(format)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Invalid import format. Use "csv" or "json".',
+        },
+        { status: 400 }
+      );
+    }
 
     if (!text.trim()) {
       return NextResponse.json(

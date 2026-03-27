@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type ProductItem = {
   id?: string;
@@ -28,34 +28,34 @@ export default function AdminProductsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [deleteLoadingSlug, setDeleteLoadingSlug] = useState("");
 
-  async function loadProducts() {
-    try {
-      setLoading(true);
-      setErrorMessage("");
+  const loadProducts = useCallback(async () => {
+  try {
+    setLoading(true);
+    setErrorMessage("");
 
-      const response = await fetch("/api/products/list", {
-        cache: "no-store",
-      });
+    const response = await fetch("/api/products/list", {
+      cache: "no-store",
+    });
 
-      const data = await response.json();
+    const data = await response.json();
 
-      if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to load products.");
-      }
-
-      setItems(data.items || []);
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "An unknown error occurred."
-      );
-    } finally {
-      setLoading(false);
+    if (!response.ok || !data.ok) {
+      throw new Error(data?.error || "Failed to load products.");
     }
-  }
 
-  useEffect(() => {
-    loadProducts();
-  }, []);
+    setItems(data.items || []);
+  } catch (error) {
+    setErrorMessage(
+      error instanceof Error ? error.message : "An unknown error occurred."
+    );
+  } finally {
+    setLoading(false);
+  }
+}, []);
+
+useEffect(() => {
+  loadProducts();
+}, [loadProducts]);
 
   async function handleDelete(slug?: string) {
     if (!slug) return;

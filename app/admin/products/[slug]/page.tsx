@@ -1,7 +1,8 @@
 "use client";
 
+import ProductMediaManager from "../../../../components/admin/ProductMediaManager";
 import Link from "next/link";
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ProductItem = {
   id?: string;
@@ -42,7 +43,7 @@ type VariantItem = {
   fulfillment_service?: string;
   requires_shipping?: string;
   taxable?: string;
-  variant_image?: string;
+  image_id?: string;
   weight?: string;
   weight_unit?: string;
   box_quantity?: string;
@@ -119,7 +120,6 @@ export default function AdminProductDetailPage({
   const [price, setPrice] = useState("");
   const [compareAtPrice, setCompareAtPrice] = useState("");
   const [boxQuantity, setBoxQuantity] = useState("");
-  const [variantImage, setVariantImage] = useState("");
   const [inventoryTracker, setInventoryTracker] = useState("none");
   const [inventoryPolicy, setInventoryPolicy] = useState("deny");
   const [fulfillmentService, setFulfillmentService] = useState("manual");
@@ -133,69 +133,80 @@ export default function AdminProductDetailPage({
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
   const [deleteLoadingId, setDeleteLoadingId] = useState("");
+  const initialLoadDoneRef = useRef(false);
+  const lastLoadedSlugRef = useRef("");
 
-  async function loadPage() {
-    try {
-      setLoading(true);
-      setPageError("");
+  const loadPage = useCallback(async () => {
+  try {
+    setLoading(true);
+    setPageError("");
 
-      const [productsResponse, variantsResponse] = await Promise.all([
-        fetch("/api/products/list", { cache: "no-store" }),
-        fetch(`/api/variants/list?product_slug=${encodeURIComponent(slug)}`, {
-          cache: "no-store",
-        }),
-      ]);
+    const [productResponse, variantsResponse] = await Promise.all([
+      fetch(`/api/products/get?slug=${encodeURIComponent(slug)}`, {
+        cache: "no-store",
+      }),
+      fetch(`/api/variants/list?product_slug=${encodeURIComponent(slug)}`, {
+        cache: "no-store",
+      }),
+    ]);
 
-      const productsData = await productsResponse.json();
-      const variantsData = await variantsResponse.json();
+    const productData = await productResponse.json();
+    const variantsData = await variantsResponse.json();
 
-      if (!productsResponse.ok || !productsData.ok) {
-        throw new Error(productsData?.error || "Failed to load product.");
-      }
-
-      if (!variantsResponse.ok || !variantsData.ok) {
-        throw new Error(variantsData?.error || "Failed to load variants.");
-      }
-
-      const foundProduct =
-        (productsData.items || []).find(
-          (item: ProductItem) =>
-            String(item.slug || "").trim().toLowerCase() === slug.toLowerCase()
-        ) || null;
-
-      if (!foundProduct) {
-        throw new Error("Product not found.");
-      }
-
-      setProduct(foundProduct);
-      setVariants(variantsData.items || []);
-
-      setTitle(foundProduct.title || "");
-      setDescription(foundProduct.description || "");
-      setShortDescription(foundProduct.short_description || "");
-      setImage(foundProduct.image || "");
-      setGallery(foundProduct.gallery || "");
-      setCollectionSlug(foundProduct.collection_slug || "");
-      setStatusValue(foundProduct.status || "draft");
-      setFeatured(foundProduct.featured || "false");
-      setSeoTitle(foundProduct.seo_title || "");
-      setSeoDescription(foundProduct.seo_description || "");
-      setVendor(foundProduct.vendor || "");
-      setProductCategory(foundProduct.product_category || "");
-      setTypeValue(foundProduct.type || "");
-      setTags(foundProduct.tags || "");
-    } catch (error) {
-      setPageError(
-        error instanceof Error ? error.message : "An unknown error occurred."
-      );
-    } finally {
-      setLoading(false);
+    if (!productResponse.ok || !productData.ok) {
+      throw new Error(productData?.error || "Failed to load product.");
     }
+
+    if (!variantsResponse.ok || !variantsData.ok) {
+      throw new Error(variantsData?.error || "Failed to load variants.");
+    }
+
+    const foundProduct = productData.item || null;
+
+    if (!foundProduct) {
+      throw new Error("Product not found.");
+    }
+
+    setProduct(foundProduct);
+    setVariants(Array.isArray(variantsData.items) ? variantsData.items : []);
+    setTitle(foundProduct.title || "");
+    setDescription(foundProduct.description || "");
+    setShortDescription(foundProduct.short_description || "");
+    setImage(foundProduct.image || "");
+    setGallery(foundProduct.gallery || "");
+    setCollectionSlug(foundProduct.collection_slug || "");
+    setStatusValue(foundProduct.status || "draft");
+    setFeatured(foundProduct.featured || "false");
+    setSeoTitle(foundProduct.seo_title || "");
+    setSeoDescription(foundProduct.seo_description || "");
+    setVendor(foundProduct.vendor || "");
+    setProductCategory(foundProduct.product_category || "");
+    setTypeValue(foundProduct.type || "");
+    setTags(foundProduct.tags || "");
+  } catch (error) {
+    setPageError(
+      error instanceof Error ? error.message : "An unknown error occurred."
+    );
+  } finally {
+    setLoading(false);
   }
+}, [slug]);
 
   useEffect(() => {
-    loadPage();
-  }, [slug]);
+  if (!slug) return;
+
+  if (
+    initialLoadDoneRef.current &&
+    lastLoadedSlugRef.current === slug
+  ) {
+    return;
+  }
+
+  initialLoadDoneRef.current = true;
+  lastLoadedSlugRef.current = slug;
+
+  loadPage();
+}, [slug, loadPage]);
 
   const optionPreview = useMemo(() => {
     const values = [option1Value, option2Value, option3Value]
@@ -318,7 +329,7 @@ export default function AdminProductDetailPage({
           fulfillment_service: fulfillmentService,
           requires_shipping: requiresShipping,
           taxable,
-          variant_image: variantImage,
+          image_id: "",
           weight,
           weight_unit: weightUnit,
           box_quantity: boxQuantity,
@@ -344,7 +355,6 @@ export default function AdminProductDetailPage({
       setPrice("");
       setCompareAtPrice("");
       setBoxQuantity("");
-      setVariantImage("");
       setInventoryTracker("none");
       setInventoryPolicy("deny");
       setFulfillmentService("manual");
@@ -429,12 +439,6 @@ export default function AdminProductDetailPage({
         <div style={headerActionsStyle}>
           <Link href={`/products/${product.slug}`} style={secondaryButtonStyle}>
             View Product
-          </Link>
-          <Link
-            href={`/admin/products/${product.slug}/images`}
-            style={secondaryButtonStyle}
-          >
-            Images
           </Link>
           <Link href="/admin/products/new" style={primaryButtonStyle}>
             + New Product
@@ -874,16 +878,6 @@ export default function AdminProductDetailPage({
                 <option value="archived">archived</option>
               </select>
             </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Variant Image URL</label>
-              <input
-                value={variantImage}
-                onChange={(e) => setVariantImage(e.target.value)}
-                placeholder="https://..."
-                style={inputStyle}
-              />
-            </div>
           </div>
 
           <div style={previewBoxStyle}>
@@ -989,6 +983,8 @@ export default function AdminProductDetailPage({
           )}
         </div>
       </div>
+
+      <ProductMediaManager productSlug={slug} />
     </div>
   );
 }

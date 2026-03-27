@@ -4,6 +4,7 @@ import { getSheetData } from "../../../../lib/sheets";
 type VariantItem = Record<string, string>;
 
 const ALLOWED_STATUS = ["published", "draft", "archived"];
+const SHEET_NAME = "product_variants";
 
 export async function GET(req: Request) {
   try {
@@ -17,7 +18,9 @@ export async function GET(req: Request) {
       .trim()
       .toLowerCase();
 
-    const variants = (await getSheetData("product_variants")) as VariantItem[];
+    const variants = (await getSheetData(SHEET_NAME, {
+      ttlSeconds: 300,
+    })) as VariantItem[];
 
     let items = variants.filter((item) => item && item.id);
 
@@ -31,10 +34,7 @@ export async function GET(req: Request) {
     if (statusParam) {
       if (!ALLOWED_STATUS.includes(statusParam)) {
         return NextResponse.json(
-          {
-            ok: false,
-            error: "Invalid status filter.",
-          },
+          { ok: false, error: "Invalid status filter." },
           { status: 400 }
         );
       }

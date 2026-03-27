@@ -1,6 +1,5 @@
 "use client";
 
-import ProductMediaManager from "../../../../components/admin/ProductMediaManager";
 import Link from "next/link";
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -65,11 +64,7 @@ function formatMoney(value: number) {
 }
 
 function buildVariantLabel(item: VariantItem) {
-  const values = [
-    item.option1_value,
-    item.option2_value,
-    item.option3_value,
-  ]
+  const values = [item.option1_value, item.option2_value, item.option3_value]
     .map((value) => String(value || "").trim())
     .filter(Boolean);
 
@@ -87,6 +82,7 @@ export default function AdminProductDetailPage({
   const [product, setProduct] = useState<ProductItem | null>(null);
   const [variants, setVariants] = useState<VariantItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [variantsLoading, setVariantsLoading] = useState(false);
   const [pageError, setPageError] = useState("");
 
   const [title, setTitle] = useState("");
@@ -133,80 +129,99 @@ export default function AdminProductDetailPage({
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
   const [deleteLoadingId, setDeleteLoadingId] = useState("");
-  const initialLoadDoneRef = useRef(false);
-  const lastLoadedSlugRef = useRef("");
 
-  const loadPage = useCallback(async () => {
-  try {
-    setLoading(true);
-    setPageError("");
+  const productLoadedSlugRef = useRef("");
+  const variantsLoadedSlugRef = useRef("");
 
-    const [productResponse, variantsResponse] = await Promise.all([
-      fetch(`/api/products/get?slug=${encodeURIComponent(slug)}`, {
-        cache: "no-store",
-      }),
-      fetch(`/api/variants/list?product_slug=${encodeURIComponent(slug)}`, {
-        cache: "no-store",
-      }),
-    ]);
+  const loadProduct = useCallback(async () => {
+    try {
+      setLoading(true);
+      setPageError("");
 
-    const productData = await productResponse.json();
-    const variantsData = await variantsResponse.json();
+      const productResponse = await fetch(
+        `/api/products/get?slug=${encodeURIComponent(slug)}`,
+        {
+          cache: "no-store",
+        }
+      );
 
-    if (!productResponse.ok || !productData.ok) {
-      throw new Error(productData?.error || "Failed to load product.");
+      const productData = await productResponse.json();
+
+      if (!productResponse.ok || !productData.ok) {
+        throw new Error(productData?.error || "Failed to load product.");
+      }
+
+      const foundProduct = productData.item || null;
+
+      if (!foundProduct) {
+        throw new Error("Product not found.");
+      }
+
+      setProduct(foundProduct);
+      setTitle(foundProduct.title || "");
+      setDescription(foundProduct.description || "");
+      setShortDescription(foundProduct.short_description || "");
+      setImage(foundProduct.image || "");
+      setGallery(foundProduct.gallery || "");
+      setCollectionSlug(foundProduct.collection_slug || "");
+      setStatusValue(foundProduct.status || "draft");
+      setFeatured(foundProduct.featured || "false");
+      setSeoTitle(foundProduct.seo_title || "");
+      setSeoDescription(foundProduct.seo_description || "");
+      setVendor(foundProduct.vendor || "");
+      setProductCategory(foundProduct.product_category || "");
+      setTypeValue(foundProduct.type || "");
+      setTags(foundProduct.tags || "");
+    } catch (error) {
+      setPageError(
+        error instanceof Error ? error.message : "An unknown error occurred."
+      );
+    } finally {
+      setLoading(false);
     }
+  }, [slug]);
 
-    if (!variantsResponse.ok || !variantsData.ok) {
-      throw new Error(variantsData?.error || "Failed to load variants.");
+  const loadVariants = useCallback(async () => {
+    try {
+      setVariantsLoading(true);
+
+      const response = await fetch(
+        `/api/variants/list?product_slug=${encodeURIComponent(slug)}`,
+        {
+          cache: "no-store",
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || "Failed to load variants.");
+      }
+
+      setVariants(Array.isArray(data.items) ? data.items : []);
+    } catch (error) {
+      console.error("Failed to load variants:", error);
+      setVariants([]);
+    } finally {
+      setVariantsLoading(false);
     }
-
-    const foundProduct = productData.item || null;
-
-    if (!foundProduct) {
-      throw new Error("Product not found.");
-    }
-
-    setProduct(foundProduct);
-    setVariants(Array.isArray(variantsData.items) ? variantsData.items : []);
-    setTitle(foundProduct.title || "");
-    setDescription(foundProduct.description || "");
-    setShortDescription(foundProduct.short_description || "");
-    setImage(foundProduct.image || "");
-    setGallery(foundProduct.gallery || "");
-    setCollectionSlug(foundProduct.collection_slug || "");
-    setStatusValue(foundProduct.status || "draft");
-    setFeatured(foundProduct.featured || "false");
-    setSeoTitle(foundProduct.seo_title || "");
-    setSeoDescription(foundProduct.seo_description || "");
-    setVendor(foundProduct.vendor || "");
-    setProductCategory(foundProduct.product_category || "");
-    setTypeValue(foundProduct.type || "");
-    setTags(foundProduct.tags || "");
-  } catch (error) {
-    setPageError(
-      error instanceof Error ? error.message : "An unknown error occurred."
-    );
-  } finally {
-    setLoading(false);
-  }
-}, [slug]);
+  }, [slug]);
 
   useEffect(() => {
-  if (!slug) return;
+    if (!slug) return;
+    if (productLoadedSlugRef.current === slug) return;
 
-  if (
-    initialLoadDoneRef.current &&
-    lastLoadedSlugRef.current === slug
-  ) {
-    return;
-  }
+    productLoadedSlugRef.current = slug;
+    loadProduct();
+  }, [slug, loadProduct]);
 
-  initialLoadDoneRef.current = true;
-  lastLoadedSlugRef.current = slug;
+  useEffect(() => {
+    if (!slug) return;
+    if (variantsLoadedSlugRef.current === slug) return;
 
-  loadPage();
-}, [slug, loadPage]);
+    variantsLoadedSlugRef.current = slug;
+    loadVariants();
+  }, [slug, loadVariants]);
 
   const optionPreview = useMemo(() => {
     const values = [option1Value, option2Value, option3Value]
@@ -255,7 +270,7 @@ export default function AdminProductDetailPage({
       }
 
       setProductSaveMessage("Product updated successfully.");
-      await loadPage();
+      await loadProduct();
     } catch (error) {
       setProductSaveError(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -364,7 +379,7 @@ export default function AdminProductDetailPage({
       setWeightUnit("kg");
       setVariantStatus("published");
 
-      await loadPage();
+      await loadVariants();
     } catch (error) {
       setSaveError(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -440,6 +455,9 @@ export default function AdminProductDetailPage({
           <Link href={`/products/${product.slug}`} style={secondaryButtonStyle}>
             View Product
           </Link>
+          <Link href={`/admin/products/${slug}/images`} style={secondaryButtonStyle}>
+            Manage Images
+          </Link>
           <Link href="/admin/products/new" style={primaryButtonStyle}>
             + New Product
           </Link>
@@ -472,7 +490,9 @@ export default function AdminProductDetailPage({
 
         <div style={summaryCardStyle}>
           <div style={summaryLabelStyle}>Variants</div>
-          <div style={summaryValueStyle}>{variants.length}</div>
+          <div style={summaryValueStyle}>
+            {variantsLoading ? "..." : variants.length}
+          </div>
         </div>
       </div>
 
@@ -903,7 +923,9 @@ export default function AdminProductDetailPage({
             </p>
           </div>
 
-          {variants.length === 0 ? (
+          {variantsLoading ? (
+            <div style={emptyStateStyle}>Loading variants...</div>
+          ) : variants.length === 0 ? (
             <div style={emptyStateStyle}>
               No variants have been created for this product yet.
             </div>
@@ -984,7 +1006,21 @@ export default function AdminProductDetailPage({
         </div>
       </div>
 
-      <ProductMediaManager productSlug={slug} />
+      <div style={cardStyle}>
+        <div style={sectionTitleWrapStyle}>
+          <h2 style={sectionTitleStyle}>Image Management</h2>
+          <p style={sectionTextStyle}>
+            Open the separate image management page to upload, assign, and organize
+            product media without slowing down this detail screen.
+          </p>
+        </div>
+
+        <div style={buttonRowStyle}>
+          <Link href={`/admin/products/${slug}/images`} style={primaryButtonStyle}>
+            Open Image Manager
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1001,18 +1037,18 @@ function StatusBadge({ value }: { value: string }) {
           border: "1px solid #cfe7d8",
         }
       : normalized === "draft"
-      ? {
-          ...badgeStyle,
-          background: "#fff7e8",
-          color: "#8a6418",
-          border: "1px solid #ecd8ad",
-        }
-      : {
-          ...badgeStyle,
-          background: "#f3f3f3",
-          color: "#5e5e5e",
-          border: "1px solid #dddddd",
-        };
+        ? {
+            ...badgeStyle,
+            background: "#fff7e8",
+            color: "#8a6418",
+            border: "1px solid #ecd8ad",
+          }
+        : {
+            ...badgeStyle,
+            background: "#f3f3f3",
+            color: "#5e5e5e",
+            border: "1px solid #dddddd",
+          };
 
   return <span style={style}>{value}</span>;
 }

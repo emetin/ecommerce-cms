@@ -1,61 +1,100 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ProductItem = {
   id?: string;
   title?: string;
   slug?: string;
-  description?: string;
-  short_description?: string;
   image?: string;
-  gallery?: string;
   collection_slug?: string;
   status?: string;
   featured?: string;
-  seo_title?: string;
-  seo_description?: string;
-  created_at?: string;
+  short_description?: string;
   updated_at?: string;
 };
+
+const PAGE_SIZE = 50;
 
 export default function AdminProductsPage() {
   const [items, setItems] = useState<ProductItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [deleteLoadingSlug, setDeleteLoadingSlug] = useState("");
 
-  const loadProducts = useCallback(async () => {
-  try {
-    setLoading(true);
-    setErrorMessage("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
-    const response = await fetch("/api/products/list", {
-      cache: "no-store",
-    });
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const data = await response.json();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(data?.error || "Failed to load products.");
+  useEffect(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
     }
 
-    setItems(data.items || []);
-  } catch (error) {
-    setErrorMessage(
-      error instanceof Error ? error.message : "An unknown error occurred."
-    );
-  } finally {
-    setLoading(false);
-  }
-}, []);
+    debounceRef.current = setTimeout(() => {
+      setPage(1);
+      setSearch(searchInput.trim());
+    }, 350);
 
-useEffect(() => {
-  loadProducts();
-}, [loadProducts]);
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [searchInput]);
+
+  const loadProducts = useCallback(async () => {
+    try {
+      setLoading(true);
+      setErrorMessage("");
+
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("limit", String(PAGE_SIZE));
+
+      if (statusFilter !== "all") {
+        params.set("status", statusFilter);
+      }
+
+      if (search.trim()) {
+        params.set("q", search.trim());
+      }
+
+      const response = await fetch(`/api/products/list?${params.toString()}`, {
+        cache: "no-store",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || "Failed to load products.");
+      }
+
+      setItems(Array.isArray(data.items) ? data.items : []);
+      setTotal(Number(data.total || 0));
+      setTotalPages(Number(data.totalPages || 1));
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "An unknown error occurred."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [page, search, statusFilter]);
+
+  useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter]);
 
   async function handleDelete(slug?: string) {
     if (!slug) return;
@@ -83,7 +122,7 @@ useEffect(() => {
         throw new Error(data?.error || "Failed to delete product.");
       }
 
-      setItems((prev) => prev.filter((item) => item.slug !== slug));
+      await loadProducts();
     } catch (error) {
       alert(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -93,29 +132,21 @@ useEffect(() => {
     }
   }
 
-  const filteredItems = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
+  const publishedCount = useMemo(
+    () =>
+      items.filter(
+        (item) => String(item.status || "").toLowerCase() === "published"
+      ).length,
+    [items]
+  );
 
-    return items.filter((item) => {
-      const title = String(item.title || "").toLowerCase();
-      const slug = String(item.slug || "").toLowerCase();
-      const description = String(item.description || "").toLowerCase();
-      const shortDescription = String(item.short_description || "").toLowerCase();
-      const status = String(item.status || "").toLowerCase();
-
-      const matchesSearch =
-        !normalizedSearch ||
-        title.includes(normalizedSearch) ||
-        slug.includes(normalizedSearch) ||
-        description.includes(normalizedSearch) ||
-        shortDescription.includes(normalizedSearch);
-
-      const matchesStatus =
-        statusFilter === "all" || status === statusFilter.toLowerCase();
-
-      return matchesSearch && matchesStatus;
-    });
-  }, [items, search, statusFilter]);
+  const draftCount = useMemo(
+    () =>
+      items.filter(
+        (item) => String(item.status || "").toLowerCase() === "draft"
+      ).length,
+    [items]
+  );
 
   return (
     <div style={{ display: "grid", gap: 24 }}>
@@ -123,7 +154,8 @@ useEffect(() => {
         <div>
           <h1 style={titleStyle}>Products</h1>
           <p style={subtitleStyle}>
-            Review, search, export, and manage all product records.
+            Review, search, export, and manage product records faster with
+            server-side filtering.
           </p>
         </div>
 
@@ -146,13 +178,23 @@ useEffect(() => {
       <div style={filterCardStyle}>
         <div style={statsRowStyle}>
           <div style={statBoxStyle}>
-            <div style={statLabelStyle}>Total Records</div>
+            <div style={statLabelStyle}>Total Results</div>
+            <div style={statValueStyle}>{total}</div>
+          </div>
+
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>On This Page</div>
             <div style={statValueStyle}>{items.length}</div>
           </div>
 
           <div style={statBoxStyle}>
-            <div style={statLabelStyle}>Filtered Results</div>
-            <div style={statValueStyle}>{filteredItems.length}</div>
+            <div style={statLabelStyle}>Published</div>
+            <div style={statValueStyle}>{publishedCount}</div>
+          </div>
+
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Draft</div>
+            <div style={statValueStyle}>{draftCount}</div>
           </div>
         </div>
 
@@ -160,9 +202,9 @@ useEffect(() => {
           <div>
             <label style={labelStyle}>Search</label>
             <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by title, slug, or description"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by title, slug, collection, short description"
               style={inputStyle}
             />
           </div>
@@ -190,7 +232,7 @@ useEffect(() => {
           <strong>Error:</strong>
           <div style={{ marginTop: 8 }}>{errorMessage}</div>
         </div>
-      ) : filteredItems.length === 0 ? (
+      ) : items.length === 0 ? (
         <div style={emptyStateStyle}>
           No products matched your current search or filters.
         </div>
@@ -210,7 +252,7 @@ useEffect(() => {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item, index) => (
+                {items.map((item, index) => (
                   <tr key={item.id || item.slug || index}>
                     <td style={tdStyle}>
                       <div style={{ display: "grid", gap: 6 }}>
@@ -222,15 +264,12 @@ useEffect(() => {
                             lineHeight: 1.6,
                           }}
                         >
-                          {item.short_description ||
-                            item.description ||
-                            "No description added yet."}
+                          {item.short_description || "No short description added yet."}
                         </div>
                       </div>
                     </td>
 
                     <td style={tdStyle}>{item.slug || "-"}</td>
-
                     <td style={tdStyle}>{item.collection_slug || "-"}</td>
 
                     <td style={tdStyle}>
@@ -284,6 +323,32 @@ useEffect(() => {
               </tbody>
             </table>
           </div>
+
+          <div style={paginationWrapStyle}>
+            <button
+              type="button"
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={page <= 1 || loading}
+              style={secondarySmallButtonStyle}
+            >
+              Previous
+            </button>
+
+            <div style={paginationInfoStyle}>
+              Page {page} / {totalPages}
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                setPage((prev) => Math.min(totalPages, prev + 1))
+              }
+              disabled={page >= totalPages || loading}
+              style={secondarySmallButtonStyle}
+            >
+              Next
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -302,18 +367,18 @@ function StatusBadge({ value }: { value: string }) {
           border: "1px solid #cfe7d8",
         }
       : normalized === "draft"
-      ? {
-          ...badgeStyle,
-          background: "#fff7e8",
-          color: "#8a6418",
-          border: "1px solid #ecd8ad",
-        }
-      : {
-          ...badgeStyle,
-          background: "#f3f3f3",
-          color: "#5e5e5e",
-          border: "1px solid #dddddd",
-        };
+        ? {
+            ...badgeStyle,
+            background: "#fff7e8",
+            color: "#8a6418",
+            border: "1px solid #ecd8ad",
+          }
+        : {
+            ...badgeStyle,
+            background: "#f3f3f3",
+            color: "#5e5e5e",
+            border: "1px solid #dddddd",
+          };
 
   return <span style={style}>{value}</span>;
 }
@@ -525,6 +590,21 @@ const dangerSmallButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   textDecoration: "none",
   fontSize: 14,
+};
+
+const paginationWrapStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  padding: 18,
+  borderTop: "1px solid #efe8dc",
+  flexWrap: "wrap",
+};
+
+const paginationInfoStyle: React.CSSProperties = {
+  fontWeight: 800,
+  color: "#5f564b",
 };
 
 const emptyStateStyle: React.CSSProperties = {

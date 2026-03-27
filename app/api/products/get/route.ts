@@ -3,7 +3,7 @@ import { getSheetData } from "../../../../lib/sheets";
 
 type ProductItem = Record<string, string>;
 
-const SHEET_NAME = "products";
+const SHEET_NAME = "Products";
 
 export async function GET(req: Request) {
   try {
@@ -20,7 +20,9 @@ export async function GET(req: Request) {
       );
     }
 
-    const products = (await getSheetData(SHEET_NAME)) as ProductItem[];
+    const products = (await getSheetData(SHEET_NAME, {
+      ttlSeconds: 300,
+    })) as ProductItem[];
 
     const item =
       products.find(
@@ -35,10 +37,17 @@ export async function GET(req: Request) {
       );
     }
 
-    return NextResponse.json({
-      ok: true,
-      item,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        item,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
+    );
   } catch (error) {
     return NextResponse.json(
       {

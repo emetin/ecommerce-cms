@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { normalizeImageUrl } from "../../lib/image-url";
 
 type ProductCardProps = {
   title: string;
@@ -14,6 +15,10 @@ export default function ProductCard({
   image,
   href,
 }: ProductCardProps) {
+  const finalImage =
+    normalizeImageUrl(image?.trim()) ||
+    "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1200&q=80";
+
   return (
     <Link
       href={href}
@@ -42,10 +47,7 @@ export default function ProductCard({
           }}
         >
           <img
-            src={
-              image?.trim() ||
-              "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1200&q=80"
-            }
+            src={finalImage}
             alt={title}
             style={{
               width: "100%",

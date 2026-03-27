@@ -9,6 +9,7 @@ import ProductCard from "../../../components/cards/ProductCard";
 import ProductGallery from "../../../components/products/ProductGallery";
 import ProductPurchasePanel from "../../../components/products/ProductPurchasePanel";
 import { buildPageMetadata } from "../../../lib/seo";
+import { normalizeImageUrls, normalizeImageUrl } from "../../../lib/image-url";
 
 type ProductItem = {
   id?: string;
@@ -111,7 +112,7 @@ function parseGallery(
     ...variantImages,
   ].filter(Boolean);
 
-  return Array.from(new Set(all));
+  return Array.from(new Set(normalizeImageUrls(all)));
 }
 
 export async function generateMetadata({
@@ -146,7 +147,7 @@ export async function generateMetadata({
         product.short_description ||
         product.description ||
         "Explore this hospitality textile product.",
-      image: product.image || "",
+      image: normalizeImageUrl(product.image || ""),
       path: `/products/${decodedSlug}`,
     });
   } catch {
@@ -361,7 +362,7 @@ export default async function ProductDetailPage({
                 product={{
                   title: product.title,
                   slug: product.slug,
-                  image: product.image,
+                  image: normalizeImageUrl(product.image),
                 }}
                 variants={variants}
               />
@@ -389,9 +390,18 @@ export default async function ProductDetailPage({
                 </div>
 
                 <DetailRow label="Collection" value={collectionLabel} />
-                <DetailRow label="Category" value={product.product_category || "-"} />
+
+                <DetailRow
+                  label="Category"
+                  value={product.product_category || "-"}
+                />
+
                 <DetailRow label="Type" value={product.type || "-"} />
-                <DetailRow label="Vendor" value={product.vendor || "Patak Textile"} />
+
+                <DetailRow
+                  label="Vendor"
+                  value={product.vendor || "Patak Textile"}
+                />
               </div>
             </div>
           </div>
@@ -418,8 +428,8 @@ export default async function ProductDetailPage({
             >
               <SectionHeading
                 kicker="Product Description"
-                title="Detailed product presentation"
-                text="Explore the product through a cleaner and more structured catalog layout."
+                title="Crafted presentation for hospitality-focused textile projects"
+                text="Explore the product with a cleaner and more refined presentation structure tailored for premium textile collections."
               />
 
               <div
@@ -454,16 +464,16 @@ export default async function ProductDetailPage({
                   marginBottom: 14,
                 }}
               >
-                Product Summary
+                Why this product page works
               </div>
 
-              <InfoCard text="This page is structured for a premium catalog presentation rather than a complex ecommerce flow." />
-              <InfoCard text="Gallery images, options, and key product details are organized to support a cleaner client experience." />
-              <InfoCard text="Use this section to guide visitors toward inquiry, quotation, and product discovery." />
+              <InfoCard text="The page opens directly with the product, creating a more familiar ecommerce experience without a separate hero block." />
+              <InfoCard text="Gallery, purchase actions, options, and product details are organized into a cleaner and more premium structure." />
+              <InfoCard text="The layout keeps your future ecommerce functionality while presenting the product in a more elegant and client-friendly way." />
 
               <div style={{ marginTop: 20 }}>
-                <ButtonLink href="/contact-us" variant="secondary">
-                  Contact Sales
+                <ButtonLink href="/about-us" variant="secondary">
+                  Learn About Patak Textile
                 </ButtonLink>
               </div>
             </div>

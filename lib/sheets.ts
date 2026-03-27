@@ -11,7 +11,7 @@ const FORMS_SHEET_ID = process.env.GOOGLE_FORMS_SHEET_ID;
 const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
-const DEFAULT_TTL_SECONDS = 60;
+const DEFAULT_TTL_SECONDS = 300;
 const DEFAULT_RETRY_COUNT = 3;
 const DEFAULT_RETRY_DELAY_MS = 500;
 

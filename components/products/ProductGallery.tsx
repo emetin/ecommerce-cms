@@ -1,15 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type ProductGalleryProps = {
   title?: string;
   images: string[];
+  controlledActiveImage?: string;
+  onActiveImageChange?: (image: string) => void;
 };
 
 export default function ProductGallery({
   title = "Product",
   images,
+  controlledActiveImage,
+  onActiveImageChange,
 }: ProductGalleryProps) {
   const validImages = useMemo(
     () => images.map((item) => String(item || "").trim()).filter(Boolean),
@@ -18,6 +22,31 @@ export default function ProductGallery({
 
   const [activeIndex, setActiveIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  useEffect(() => {
+    if (!validImages.length) {
+      setActiveIndex(0);
+      return;
+    }
+
+    if (!controlledActiveImage) {
+      setActiveIndex((prev) => (prev >= validImages.length ? 0 : prev));
+      return;
+    }
+
+    const nextIndex = validImages.findIndex(
+      (item) => item.trim() === controlledActiveImage.trim()
+    );
+
+    if (nextIndex >= 0) {
+      setActiveIndex(nextIndex);
+    }
+  }, [controlledActiveImage, validImages]);
+
+  useEffect(() => {
+    if (!validImages.length) return;
+    onActiveImageChange?.(validImages[activeIndex]);
+  }, [activeIndex, validImages, onActiveImageChange]);
 
   if (!validImages.length) {
     return (

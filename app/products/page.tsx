@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getSheetData } from "../../lib/sheets";
+import { normalizeImageUrl } from "../../lib/image-url";
 import Container from "../../components/ui/Container";
 import Section from "../../components/ui/Section";
 import ButtonLink from "../../components/ui/ButtonLink";
@@ -28,6 +29,17 @@ type ProductItem = {
   tags?: string;
 };
 
+type ProductImageItem = {
+  id?: string;
+  product_slug?: string;
+  image_url?: string;
+  sort_order?: string;
+  alt_text?: string;
+  is_main?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export const metadata: Metadata = buildPageMetadata({
   title: "Products",
   description:
@@ -35,12 +47,53 @@ export const metadata: Metadata = buildPageMetadata({
   path: "/products",
 });
 
+function toSafeOrder(value?: string) {
+  const num = Number(String(value || "").trim());
+  return Number.isFinite(num) ? num : 999999;
+}
+
+function isTrue(value?: string) {
+  return String(value || "").trim().toLowerCase() === "true";
+}
+
+function getPrimaryProductImage(
+  product: ProductItem,
+  productImages: ProductImageItem[]
+) {
+  const sortedImages = [...productImages].sort((a, b) => {
+    const aMain = isTrue(a.is_main);
+    const bMain = isTrue(b.is_main);
+
+    if (aMain !== bMain) {
+      return aMain ? -1 : 1;
+    }
+
+    return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+  });
+
+  const mainImage = sortedImages.find((item) => isTrue(item.is_main));
+  const firstGalleryImage = sortedImages[0];
+
+  return normalizeImageUrl(
+    mainImage?.image_url ||
+      firstGalleryImage?.image_url ||
+      product.image ||
+      ""
+  );
+}
+
 export default async function ProductsPage() {
   let products: ProductItem[] = [];
+  let allProductImages: ProductImageItem[] = [];
   let errorMessage = "";
 
   try {
-    const productData = await getSheetData("products");
+    const [productData, imageData] = await Promise.all([
+      getSheetData("products"),
+      getSheetData("product_images"),
+    ]);
+
+    allProductImages = imageData as ProductImageItem[];
 
     products = (productData as ProductItem[])
       .filter(
@@ -179,19 +232,36 @@ export default async function ProductsPage() {
             />
 
             <div className="cards-grid cards-grid--3">
-              {products.map((product, index) => (
-                <ProductCard
-                  key={`${product.slug || product.title || "product"}-${index}`}
-                  title={product.title || "Untitled Product"}
-                  description={
-                    product.short_description ||
-                    product.description ||
-                    "Explore this textile product within the Patak Textile catalog structure."
-                  }
-                  image={product.image || ""}
-                  href={`/products/${product.slug || ""}`}
-                />
-              ))}
+              {products.map((product, index) => {
+                const productSlug = String(product.slug || "")
+                  .trim()
+                  .toLowerCase();
+
+                const productImages = allProductImages.filter(
+                  (item) =>
+                    String(item.product_slug || "").trim().toLowerCase() ===
+                    productSlug
+                );
+
+                const primaryImage = getPrimaryProductImage(
+                  product,
+                  productImages
+                );
+
+                return (
+                  <ProductCard
+                    key={`${product.slug || product.title || "product"}-${index}`}
+                    title={product.title || "Untitled Product"}
+                    description={
+                      product.short_description ||
+                      product.description ||
+                      "Explore this textile product within the Patak Textile catalog structure."
+                    }
+                    image={primaryImage}
+                    href={`/products/${product.slug || ""}`}
+                  />
+                );
+              })}
             </div>
           </Container>
         </Section>

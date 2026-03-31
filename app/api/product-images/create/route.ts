@@ -5,11 +5,14 @@ import {
   getSheetHeaders,
   getSheetRows,
   updateSheetRowByRowNumber,
+  updateSheetRowBySlug,
 } from "../../../../lib/sheets";
 
 type ProductImageItem = Record<string, string>;
+type ProductItem = Record<string, string>;
 
 const SHEET_NAME = "product_images";
+const PRODUCTS_SHEET_NAME = "products";
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -21,6 +24,31 @@ function normalizeBool(value: unknown, fallback = "false") {
 
 function buildImageId() {
   return `img_${Date.now()}${Math.floor(Math.random() * 1000)}`;
+}
+
+async function syncMainProductImage(productSlug: string, imageUrl: string) {
+  const products = (await getSheetData(PRODUCTS_SHEET_NAME)) as ProductItem[];
+
+  const product = products.find(
+    (item) =>
+      String(item.slug || "").trim().toLowerCase() ===
+      String(productSlug || "").trim().toLowerCase()
+  );
+
+  if (!product) {
+    return;
+  }
+
+  const headers = await getSheetHeaders(PRODUCTS_SHEET_NAME);
+
+  const updatedProduct: ProductItem = {
+    ...product,
+    image: imageUrl,
+    updated_at: new Date().toISOString(),
+  };
+
+  const rowValues = headers.map((header) => updatedProduct[header] || "");
+  await updateSheetRowBySlug(PRODUCTS_SHEET_NAME, productSlug, rowValues);
 }
 
 export async function POST(req: Request) {
@@ -78,12 +106,15 @@ export async function POST(req: Request) {
             .trim()
             .toLowerCase();
 
-          if (rowSlug === productSlug && String(rowObject.is_main || "") === "true") {
+          if (
+            rowSlug === productSlug &&
+            String(rowObject.is_main || "").trim().toLowerCase() === "true"
+          ) {
             const updated: Record<string, string> = {
-  ...rowObject,
-  is_main: "false",
-  updated_at: now,
-};
+              ...rowObject,
+              is_main: "false",
+              updated_at: now,
+            };
 
             const rowValues = sheetHeaders.map((header) => updated[header] || "");
             await updateSheetRowByRowNumber(SHEET_NAME, i + 1, rowValues);
@@ -105,6 +136,10 @@ export async function POST(req: Request) {
 
     const rowValues = headers.map((header) => item[header] || "");
     await appendSheetRow(SHEET_NAME, rowValues);
+
+    if (isMain === "true") {
+      await syncMainProductImage(productSlug, imageUrl);
+    }
 
     return NextResponse.json({
       ok: true,

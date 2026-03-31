@@ -3,40 +3,45 @@ import { getSheetData } from "../../../../lib/sheets";
 
 type ProductImageItem = Record<string, string>;
 
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function isTrue(value: unknown) {
+  return String(value || "").trim().toLowerCase() === "true";
+}
+
+function toSafeOrder(value: unknown) {
+  const num = Number(String(value || "").trim());
+  return Number.isFinite(num) ? num : 999999;
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    const productSlug = String(searchParams.get("product_slug") || "")
-      .trim()
-      .toLowerCase();
+    const productSlug = normalizeText(searchParams.get("product_slug")).toLowerCase();
 
     const images = (await getSheetData("product_images")) as ProductImageItem[];
 
-    let items = images.filter((item) => item && item.id);
+    let items = images.filter((item) => item && normalizeText(item.id));
 
     if (productSlug) {
       items = items.filter(
         (item) =>
-          String(item.product_slug || "").trim().toLowerCase() === productSlug
+          normalizeText(item.product_slug).toLowerCase() === productSlug
       );
     }
 
     items = items.sort((a, b) => {
-      const aMain = String(a.is_main || "").trim().toLowerCase() === "true";
-      const bMain = String(b.is_main || "").trim().toLowerCase() === "true";
+      const aMain = isTrue(a.is_main);
+      const bMain = isTrue(b.is_main);
 
       if (aMain !== bMain) {
         return aMain ? -1 : 1;
       }
 
-      const aOrder = Number(String(a.sort_order || "").trim());
-      const bOrder = Number(String(b.sort_order || "").trim());
-
-      const safeA = Number.isFinite(aOrder) ? aOrder : 999999;
-      const safeB = Number.isFinite(bOrder) ? bOrder : 999999;
-
-      return safeA - safeB;
+      return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
     });
 
     return NextResponse.json(

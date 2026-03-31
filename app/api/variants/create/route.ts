@@ -42,7 +42,7 @@ export async function POST(req: Request) {
     const fulfillmentService = normalizeText(body?.fulfillment_service);
     const requiresShipping = normalizeText(body?.requires_shipping);
     const taxable = normalizeText(body?.taxable);
-    const imageId = normalizeText(body?.image_id);
+    const variantImage = normalizeText(body?.variant_image);
     const weight = normalizeText(body?.weight);
     const weightUnit = normalizeText(body?.weight_unit);
     const boxQuantity = normalizeText(body?.box_quantity);
@@ -51,6 +51,13 @@ export async function POST(req: Request) {
     if (!productSlug) {
       return NextResponse.json(
         { ok: false, error: "Product slug is required." },
+        { status: 400 }
+      );
+    }
+
+    if (!option1Value) {
+      return NextResponse.json(
+        { ok: false, error: "Option 1 value is required." },
         { status: 400 }
       );
     }
@@ -104,7 +111,8 @@ export async function POST(req: Request) {
       fulfillment_service: fulfillmentService,
       requires_shipping: requiresShipping,
       taxable,
-      image_id: imageId,
+      variant_image: variantImage,
+      image_id: variantImage,
       weight,
       weight_unit: weightUnit,
       box_quantity: boxQuantity,

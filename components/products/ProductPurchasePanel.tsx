@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { normalizeImageUrl } from "../../lib/image-url";
 
-type VariantItem = {
+export type VariantItem = {
   id?: string;
   product_slug?: string;
   option1_name?: string;
@@ -21,6 +22,7 @@ type VariantItem = {
   requires_shipping?: string;
   taxable?: string;
   variant_image?: string;
+  image_id?: string;
   weight?: string;
   weight_unit?: string;
   box_quantity?: string;
@@ -36,6 +38,7 @@ type ProductPurchasePanelProps = {
     image?: string;
   };
   variants: VariantItem[];
+  onVariantChange?: (variant: VariantItem | null) => void;
 };
 
 function parsePrice(value?: string) {
@@ -98,6 +101,13 @@ function buildVariantLabel(variant: VariantItem) {
   return values.length ? values.join(" / ") : "Default";
 }
 
+function getVariantImage(variant?: VariantItem | null) {
+  if (!variant) return "";
+  return normalizeImageUrl(
+    String(variant.variant_image || variant.image_id || "").trim()
+  );
+}
+
 function getOptionMeta(
   variants: VariantItem[],
   optionNameKey: "option1_name" | "option2_name" | "option3_name",
@@ -147,6 +157,7 @@ function filterOutDefaultVariantsWhenRealOnesExist(variants: VariantItem[]) {
 export default function ProductPurchasePanel({
   product,
   variants,
+  onVariantChange,
 }: ProductPurchasePanelProps) {
   const activeVariants = useMemo(() => {
     const published = variants.filter((variant) =>
@@ -280,6 +291,10 @@ export default function ProductPurchasePanel({
     selectedOption3,
   ]);
 
+  useEffect(() => {
+    onVariantChange?.(selectedVariant);
+  }, [selectedVariant, onVariantChange]);
+
   const price = parsePrice(selectedVariant?.price);
   const compareAtPrice = parsePrice(selectedVariant?.compare_at_price);
   const hasDiscount = compareAtPrice > price && price > 0;
@@ -290,6 +305,8 @@ export default function ProductPurchasePanel({
   const inquiryHref = `/contact-us?product=${encodeURIComponent(
     product.title || "Product"
   )}&variant=${encodeURIComponent(buildVariantLabel(selectedVariant || {}))}`;
+
+  const variantImage = getVariantImage(selectedVariant);
 
   if (!activeVariants.length) {
     return (
@@ -414,6 +431,29 @@ export default function ProductPurchasePanel({
           value={selectedOption3}
           onChange={setSelectedOption3}
         />
+      ) : null}
+
+      {variantImage ? (
+        <div
+          style={{
+            marginTop: 20,
+            borderRadius: 20,
+            overflow: "hidden",
+            border: "1px solid #e5ddd2",
+            background: "#faf8f4",
+          }}
+        >
+          <img
+            src={variantImage}
+            alt={buildVariantLabel(selectedVariant || {})}
+            style={{
+              width: "100%",
+              aspectRatio: "1 / 1",
+              objectFit: "cover",
+              display: "block",
+            }}
+          />
+        </div>
       ) : null}
 
       <div

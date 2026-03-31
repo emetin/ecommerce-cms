@@ -65,6 +65,7 @@ type ProductImageItem = {
   image_url?: string;
   sort_order?: string;
   alt_text?: string;
+  is_main?: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -80,6 +81,44 @@ function formatCollectionLabel(value?: string) {
     .join(" ");
 }
 
+function toSafeOrder(value?: string) {
+  const num = Number(String(value || "").trim());
+  return Number.isFinite(num) ? num : 999999;
+}
+
+function isTrue(value?: string) {
+  return String(value || "").trim().toLowerCase() === "true";
+}
+
+function sortProductImages(images: ProductImageItem[]) {
+  return [...images].sort((a, b) => {
+    const aMain = isTrue(a.is_main);
+    const bMain = isTrue(b.is_main);
+
+    if (aMain !== bMain) {
+      return aMain ? -1 : 1;
+    }
+
+    return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+  });
+}
+
+function getPrimaryProductImage(
+  product: ProductItem,
+  productImages: ProductImageItem[]
+) {
+  const sortedImages = sortProductImages(productImages);
+  const mainImage = sortedImages.find((item) => isTrue(item.is_main));
+  const firstGalleryImage = sortedImages[0];
+
+  return normalizeImageUrl(
+    mainImage?.image_url ||
+      firstGalleryImage?.image_url ||
+      product.image ||
+      ""
+  );
+}
+
 function parseGallery(
   product: ProductItem,
   variants: VariantItem[],
@@ -89,14 +128,7 @@ function parseGallery(
     .map((variant) => String(variant.variant_image || "").trim())
     .filter(Boolean);
 
-  const sortedProductImages = [...productImages]
-    .sort((a, b) => {
-      const aOrder = Number(String(a.sort_order || "").trim());
-      const bOrder = Number(String(b.sort_order || "").trim());
-      const aValue = Number.isFinite(aOrder) ? aOrder : 999999;
-      const bValue = Number.isFinite(bOrder) ? bOrder : 999999;
-      return aValue - bValue;
-    })
+  const sortedProductImages = sortProductImages(productImages)
     .map((item) => String(item.image_url || "").trim())
     .filter(Boolean);
 
@@ -105,8 +137,10 @@ function parseGallery(
     .map((item) => item.trim())
     .filter(Boolean);
 
+  const primaryImage = getPrimaryProductImage(product, productImages);
+
   const all = [
-    String(product.image || "").trim(),
+    primaryImage,
     ...sortedProductImages,
     ...manualGallery,
     ...variantImages,
@@ -124,9 +158,16 @@ export async function generateMetadata({
   const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
 
   try {
-    const items = (await getSheetData("products")) as ProductItem[];
+    const [items, imageData] = await Promise.all([
+      getSheetData("products"),
+      getSheetData("product_images"),
+    ]);
+
+    const products = items as ProductItem[];
+    const allProductImages = imageData as ProductImageItem[];
+
     const product =
-      items.find(
+      products.find(
         (item) =>
           String(item.slug || "").trim().toLowerCase() === decodedSlug &&
           String(item.status || "").trim().toLowerCase() === "published"
@@ -140,6 +181,13 @@ export async function generateMetadata({
       });
     }
 
+    const productImages = allProductImages.filter(
+      (item) =>
+        String(item.product_slug || "").trim().toLowerCase() === decodedSlug
+    );
+
+    const primaryImage = getPrimaryProductImage(product, productImages);
+
     return buildPageMetadata({
       title: product.seo_title || product.title || "Product",
       description:
@@ -147,7 +195,7 @@ export async function generateMetadata({
         product.short_description ||
         product.description ||
         "Explore this hospitality textile product.",
-      image: normalizeImageUrl(product.image || ""),
+      image: primaryImage,
       path: `/products/${decodedSlug}`,
     });
   } catch {
@@ -171,6 +219,7 @@ export default async function ProductDetailPage({
   let relatedProducts: ProductItem[] = [];
   let variants: VariantItem[] = [];
   let productImages: ProductImageItem[] = [];
+  let allProductImages: ProductImageItem[] = [];
   let errorMessage = "";
 
   try {
@@ -182,7 +231,7 @@ export default async function ProductDetailPage({
 
     const items = productData as ProductItem[];
     const allVariants = variantData as VariantItem[];
-    const allProductImages = imageData as ProductImageItem[];
+    allProductImages = imageData as ProductImageItem[];
 
     const foundProduct =
       items.find(
@@ -255,6 +304,7 @@ export default async function ProductDetailPage({
   }
 
   const galleryImages = parseGallery(product, variants, productImages);
+  const primaryImage = getPrimaryProductImage(product, productImages);
   const collectionLabel = formatCollectionLabel(product.collection_slug);
 
   return (
@@ -362,7 +412,7 @@ export default async function ProductDetailPage({
                 product={{
                   title: product.title,
                   slug: product.slug,
-                  image: normalizeImageUrl(product.image),
+                  image: primaryImage,
                 }}
                 variants={variants}
               />
@@ -390,14 +440,11 @@ export default async function ProductDetailPage({
                 </div>
 
                 <DetailRow label="Collection" value={collectionLabel} />
-
                 <DetailRow
                   label="Category"
                   value={product.product_category || "-"}
                 />
-
                 <DetailRow label="Type" value={product.type || "-"} />
-
                 <DetailRow
                   label="Vendor"
                   value={product.vendor || "Patak Textile"}
@@ -491,19 +538,36 @@ export default async function ProductDetailPage({
             />
 
             <div className="cards-grid cards-grid--3">
-              {relatedProducts.map((item, index) => (
-                <ProductCard
-                  key={`${item.slug || item.title || "related-product"}-${index}`}
-                  title={item.title || "Untitled Product"}
-                  description={
-                    item.short_description ||
-                    item.description ||
-                    "No description added yet."
-                  }
-                  image={item.image || ""}
-                  href={`/products/${item.slug || ""}`}
-                />
-              ))}
+              {relatedProducts.map((item, index) => {
+                const relatedSlug = String(item.slug || "")
+                  .trim()
+                  .toLowerCase();
+
+                const relatedImages = allProductImages.filter(
+                  (image) =>
+                    String(image.product_slug || "").trim().toLowerCase() ===
+                    relatedSlug
+                );
+
+                const relatedPrimaryImage = getPrimaryProductImage(
+                  item,
+                  relatedImages
+                );
+
+                return (
+                  <ProductCard
+                    key={`${item.slug || item.title || "related-product"}-${index}`}
+                    title={item.title || "Untitled Product"}
+                    description={
+                      item.short_description ||
+                      item.description ||
+                      "No description added yet."
+                    }
+                    image={relatedPrimaryImage}
+                    href={`/products/${item.slug || ""}`}
+                  />
+                );
+              })}
             </div>
           </Container>
         </Section>

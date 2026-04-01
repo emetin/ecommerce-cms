@@ -456,6 +456,7 @@ export default function AdminProductDetailPage({
           requires_shipping: requiresShipping,
           taxable,
           image_id: "",
+          variant_image: "",
           weight,
           weight_unit: weightUnit,
           box_quantity: boxQuantity,
@@ -825,13 +826,18 @@ export default function AdminProductDetailPage({
             <label style={labelStyle}>Primary Image Field</label>
             <input
               value={image}
-              onChange={(e) => setImage(e.target.value)}
+              readOnly
               placeholder="This is synced by Image Manager when a main image is selected"
-              style={inputStyle}
+              style={{
+                ...inputStyle,
+                background: "#f5f1ea",
+                color: "#7a7267",
+                cursor: "not-allowed",
+              }}
             />
             <div style={helperTextStyle}>
-              This field is kept for compatibility, but your main workflow should
-              be through Image Manager.
+              This field is synced automatically from Image Manager and is kept
+              only for compatibility.
             </div>
           </div>
 
@@ -839,12 +845,19 @@ export default function AdminProductDetailPage({
             <label style={labelStyle}>Legacy Gallery Field</label>
             <textarea
               value={gallery}
-              onChange={(e) => setGallery(e.target.value)}
+              readOnly
               placeholder="Legacy comma-separated image URLs"
-              style={{ ...inputStyle, minHeight: 110, resize: "vertical" }}
+              style={{
+                ...inputStyle,
+                minHeight: 110,
+                resize: "vertical",
+                background: "#f5f1ea",
+                color: "#7a7267",
+                cursor: "not-allowed",
+              }}
             />
             <div style={helperTextStyle}>
-              This field remains available for backward compatibility only.
+              Legacy field only. Gallery should be managed from Image Manager.
             </div>
           </div>
 

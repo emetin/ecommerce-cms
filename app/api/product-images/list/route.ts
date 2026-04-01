@@ -7,42 +7,54 @@ function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
 function isTrue(value: unknown) {
-  return String(value || "").trim().toLowerCase() === "true";
+  return normalizeLower(value) === "true";
 }
 
 function toSafeOrder(value: unknown) {
-  const num = Number(String(value || "").trim());
+  const num = Number(normalizeText(value));
   return Number.isFinite(num) ? num : 999999;
+}
+
+function sortImages(items: ProductImageItem[]) {
+  return [...items].sort((a, b) => {
+    const aMain = isTrue(a.is_main);
+    const bMain = isTrue(b.is_main);
+
+    if (aMain !== bMain) {
+      return aMain ? -1 : 1;
+    }
+
+    const byOrder = toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+    if (byOrder !== 0) return byOrder;
+
+    return normalizeText(a.id).localeCompare(normalizeText(b.id));
+  });
 }
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
+    const productSlug = normalizeLower(searchParams.get("product_slug"));
 
-    const productSlug = normalizeText(searchParams.get("product_slug")).toLowerCase();
-
-    const images = (await getSheetData("product_images")) as ProductImageItem[];
+    const images = (await getSheetData("product_images", {
+      forceFresh: true,
+      ttlSeconds: 30,
+    })) as ProductImageItem[];
 
     let items = images.filter((item) => item && normalizeText(item.id));
 
     if (productSlug) {
       items = items.filter(
-        (item) =>
-          normalizeText(item.product_slug).toLowerCase() === productSlug
+        (item) => normalizeLower(item.product_slug) === productSlug
       );
     }
 
-    items = items.sort((a, b) => {
-      const aMain = isTrue(a.is_main);
-      const bMain = isTrue(b.is_main);
-
-      if (aMain !== bMain) {
-        return aMain ? -1 : 1;
-      }
-
-      return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
-    });
+    items = sortImages(items);
 
     return NextResponse.json(
       {
@@ -52,7 +64,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "no-store",
+          "Cache-Control": "no-store, max-age=0",
         },
       }
     );

@@ -1,15 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getSheetData } from "../../../lib/sheets";
-import Container from "../../../components/ui/Container";
-import Section from "../../../components/ui/Section";
-import SectionHeading from "../../../components/ui/SectionHeading";
-import ButtonLink from "../../../components/ui/ButtonLink";
-import ProductCard from "../../../components/cards/ProductCard";
-import ProductGallery from "../../../components/products/ProductGallery";
-import ProductPurchasePanel from "../../../components/products/ProductPurchasePanel";
 import { buildPageMetadata } from "../../../lib/seo";
-import { normalizeImageUrls, normalizeImageUrl } from "../../../lib/image-url";
+import { normalizeImageUrl } from "../../../lib/image-url";
+import ProductDetailClient from "../../../components/products/ProductDetailClient";
+import type { VariantItem } from "../../../components/products/ProductPurchasePanel";
 
 type ProductItem = {
   id?: string;
@@ -32,33 +27,6 @@ type ProductItem = {
   tags?: string;
 };
 
-type VariantItem = {
-  id?: string;
-  product_slug?: string;
-  option1_name?: string;
-  option1_value?: string;
-  option2_name?: string;
-  option2_value?: string;
-  option3_name?: string;
-  option3_value?: string;
-  sku?: string;
-  barcode?: string;
-  price?: string;
-  compare_at_price?: string;
-  inventory_tracker?: string;
-  inventory_policy?: string;
-  fulfillment_service?: string;
-  requires_shipping?: string;
-  taxable?: string;
-  variant_image?: string;
-  weight?: string;
-  weight_unit?: string;
-  box_quantity?: string;
-  status?: string;
-  created_at?: string;
-  updated_at?: string;
-};
-
 type ProductImageItem = {
   id?: string;
   product_slug?: string;
@@ -70,24 +38,21 @@ type ProductImageItem = {
   updated_at?: string;
 };
 
-function formatCollectionLabel(value?: string) {
-  const raw = String(value || "").trim();
-  if (!raw) return "Product";
+function normalizeText(value?: string) {
+  return String(value || "").trim();
+}
 
-  return raw
-    .split("-")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+function normalizeLower(value?: string) {
+  return normalizeText(value).toLowerCase();
 }
 
 function toSafeOrder(value?: string) {
-  const num = Number(String(value || "").trim());
+  const num = Number(normalizeText(value));
   return Number.isFinite(num) ? num : 999999;
 }
 
 function isTrue(value?: string) {
-  return String(value || "").trim().toLowerCase() === "true";
+  return normalizeLower(value) === "true";
 }
 
 function sortProductImages(images: ProductImageItem[]) {
@@ -99,7 +64,10 @@ function sortProductImages(images: ProductImageItem[]) {
       return aMain ? -1 : 1;
     }
 
-    return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+    const byOrder = toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+    if (byOrder !== 0) return byOrder;
+
+    return normalizeText(a.id).localeCompare(normalizeText(b.id));
   });
 }
 
@@ -112,41 +80,8 @@ function getPrimaryProductImage(
   const firstGalleryImage = sortedImages[0];
 
   return normalizeImageUrl(
-    mainImage?.image_url ||
-      firstGalleryImage?.image_url ||
-      product.image ||
-      ""
+    mainImage?.image_url || firstGalleryImage?.image_url || product.image || ""
   );
-}
-
-function parseGallery(
-  product: ProductItem,
-  variants: VariantItem[],
-  productImages: ProductImageItem[]
-) {
-  const variantImages = variants
-    .map((variant) => String(variant.variant_image || "").trim())
-    .filter(Boolean);
-
-  const sortedProductImages = sortProductImages(productImages)
-    .map((item) => String(item.image_url || "").trim())
-    .filter(Boolean);
-
-  const manualGallery = String(product.gallery || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  const primaryImage = getPrimaryProductImage(product, productImages);
-
-  const all = [
-    primaryImage,
-    ...sortedProductImages,
-    ...manualGallery,
-    ...variantImages,
-  ].filter(Boolean);
-
-  return Array.from(new Set(normalizeImageUrls(all)));
 }
 
 export async function generateMetadata({
@@ -169,8 +104,8 @@ export async function generateMetadata({
     const product =
       products.find(
         (item) =>
-          String(item.slug || "").trim().toLowerCase() === decodedSlug &&
-          String(item.status || "").trim().toLowerCase() === "published"
+          normalizeLower(item.slug) === decodedSlug &&
+          normalizeLower(item.status) === "published"
       ) || null;
 
     if (!product) {
@@ -182,8 +117,7 @@ export async function generateMetadata({
     }
 
     const productImages = allProductImages.filter(
-      (item) =>
-        String(item.product_slug || "").trim().toLowerCase() === decodedSlug
+      (item) => normalizeLower(item.product_slug) === decodedSlug
     );
 
     const primaryImage = getPrimaryProductImage(product, productImages);
@@ -236,43 +170,34 @@ export default async function ProductDetailPage({
     const foundProduct =
       items.find(
         (item) =>
-          String(item.slug || "").trim().toLowerCase() === decodedSlug &&
-          String(item.status || "").trim().toLowerCase() === "published"
+          normalizeLower(item.slug) === decodedSlug &&
+          normalizeLower(item.status) === "published"
       ) || null;
 
     product = foundProduct;
 
     if (foundProduct) {
-      const currentCollectionSlug = String(foundProduct.collection_slug || "")
-        .trim()
-        .toLowerCase();
+      const currentCollectionSlug = normalizeLower(foundProduct.collection_slug);
 
       variants = allVariants.filter((variant) => {
-        const variantSlug = String(variant.product_slug || "")
-          .trim()
-          .toLowerCase();
-        const variantStatus = String(variant.status || "")
-          .trim()
-          .toLowerCase();
+        const variantSlug = normalizeLower(variant.product_slug);
+        const variantStatus = normalizeLower(variant.status);
 
         return (
           variantSlug === decodedSlug &&
-          (variantStatus === "published" || variantStatus === "")
+          ["", "published", "active"].includes(variantStatus)
         );
       });
 
-      productImages = allProductImages.filter((item) => {
-        const itemSlug = String(item.product_slug || "").trim().toLowerCase();
-        return itemSlug === decodedSlug;
-      });
+      productImages = allProductImages.filter(
+        (item) => normalizeLower(item.product_slug) === decodedSlug
+      );
 
       relatedProducts = items
         .filter((item) => {
-          const itemSlug = String(item.slug || "").trim().toLowerCase();
-          const itemStatus = String(item.status || "").trim().toLowerCase();
-          const itemCollectionSlug = String(item.collection_slug || "")
-            .trim()
-            .toLowerCase();
+          const itemSlug = normalizeLower(item.slug);
+          const itemStatus = normalizeLower(item.status);
+          const itemCollectionSlug = normalizeLower(item.collection_slug);
 
           return (
             itemSlug !== decodedSlug &&
@@ -289,13 +214,9 @@ export default async function ProductDetailPage({
 
   if (errorMessage) {
     return (
-      <Section>
-        <Container>
-          <div className="empty-state">
-            <strong>Error:</strong> {errorMessage}
-          </div>
-        </Container>
-      </Section>
+      <div style={{ padding: 40 }}>
+        <strong>Error:</strong> {errorMessage}
+      </div>
     );
   }
 
@@ -303,333 +224,13 @@ export default async function ProductDetailPage({
     notFound();
   }
 
-  const galleryImages = parseGallery(product, variants, productImages);
-  const primaryImage = getPrimaryProductImage(product, productImages);
-  const collectionLabel = formatCollectionLabel(product.collection_slug);
-
   return (
-    <>
-      <Section>
-        <Container>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 16,
-              flexWrap: "wrap",
-              alignItems: "center",
-              marginBottom: 24,
-            }}
-          >
-            <ButtonLink href="/products" variant="secondary">
-              ← Back to Products
-            </ButtonLink>
-
-            <div
-              style={{
-                color: "#7b7367",
-                fontWeight: 700,
-                fontSize: 14,
-              }}
-            >
-              Home / Products / {product.title || "Product"}
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.05fr 0.95fr",
-              gap: 42,
-              alignItems: "start",
-            }}
-          >
-            <ProductGallery
-              title={product.title || "Product"}
-              images={galleryImages}
-            />
-
-            <div
-              style={{
-                display: "grid",
-                gap: 22,
-              }}
-            >
-              <div
-                style={{
-                  display: "grid",
-                  gap: 14,
-                }}
-              >
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    minHeight: 32,
-                    width: "fit-content",
-                    padding: "0 12px",
-                    borderRadius: 999,
-                    background: "#f3ede3",
-                    color: "#2f7d62",
-                    fontSize: 11,
-                    fontWeight: 800,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {collectionLabel}
-                </div>
-
-                <h1
-                  style={{
-                    margin: 0,
-                    fontSize: "clamp(2rem, 3.2vw, 3.4rem)",
-                    lineHeight: 1.04,
-                    fontWeight: 800,
-                    letterSpacing: "-0.03em",
-                    color: "#171717",
-                  }}
-                >
-                  {product.title || "Untitled Product"}
-                </h1>
-
-                <p
-                  style={{
-                    margin: 0,
-                    color: "#5d554a",
-                    fontSize: 16,
-                    lineHeight: 1.85,
-                    maxWidth: 680,
-                  }}
-                >
-                  {product.short_description ||
-                    product.description ||
-                    "Explore this textile product within the Patak Textile catalog structure."}
-                </p>
-              </div>
-
-              <ProductPurchasePanel
-                product={{
-                  title: product.title,
-                  slug: product.slug,
-                  image: primaryImage,
-                }}
-                variants={variants}
-              />
-
-              <div
-                style={{
-                  padding: 24,
-                  borderRadius: 24,
-                  border: "1px solid #e5ddd2",
-                  background: "#faf8f4",
-                  display: "grid",
-                  gap: 12,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 12,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                    color: "#7b7367",
-                    fontWeight: 700,
-                  }}
-                >
-                  Product Details
-                </div>
-
-                <DetailRow label="Collection" value={collectionLabel} />
-                <DetailRow
-                  label="Category"
-                  value={product.product_category || "-"}
-                />
-                <DetailRow label="Type" value={product.type || "-"} />
-                <DetailRow
-                  label="Vendor"
-                  value={product.vendor || "Patak Textile"}
-                />
-              </div>
-            </div>
-          </div>
-        </Container>
-      </Section>
-
-      <Section>
-        <Container>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.15fr 0.85fr",
-              gap: 24,
-              alignItems: "start",
-            }}
-          >
-            <div
-              style={{
-                padding: 32,
-                borderRadius: 28,
-                border: "1px solid #e5ddd2",
-                background: "#faf8f4",
-              }}
-            >
-              <SectionHeading
-                kicker="Product Description"
-                title="Crafted presentation for hospitality-focused textile projects"
-                text="Explore the product with a cleaner and more refined presentation structure tailored for premium textile collections."
-              />
-
-              <div
-                style={{
-                  fontSize: 17,
-                  lineHeight: 1.95,
-                  color: "#3d392f",
-                  whiteSpace: "pre-line",
-                }}
-              >
-                {product.description ||
-                  product.short_description ||
-                  "No detailed description added yet."}
-              </div>
-            </div>
-
-            <div
-              style={{
-                padding: 28,
-                borderRadius: 28,
-                border: "1px solid #e5ddd2",
-                background: "#fff",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 12,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  color: "#7b7367",
-                  fontWeight: 700,
-                  marginBottom: 14,
-                }}
-              >
-                Why this product page works
-              </div>
-
-              <InfoCard text="The page opens directly with the product, creating a more familiar ecommerce experience without a separate hero block." />
-              <InfoCard text="Gallery, purchase actions, options, and product details are organized into a cleaner and more premium structure." />
-              <InfoCard text="The layout keeps your future ecommerce functionality while presenting the product in a more elegant and client-friendly way." />
-
-              <div style={{ marginTop: 20 }}>
-                <ButtonLink href="/about-us" variant="secondary">
-                  Learn About Patak Textile
-                </ButtonLink>
-              </div>
-            </div>
-          </div>
-        </Container>
-      </Section>
-
-      {relatedProducts.length > 0 ? (
-        <Section tone="soft">
-          <Container>
-            <SectionHeading
-              kicker="Related Products"
-              title="Other products from the same collection"
-              text="Continue exploring similar textile presentations from the same collection family."
-            />
-
-            <div className="cards-grid cards-grid--3">
-              {relatedProducts.map((item, index) => {
-                const relatedSlug = String(item.slug || "")
-                  .trim()
-                  .toLowerCase();
-
-                const relatedImages = allProductImages.filter(
-                  (image) =>
-                    String(image.product_slug || "").trim().toLowerCase() ===
-                    relatedSlug
-                );
-
-                const relatedPrimaryImage = getPrimaryProductImage(
-                  item,
-                  relatedImages
-                );
-
-                return (
-                  <ProductCard
-                    key={`${item.slug || item.title || "related-product"}-${index}`}
-                    title={item.title || "Untitled Product"}
-                    description={
-                      item.short_description ||
-                      item.description ||
-                      "No description added yet."
-                    }
-                    image={relatedPrimaryImage}
-                    href={`/products/${item.slug || ""}`}
-                  />
-                );
-              })}
-            </div>
-          </Container>
-        </Section>
-      ) : null}
-    </>
-  );
-}
-
-function DetailRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 14,
-        padding: "10px 0",
-        borderBottom: "1px solid #eee5d9",
-      }}
-    >
-      <span
-        style={{
-          color: "#7b7367",
-          fontWeight: 700,
-        }}
-      >
-        {label}
-      </span>
-
-      <span
-        style={{
-          color: "#171717",
-          fontWeight: 800,
-          textAlign: "right",
-        }}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function InfoCard({ text }: { text: string }) {
-  return (
-    <div
-      style={{
-        padding: "14px 16px",
-        borderRadius: 18,
-        background: "#faf7f1",
-        border: "1px solid #e7decf",
-        color: "#50493f",
-        lineHeight: 1.8,
-        fontSize: 15,
-        marginBottom: 12,
-      }}
-    >
-      {text}
-    </div>
+    <ProductDetailClient
+      product={product}
+      relatedProducts={relatedProducts}
+      variants={variants}
+      productImages={productImages}
+      allProductImages={allProductImages}
+    />
   );
 }

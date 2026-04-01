@@ -23,6 +23,8 @@ type UploadQueueItem = {
   is_main: boolean;
 };
 
+const MAX_BULK_UPLOAD = 10;
+
 function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
@@ -177,7 +179,14 @@ export default function AdminProductImagesPage({
   function handleQueueFiles(files: FileList | null) {
     if (!files?.length) return;
 
-    const nextItems: UploadQueueItem[] = Array.from(files).map((file, index) => ({
+    const incoming = Array.from(files);
+
+    if (queue.length + incoming.length > MAX_BULK_UPLOAD) {
+      setSaveError(`You can upload up to ${MAX_BULK_UPLOAD} images at once.`);
+      return;
+    }
+
+    const nextItems: UploadQueueItem[] = incoming.map((file, index) => ({
       localId: `${Date.now()}-${index}-${file.name}`,
       file,
       preview: URL.createObjectURL(file),
@@ -185,15 +194,26 @@ export default function AdminProductImagesPage({
       is_main: false,
     }));
 
+    setSaveError("");
     setQueue((prev) => [...prev, ...nextItems]);
   }
 
   function updateQueueItem(localId: string, patch: Partial<UploadQueueItem>) {
-    setQueue((prev) =>
-      prev.map((item) =>
+    setQueue((prev) => {
+      let next = prev.map((item) =>
         item.localId === localId ? { ...item, ...patch } : item
-      )
-    );
+      );
+
+      if (patch.is_main === true) {
+        next = next.map((item) =>
+          item.localId === localId
+            ? { ...item, is_main: true }
+            : { ...item, is_main: false }
+        );
+      }
+
+      return next;
+    });
   }
 
   function removeQueueItem(localId: string) {
@@ -614,11 +634,13 @@ export default function AdminProductImagesPage({
         <div style={cardStyle}>
           <h2 style={sectionTitleStyle}>Bulk Upload</h2>
           <div style={noticeBoxStyle}>
-            Select multiple files, add alt text, and upload all in one step.
+            Select up to 10 images, add alt text, and upload all in one step.
           </div>
 
           <div>
-            <label style={labelStyle}>Upload Multiple Images</label>
+            <label style={labelStyle}>
+              Upload Multiple Images (max {MAX_BULK_UPLOAD})
+            </label>
             <input
               type="file"
               accept="image/*"
@@ -630,6 +652,17 @@ export default function AdminProductImagesPage({
 
           {queue.length > 0 ? (
             <>
+              <div
+                style={{
+                  marginTop: 12,
+                  fontSize: 13,
+                  color: "#6f6559",
+                  fontWeight: 700,
+                }}
+              >
+                {queue.length} / {MAX_BULK_UPLOAD} images ready
+              </div>
+
               <div style={queueGridStyle}>
                 {queue.map((item, index) => (
                   <div key={item.localId} style={queueCardStyle}>
@@ -981,6 +1014,7 @@ const previewImageStyle: React.CSSProperties = {
 const queueGridStyle: React.CSSProperties = {
   display: "grid",
   gap: 14,
+  marginTop: 16,
 };
 
 const queueCardStyle: React.CSSProperties = {

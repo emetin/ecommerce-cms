@@ -6,6 +6,8 @@ export function extractGoogleDriveFileId(url: string) {
     /\/file\/d\/([a-zA-Z0-9_-]+)/,
     /[?&]id=([a-zA-Z0-9_-]+)/,
     /\/d\/([a-zA-Z0-9_-]+)/,
+    /\/thumbnail\?id=([a-zA-Z0-9_-]+)/,
+    /\/uc\?(?:[^#]*&)?id=([a-zA-Z0-9_-]+)/,
   ];
 
   for (const pattern of patterns) {
@@ -42,4 +44,43 @@ export function normalizeImageUrls(urls: string[]) {
     .map((item) => normalizeImageUrl(item))
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+export function getCanonicalImageKey(url?: string) {
+  const normalized = normalizeImageUrl(url);
+  if (!normalized) return "";
+
+  const driveId = extractGoogleDriveFileId(normalized);
+  if (driveId) {
+    return `drive:${driveId}`;
+  }
+
+  return normalized.trim().toLowerCase();
+}
+
+export function areSameImageUrls(a?: string, b?: string) {
+  const aKey = getCanonicalImageKey(a);
+  const bKey = getCanonicalImageKey(b);
+
+  if (!aKey || !bKey) return false;
+  return aKey === bKey;
+}
+
+export function uniqueImageUrls(urls: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const raw of urls) {
+    const normalized = normalizeImageUrl(raw);
+    const key = getCanonicalImageKey(normalized);
+
+    if (!normalized || !key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(normalized);
+  }
+
+  return result;
 }

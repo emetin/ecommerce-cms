@@ -17,29 +17,53 @@ function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
 function isTrue(value: unknown) {
-  return String(value || "").trim().toLowerCase() === "true";
+  return normalizeLower(value) === "true";
 }
 
 function toSafeOrder(value: unknown) {
-  const num = Number(String(value || "").trim());
+  const num = Number(normalizeText(value));
   return Number.isFinite(num) ? num : 999999;
 }
 
+function sortImages(items: ProductImageItem[]) {
+  return [...items].sort((a, b) => {
+    const aMain = isTrue(a.is_main);
+    const bMain = isTrue(b.is_main);
+
+    if (aMain !== bMain) {
+      return aMain ? -1 : 1;
+    }
+
+    const byOrder = toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+    if (byOrder !== 0) return byOrder;
+
+    return normalizeText(a.id).localeCompare(normalizeText(b.id));
+  });
+}
+
 async function syncProductMainImage(productSlug: string, imageUrl: string) {
-  const products = (await getSheetData(PRODUCTS_SHEET)) as ProductItem[];
+  const products = (await getSheetData(PRODUCTS_SHEET, {
+    forceFresh: true,
+    ttlSeconds: 30,
+  })) as ProductItem[];
 
   const product = products.find(
-    (item) =>
-      String(item.slug || "").trim().toLowerCase() ===
-      String(productSlug || "").trim().toLowerCase()
+    (item) => normalizeLower(item.slug) === normalizeLower(productSlug)
   );
 
   if (!product) {
     return;
   }
 
-  const headers = await getSheetHeaders(PRODUCTS_SHEET);
+  const headers = await getSheetHeaders(PRODUCTS_SHEET, {
+    forceFresh: true,
+    ttlSeconds: 30,
+  });
 
   const updatedProduct: ProductItem = {
     ...product,
@@ -66,7 +90,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const allImages = (await getSheetData(PRODUCT_IMAGES_SHEET)) as ProductImageItem[];
+    const allImages = (await getSheetData(PRODUCT_IMAGES_SHEET, {
+      forceFresh: true,
+      ttlSeconds: 30,
+    })) as ProductImageItem[];
 
     const imageToDelete =
       allImages.find((item) => normalizeText(item.id) === id) || null;
@@ -81,38 +108,30 @@ export async function POST(req: Request) {
       );
     }
 
-    const productSlug = normalizeText(imageToDelete.product_slug).toLowerCase();
+    const productSlug = normalizeLower(imageToDelete.product_slug);
     const deletingMainImage = isTrue(imageToDelete.is_main);
 
     const result = await deleteSheetRowsByField(PRODUCT_IMAGES_SHEET, "id", id);
 
-    if (deletingMainImage && productSlug) {
-      const remainingImages = (
-        (await getSheetData(PRODUCT_IMAGES_SHEET)) as ProductImageItem[]
+    const refreshedImages = (await getSheetData(PRODUCT_IMAGES_SHEET, {
+      forceFresh: true,
+      ttlSeconds: 30,
+    })) as ProductImageItem[];
+
+    const remainingImages = sortImages(
+      refreshedImages.filter(
+        (item) => normalizeLower(item.product_slug) === productSlug
       )
-        .filter(
-          (item) =>
-            normalizeText(item.product_slug).toLowerCase() === productSlug
-        )
-        .sort((a, b) => {
-          const aMain = isTrue(a.is_main);
-          const bMain = isTrue(b.is_main);
+    );
 
-          if (aMain !== bMain) {
-            return aMain ? -1 : 1;
-          }
+    if (deletingMainImage && remainingImages.length > 0) {
+      const nextMain = remainingImages[0];
 
-          return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+      if (!isTrue(nextMain.is_main)) {
+        const headers = await getSheetHeaders(PRODUCT_IMAGES_SHEET, {
+          forceFresh: true,
+          ttlSeconds: 30,
         });
-
-      if (remainingImages.length > 0) {
-        const nextMain = remainingImages[0];
-        const now = new Date().toISOString();
-        const headers = await getSheetHeaders(PRODUCT_IMAGES_SHEET);
-
-        const refreshedImages = (await getSheetData(
-          PRODUCT_IMAGES_SHEET
-        )) as ProductImageItem[];
 
         const targetIndex = refreshedImages.findIndex(
           (item) => normalizeText(item.id) === normalizeText(nextMain.id)
@@ -122,7 +141,7 @@ export async function POST(req: Request) {
           const updatedImage: ProductImageItem = {
             ...refreshedImages[targetIndex],
             is_main: "true",
-            updated_at: now,
+            updated_at: new Date().toISOString(),
           };
 
           const rowValues = headers.map((header) => updatedImage[header] || "");
@@ -131,16 +150,25 @@ export async function POST(req: Request) {
             targetIndex + 2,
             rowValues
           );
-
-          await syncProductMainImage(
-            productSlug,
-            normalizeText(updatedImage.image_url)
-          );
         }
-      } else {
-        await syncProductMainImage(productSlug, "");
       }
     }
+
+    const finalImages = (await getSheetData(PRODUCT_IMAGES_SHEET, {
+      forceFresh: true,
+      ttlSeconds: 30,
+    })) as ProductImageItem[];
+
+    const sameProductImages = sortImages(
+      finalImages.filter((item) => normalizeLower(item.product_slug) === productSlug)
+    );
+
+    const bestImage =
+      sameProductImages.find((item) => isTrue(item.is_main)) ||
+      sameProductImages[0] ||
+      null;
+
+    await syncProductMainImage(productSlug, normalizeText(bestImage?.image_url || ""));
 
     return NextResponse.json({
       ok: true,

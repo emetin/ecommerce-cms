@@ -8,7 +8,11 @@ import ButtonLink from "../ui/ButtonLink";
 import ProductCard from "../cards/ProductCard";
 import ProductGallery from "./ProductGallery";
 import ProductPurchasePanel, { VariantItem } from "./ProductPurchasePanel";
-import { normalizeImageUrl } from "../../lib/image-url";
+import {
+  areSameImageUrls,
+  normalizeImageUrl,
+  uniqueImageUrls,
+} from "../../lib/image-url";
 
 type ProductItem = {
   id?: string;
@@ -31,57 +35,171 @@ type ProductItem = {
   tags?: string;
 };
 
+type ProductImageItem = {
+  id?: string;
+  product_slug?: string;
+  image_url?: string;
+  sort_order?: string;
+  alt_text?: string;
+  is_main?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+function normalizeText(value?: string) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value?: string) {
+  return normalizeText(value).toLowerCase();
+}
+
+function formatCollectionLabel(value?: string) {
+  const raw = normalizeText(value);
+  if (!raw) return "Product";
+
+  return raw
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function toSafeOrder(value?: string) {
+  const num = Number(normalizeText(value));
+  return Number.isFinite(num) ? num : 999999;
+}
+
+function isTrue(value?: string) {
+  return normalizeLower(value) === "true";
+}
+
+function sortProductImages(images: ProductImageItem[]) {
+  return [...images].sort((a, b) => {
+    const aMain = isTrue(a.is_main);
+    const bMain = isTrue(b.is_main);
+
+    if (aMain !== bMain) {
+      return aMain ? -1 : 1;
+    }
+
+    const byOrder = toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+    if (byOrder !== 0) return byOrder;
+
+    return normalizeText(a.id).localeCompare(normalizeText(b.id));
+  });
+}
+
+function getPrimaryProductImage(
+  product: ProductItem,
+  productImages: ProductImageItem[]
+) {
+  const sortedImages = sortProductImages(productImages);
+  const mainImage = sortedImages.find((item) => isTrue(item.is_main));
+  const firstGalleryImage = sortedImages[0];
+
+  return normalizeImageUrl(
+    mainImage?.image_url || firstGalleryImage?.image_url || product.image || ""
+  );
+}
+
+function parseLegacyGallery(value?: string) {
+  return normalizeText(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildOrderedGallery(
+  product: ProductItem,
+  variants: VariantItem[],
+  productImages: ProductImageItem[]
+) {
+  const primaryImage = getPrimaryProductImage(product, productImages);
+
+  const imageManagerUrls = sortProductImages(productImages)
+    .map((item) => normalizeImageUrl(item.image_url || ""))
+    .filter(Boolean);
+
+  const legacyGalleryUrls = parseLegacyGallery(product.gallery).map((item) =>
+    normalizeImageUrl(item)
+  );
+
+  const variantUrls = variants
+    .map((variant) => normalizeImageUrl(variant.variant_image || variant.image_id || ""))
+    .filter(Boolean);
+
+  return uniqueImageUrls([
+    primaryImage,
+    ...imageManagerUrls,
+    ...legacyGalleryUrls,
+    ...variantUrls,
+  ]);
+}
+
 type ProductDetailClientProps = {
   product: ProductItem;
   relatedProducts: ProductItem[];
   variants: VariantItem[];
-  galleryImages: string[];
-  collectionLabel: string;
+  productImages: ProductImageItem[];
+  allProductImages: ProductImageItem[];
 };
-
-function getVariantImage(variant?: VariantItem | null) {
-  if (!variant) return "";
-  return normalizeImageUrl(
-    String(variant.variant_image || variant.image_id || "").trim()
-  );
-}
 
 export default function ProductDetailClient({
   product,
   relatedProducts,
   variants,
-  galleryImages,
-  collectionLabel,
+  productImages,
+  allProductImages,
 }: ProductDetailClientProps) {
-  const normalizedProductImage = normalizeImageUrl(product.image || "");
+  const [selectedVariant, setSelectedVariant] = useState<VariantItem | null>(null);
+  const [selectedImage, setSelectedImage] = useState("");
 
-  const initialImage = useMemo(() => {
-    return galleryImages[0] || normalizedProductImage || "";
-  }, [galleryImages, normalizedProductImage]);
+  const baseGalleryImages = useMemo(
+    () => buildOrderedGallery(product, variants, productImages),
+    [product, variants, productImages]
+  );
 
-  const [selectedImage, setSelectedImage] = useState(initialImage);
+  const primaryImage = useMemo(
+    () => getPrimaryProductImage(product, productImages),
+    [product, productImages]
+  );
 
-  function handleVariantChange(variant: VariantItem | null) {
-    const variantImage = getVariantImage(variant);
+  const selectedVariantImage = useMemo(() => {
+    return normalizeImageUrl(
+      String(selectedVariant?.variant_image || selectedVariant?.image_id || "").trim()
+    );
+  }, [selectedVariant]);
 
-    if (variantImage && galleryImages.includes(variantImage)) {
-      setSelectedImage(variantImage);
-      return;
+  const galleryImages = useMemo(() => {
+    if (!selectedVariantImage) {
+      return baseGalleryImages;
     }
 
-    if (variantImage) {
-      setSelectedImage(variantImage);
-      return;
+    const existsInGallery = baseGalleryImages.some((item) =>
+      areSameImageUrls(item, selectedVariantImage)
+    );
+
+    if (existsInGallery) {
+      return baseGalleryImages;
     }
 
-    setSelectedImage(initialImage);
-  }
+    return uniqueImageUrls([selectedVariantImage, ...baseGalleryImages]);
+  }, [baseGalleryImages, selectedVariantImage]);
 
-  const galleryWithSelected = useMemo(() => {
-    if (!selectedImage) return galleryImages;
-    if (galleryImages.includes(selectedImage)) return galleryImages;
-    return [selectedImage, ...galleryImages].filter(Boolean);
-  }, [galleryImages, selectedImage]);
+  const controlledActiveImage = useMemo(() => {
+    if (selectedVariantImage) {
+      return selectedVariantImage;
+    }
+
+    if (selectedImage) {
+      return selectedImage;
+    }
+
+    return primaryImage;
+  }, [primaryImage, selectedImage, selectedVariantImage]);
+
+  const collectionLabel = formatCollectionLabel(product.collection_slug);
 
   return (
     <>
@@ -122,8 +240,8 @@ export default function ProductDetailClient({
           >
             <ProductGallery
               title={product.title || "Product"}
-              images={galleryWithSelected}
-              controlledActiveImage={selectedImage}
+              images={galleryImages}
+              controlledActiveImage={controlledActiveImage || undefined}
               onActiveImageChange={setSelectedImage}
             />
 
@@ -190,10 +308,10 @@ export default function ProductDetailClient({
                 product={{
                   title: product.title,
                   slug: product.slug,
-                  image: normalizedProductImage,
+                  image: primaryImage,
                 }}
                 variants={variants}
-                onVariantChange={handleVariantChange}
+                onVariantChange={setSelectedVariant}
               />
 
               <div
@@ -295,7 +413,7 @@ export default function ProductDetailClient({
 
               <InfoCard text="The page opens directly with the product, creating a more familiar ecommerce experience without a separate hero block." />
               <InfoCard text="Gallery, purchase actions, options, and product details are organized into a cleaner and more premium structure." />
-              <InfoCard text="Variant selection now supports image switching so the product presentation feels more complete and intuitive." />
+              <InfoCard text="Variant image selection is now synchronized with the main gallery, so the visual flow feels more stable and intentional." />
 
               <div style={{ marginTop: 20 }}>
                 <ButtonLink href="/about-us" variant="secondary">
@@ -317,19 +435,32 @@ export default function ProductDetailClient({
             />
 
             <div className="cards-grid cards-grid--3">
-              {relatedProducts.map((item, index) => (
-                <ProductCard
-                  key={`${item.slug || item.title || "related-product"}-${index}`}
-                  title={item.title || "Untitled Product"}
-                  description={
-                    item.short_description ||
-                    item.description ||
-                    "No description added yet."
-                  }
-                  image={item.image || ""}
-                  href={`/products/${item.slug || ""}`}
-                />
-              ))}
+              {relatedProducts.map((item, index) => {
+                const relatedSlug = normalizeLower(item.slug);
+
+                const relatedImages = allProductImages.filter(
+                  (image) => normalizeLower(image.product_slug) === relatedSlug
+                );
+
+                const relatedPrimaryImage = getPrimaryProductImage(
+                  item,
+                  relatedImages
+                );
+
+                return (
+                  <ProductCard
+                    key={`${item.slug || item.title || "related-product"}-${index}`}
+                    title={item.title || "Untitled Product"}
+                    description={
+                      item.short_description ||
+                      item.description ||
+                      "No description added yet."
+                    }
+                    image={relatedPrimaryImage}
+                    href={`/products/${item.slug || ""}`}
+                  />
+                );
+              })}
             </div>
           </Container>
         </Section>

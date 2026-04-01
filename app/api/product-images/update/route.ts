@@ -17,24 +17,57 @@ function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
 function normalizeBool(value: unknown, fallback = "false") {
-  return String(value || fallback).trim().toLowerCase();
+  return normalizeLower(value || fallback);
+}
+
+function isTrue(value: unknown) {
+  return normalizeLower(value) === "true";
+}
+
+function toSafeOrder(value: unknown) {
+  const num = Number(normalizeText(value));
+  return Number.isFinite(num) ? num : 999999;
+}
+
+function sortImages(items: ProductImageItem[]) {
+  return [...items].sort((a, b) => {
+    const aMain = isTrue(a.is_main);
+    const bMain = isTrue(b.is_main);
+
+    if (aMain !== bMain) {
+      return aMain ? -1 : 1;
+    }
+
+    const byOrder = toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+    if (byOrder !== 0) return byOrder;
+
+    return normalizeText(a.id).localeCompare(normalizeText(b.id));
+  });
 }
 
 async function syncMainProductImage(productSlug: string, imageUrl: string) {
-  const products = (await getSheetData(PRODUCTS_SHEET_NAME)) as ProductItem[];
+  const products = (await getSheetData(PRODUCTS_SHEET_NAME, {
+    forceFresh: true,
+    ttlSeconds: 30,
+  })) as ProductItem[];
 
   const product = products.find(
-    (item) =>
-      String(item.slug || "").trim().toLowerCase() ===
-      String(productSlug || "").trim().toLowerCase()
+    (item) => normalizeLower(item.slug) === normalizeLower(productSlug)
   );
 
   if (!product) {
     return;
   }
 
-  const headers = await getSheetHeaders(PRODUCTS_SHEET_NAME);
+  const headers = await getSheetHeaders(PRODUCTS_SHEET_NAME, {
+    forceFresh: true,
+    ttlSeconds: 30,
+  });
 
   const updatedProduct: ProductItem = {
     ...product,
@@ -77,7 +110,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const rows = await getSheetRows(SHEET_NAME);
+    const rows = await getSheetRows(SHEET_NAME, {
+      forceFresh: true,
+      ttlSeconds: 30,
+    });
 
     if (rows.length <= 1) {
       return NextResponse.json(
@@ -99,7 +135,7 @@ export async function POST(req: Request) {
         rowObject[header] = row[index] ? String(row[index]) : "";
       });
 
-      if (String(rowObject.id || "").trim() === id) {
+      if (normalizeText(rowObject.id) === id) {
         foundRowNumber = i + 1;
         existingItem = rowObject;
         break;
@@ -113,9 +149,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const productSlug = String(existingItem.product_slug || "")
-      .trim()
-      .toLowerCase();
+    const productSlug = normalizeLower(existingItem.product_slug);
     const now = new Date().toISOString();
 
     if (isMain === "true") {
@@ -127,14 +161,11 @@ export async function POST(req: Request) {
           rowObject[header] = row[index] ? String(row[index]) : "";
         });
 
-        const rowId = String(rowObject.id || "").trim();
-        const rowSlug = String(rowObject.product_slug || "")
-          .trim()
-          .toLowerCase();
-        const rowIsMain =
-          String(rowObject.is_main || "").trim().toLowerCase() === "true";
+        const rowId = normalizeText(rowObject.id);
+        const rowSlug = normalizeLower(rowObject.product_slug);
+        const rowIsMain = normalizeLower(rowObject.is_main);
 
-        if (rowSlug === productSlug && rowId !== id && rowIsMain) {
+        if (rowSlug === productSlug && rowId !== id && rowIsMain === "true") {
           const updatedOther: ProductImageItem = {
             ...rowObject,
             is_main: "false",
@@ -154,7 +185,7 @@ export async function POST(req: Request) {
       ...existingItem,
       image_url: imageUrl,
       alt_text: altText,
-      sort_order: sortOrder || "999",
+      sort_order: sortOrder || existingItem.sort_order || "999",
       is_main: isMain,
       updated_at: now,
     };
@@ -162,9 +193,21 @@ export async function POST(req: Request) {
     const rowValues = headers.map((header) => updatedItem[header] || "");
     await updateSheetRowByRowNumber(SHEET_NAME, foundRowNumber, rowValues);
 
-    if (isMain === "true") {
-      await syncMainProductImage(productSlug, imageUrl);
-    }
+    const allImages = (await getSheetData(SHEET_NAME, {
+      forceFresh: true,
+      ttlSeconds: 30,
+    })) as ProductImageItem[];
+
+    const sameProductImages = sortImages(
+      allImages.filter((item) => normalizeLower(item.product_slug) === productSlug)
+    );
+
+    const bestImage =
+      sameProductImages.find((item) => isTrue(item.is_main)) ||
+      sameProductImages[0] ||
+      null;
+
+    await syncMainProductImage(productSlug, normalizeText(bestImage?.image_url || ""));
 
     return NextResponse.json({
       ok: true,

@@ -43,7 +43,6 @@ type ProductPurchasePanelProps = {
 
 function parsePrice(value?: string) {
   const raw = String(value || "").trim();
-
   if (!raw) return 0;
 
   const cleaned = raw.replace(/[^\d.,-]/g, "");
@@ -304,7 +303,7 @@ export default function ProductPurchasePanel({
 
   const inquiryHref = `/contact-us?product=${encodeURIComponent(
     product.title || "Product"
-  )}&variant=${encodeURIComponent(buildVariantLabel(selectedVariant || {}))}`;
+  )}&variant=${encodeURIComponent(buildVariantLabel(selectedVariant || {} as VariantItem))}`;
 
   const variantImage = getVariantImage(selectedVariant);
 
@@ -445,7 +444,7 @@ export default function ProductPurchasePanel({
         >
           <img
             src={variantImage}
-            alt={buildVariantLabel(selectedVariant || {})}
+            alt={buildVariantLabel(selectedVariant || ({} as VariantItem))}
             style={{
               width: "100%",
               aspectRatio: "1 / 1",
@@ -479,7 +478,10 @@ export default function ProductPurchasePanel({
           gap: 10,
         }}
       >
-        <InfoRow label="Variant" value={buildVariantLabel(selectedVariant || {})} />
+        <InfoRow
+          label="Variant"
+          value={buildVariantLabel(selectedVariant || ({} as VariantItem))}
+        />
         <InfoRow label="SKU" value={String(selectedVariant?.sku || "-")} />
         <InfoRow
           label="Box Quantity"

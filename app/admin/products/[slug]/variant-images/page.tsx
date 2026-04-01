@@ -120,14 +120,43 @@ export default function VariantImagesPage({
   const imageOptions = useMemo(() => sortImages(images), [images]);
 
   async function handleAssignImage(variant: VariantItem, imageId: string) {
+    const variantId = normalizeText(variant.id);
+
+    if (!variantId) {
+      setErrorMessage("Variant id is missing.");
+      return;
+    }
+
+    const selectedImage =
+      imageOptions.find(
+        (item) => normalizeText(item.id) === normalizeText(imageId)
+      ) || null;
+
+    if (!selectedImage) {
+      setErrorMessage("Selected image could not be found.");
+      return;
+    }
+
+    const nextImageId = normalizeText(selectedImage.id);
+    const nextImageUrl = normalizeText(selectedImage.image_url);
+
     try {
-      setSavingId(String(variant.id || ""));
+      setSavingId(variantId);
       setMessage("");
       setErrorMessage("");
 
-      const selectedImage =
-        imageOptions.find((item) => normalizeText(item.id) === normalizeText(imageId)) ||
-        null;
+      // Optimistic UI update
+      setVariants((prev) =>
+        prev.map((item) =>
+          normalizeText(item.id) === variantId
+            ? {
+                ...item,
+                image_id: nextImageId,
+                variant_image: nextImageUrl,
+              }
+            : item
+        )
+      );
 
       const response = await fetch("/api/variants/update", {
         method: "POST",
@@ -135,9 +164,9 @@ export default function VariantImagesPage({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          id: variant.id,
-          image_id: selectedImage?.id || "",
-          variant_image: selectedImage?.image_url || "",
+          id: variantId,
+          image_id: nextImageId,
+          variant_image: nextImageUrl,
         }),
       });
 
@@ -148,10 +177,72 @@ export default function VariantImagesPage({
       }
 
       setMessage("Variant image updated successfully.");
+
+      // Re-sync from server after successful save
       await loadData();
     } catch (error) {
+      // Roll back by reloading real data
+      await loadData();
+
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to assign variant image."
+      );
+    } finally {
+      setSavingId("");
+    }
+  }
+
+  async function handleClearImage(variant: VariantItem) {
+    const variantId = normalizeText(variant.id);
+
+    if (!variantId) {
+      setErrorMessage("Variant id is missing.");
+      return;
+    }
+
+    try {
+      setSavingId(variantId);
+      setMessage("");
+      setErrorMessage("");
+
+      // Optimistic clear
+      setVariants((prev) =>
+        prev.map((item) =>
+          normalizeText(item.id) === variantId
+            ? {
+                ...item,
+                image_id: "",
+                variant_image: "",
+              }
+            : item
+        )
+      );
+
+      const response = await fetch("/api/variants/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: variantId,
+          image_id: "",
+          variant_image: "",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || "Failed to clear variant image.");
+      }
+
+      setMessage("Variant image cleared successfully.");
+      await loadData();
+    } catch (error) {
+      await loadData();
+
+      setErrorMessage(
+        error instanceof Error ? error.message : "Failed to clear variant image."
       );
     } finally {
       setSavingId("");
@@ -184,57 +275,72 @@ export default function VariantImagesPage({
         </div>
       ) : (
         <div style={listStyle}>
-          {variants.map((variant) => (
-            <div key={variant.id} style={variantCardStyle}>
-              <div style={variantHeaderStyle}>
-                <div>
-                  <div style={variantTitleStyle}>{buildVariantLabel(variant)}</div>
-                  <div style={variantMetaStyle}>SKU: {variant.sku || "-"}</div>
+          {variants.map((variant) => {
+            const currentVariantId = normalizeText(variant.id);
+            const currentImageId = normalizeText(variant.image_id);
+            const currentImageUrl = normalizeText(variant.variant_image);
+
+            return (
+              <div key={variant.id} style={variantCardStyle}>
+                <div style={variantHeaderStyle}>
+                  <div>
+                    <div style={variantTitleStyle}>{buildVariantLabel(variant)}</div>
+                    <div style={variantMetaStyle}>SKU: {variant.sku || "-"}</div>
+                  </div>
+
+                  <div style={{ display: "grid", gap: 10, justifyItems: "end" }}>
+                    {currentImageUrl ? (
+                      <img
+                        src={normalizeImageUrl(currentImageUrl)}
+                        alt={buildVariantLabel(variant)}
+                        style={selectedImageStyle}
+                      />
+                    ) : (
+                      <div style={selectedImageEmptyStyle}>No Image</div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleClearImage(variant)}
+                      style={clearButtonStyle}
+                      disabled={savingId === currentVariantId}
+                    >
+                      {savingId === currentVariantId ? "Saving..." : "Clear"}
+                    </button>
+                  </div>
                 </div>
 
-                {variant.variant_image ? (
-                  <img
-                    src={normalizeImageUrl(variant.variant_image)}
-                    alt={buildVariantLabel(variant)}
-                    style={selectedImageStyle}
-                  />
-                ) : (
-                  <div style={selectedImageEmptyStyle}>No Image</div>
-                )}
-              </div>
+                <div style={imagePickerGridStyle}>
+                  {imageOptions.map((image, index) => {
+                    const imageId = normalizeText(image.id);
+                    const active = imageId === currentImageId;
 
-              <div style={imagePickerGridStyle}>
-                {imageOptions.map((image) => {
-                  const active =
-                    normalizeText(image.id) === normalizeText(variant.image_id);
-
-                  return (
-                    <button
-                      key={image.id}
-                      type="button"
-                      onClick={() =>
-                        handleAssignImage(variant, String(image.id || ""))
-                      }
-                      style={{
-                        ...imageOptionButtonStyle,
-                        ...(active ? activeImageOptionButtonStyle : null),
-                      }}
-                      disabled={savingId === variant.id}
-                    >
-                      <img
-                        src={normalizeImageUrl(image.image_url || "")}
-                        alt={image.alt_text || "Variant option"}
-                        style={imageOptionImageStyle}
-                      />
-                      <div style={imageOptionMetaStyle}>
-                        {image.alt_text || `Image ${image.sort_order || "-"}`}
-                      </div>
-                    </button>
-                  );
-                })}
+                    return (
+                      <button
+                        key={image.id || `${image.image_url}-${index}`}
+                        type="button"
+                        onClick={() => handleAssignImage(variant, imageId)}
+                        style={{
+                          ...imageOptionButtonStyle,
+                          ...(active ? activeImageOptionButtonStyle : null),
+                        }}
+                        disabled={savingId === currentVariantId}
+                      >
+                        <img
+                          src={normalizeImageUrl(image.image_url || "")}
+                          alt={image.alt_text || `Image ${image.sort_order || "-"}`}
+                          style={imageOptionImageStyle}
+                        />
+                        <div style={imageOptionMetaStyle}>
+                          {image.alt_text || `Image ${image.sort_order || "-"}`}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -371,6 +477,17 @@ const imageOptionMetaStyle: React.CSSProperties = {
   color: "#5f564c",
   fontWeight: 700,
   wordBreak: "break-word",
+};
+
+const clearButtonStyle: React.CSSProperties = {
+  minHeight: 38,
+  padding: "0 14px",
+  borderRadius: 999,
+  border: "1px solid #e2d6c7",
+  background: "#fff",
+  color: "#5f564c",
+  fontWeight: 700,
+  cursor: "pointer",
 };
 
 const successBoxStyle: React.CSSProperties = {

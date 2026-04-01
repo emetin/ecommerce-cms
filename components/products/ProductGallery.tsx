@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { areSameImageUrls, normalizeImageUrl, uniqueImageUrls } from "../../lib/image-url";
 
 type ProductGalleryProps = {
   title?: string;
@@ -15,10 +16,11 @@ export default function ProductGallery({
   controlledActiveImage,
   onActiveImageChange,
 }: ProductGalleryProps) {
-  const validImages = useMemo(
-    () => images.map((item) => String(item || "").trim()).filter(Boolean),
-    [images]
-  );
+  const validImages = useMemo(() => {
+    return uniqueImageUrls(
+      images.map((item) => normalizeImageUrl(String(item || "").trim())).filter(Boolean)
+    );
+  }, [images]);
 
   const [activeIndex, setActiveIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -34,34 +36,41 @@ export default function ProductGallery({
       return;
     }
 
-    const nextIndex = validImages.findIndex(
-      (item) => item.trim() === controlledActiveImage.trim()
+    const nextIndex = validImages.findIndex((item) =>
+      areSameImageUrls(item, controlledActiveImage)
     );
 
     if (nextIndex >= 0) {
       setActiveIndex(nextIndex);
+      return;
     }
+
+    setActiveIndex((prev) => (prev >= validImages.length ? 0 : prev));
   }, [controlledActiveImage, validImages]);
 
   useEffect(() => {
     if (!validImages.length) return;
-    onActiveImageChange?.(validImages[activeIndex]);
+    const activeImage = validImages[activeIndex] || validImages[0];
+    if (activeImage) {
+      onActiveImageChange?.(activeImage);
+    }
   }, [activeIndex, validImages, onActiveImageChange]);
 
   if (!validImages.length) {
     return (
       <div
         style={{
-          borderRadius: 28,
+          borderRadius: 30,
           overflow: "hidden",
-          border: "1px solid #e5ddd2",
-          background: "#f7f4ef",
+          border: "1px solid #e7decf",
+          background: "linear-gradient(180deg, #faf7f1 0%, #f4eee4 100%)",
           aspectRatio: "1 / 1",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           color: "#7a7266",
           fontWeight: 700,
+          fontSize: 15,
         }}
       >
         No Image
@@ -69,7 +78,7 @@ export default function ProductGallery({
     );
   }
 
-  const activeImage = validImages[activeIndex];
+  const activeImage = validImages[activeIndex] || validImages[0];
 
   function goPrev() {
     setActiveIndex((prev) => (prev === 0 ? validImages.length - 1 : prev - 1));
@@ -81,14 +90,15 @@ export default function ProductGallery({
 
   return (
     <>
-      <div>
+      <div style={{ display: "grid", gap: 16 }}>
         <div
           style={{
             position: "relative",
-            borderRadius: 28,
+            borderRadius: 30,
             overflow: "hidden",
             border: "1px solid #e5ddd2",
-            background: "#f7f4ef",
+            background: "linear-gradient(180deg, #fbf8f3 0%, #f3ece2 100%)",
+            boxShadow: "0 18px 42px rgba(23,23,23,0.08)",
           }}
         >
           <img
@@ -101,8 +111,31 @@ export default function ProductGallery({
               objectFit: "cover",
               display: "block",
               cursor: "zoom-in",
+              transition: "transform 0.35s ease",
             }}
           />
+
+          <div
+            style={{
+              position: "absolute",
+              top: 18,
+              left: 18,
+              display: "inline-flex",
+              alignItems: "center",
+              minHeight: 34,
+              padding: "0 12px",
+              borderRadius: 999,
+              background: "rgba(255,255,255,0.88)",
+              backdropFilter: "blur(8px)",
+              border: "1px solid rgba(231,222,207,0.95)",
+              fontWeight: 800,
+              fontSize: 12,
+              color: "#4f473d",
+              letterSpacing: "0.04em",
+            }}
+          >
+            {activeIndex + 1} / {validImages.length}
+          </div>
 
           {validImages.length > 1 ? (
             <>
@@ -139,12 +172,11 @@ export default function ProductGallery({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+              gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
               gap: 12,
-              marginTop: 14,
             }}
           >
-            {validImages.slice(0, 8).map((image, index) => (
+            {validImages.slice(0, 10).map((image, index) => (
               <button
                 key={`${image}-${index}`}
                 type="button"
@@ -156,9 +188,15 @@ export default function ProductGallery({
                   border:
                     index === activeIndex
                       ? "2px solid #2f7d62"
-                      : "1px solid #e5ddd2",
+                      : "1px solid #e7decf",
                   background: "#fff",
                   cursor: "pointer",
+                  boxShadow:
+                    index === activeIndex
+                      ? "0 10px 24px rgba(47,125,98,0.16)"
+                      : "0 4px 14px rgba(23,23,23,0.04)",
+                  transform: index === activeIndex ? "translateY(-2px)" : "none",
+                  transition: "all 0.2s ease",
                 }}
               >
                 <img
@@ -235,11 +273,12 @@ const navButtonBase: React.CSSProperties = {
   position: "absolute",
   top: "50%",
   transform: "translateY(-50%)",
-  width: 44,
-  height: 44,
+  width: 48,
+  height: 48,
   borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.65)",
-  background: "rgba(255,255,255,0.88)",
+  border: "1px solid rgba(255,255,255,0.7)",
+  background: "rgba(255,255,255,0.9)",
+  backdropFilter: "blur(8px)",
   cursor: "pointer",
   fontSize: 28,
   lineHeight: 1,
@@ -247,34 +286,38 @@ const navButtonBase: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
+  boxShadow: "0 10px 24px rgba(23,23,23,0.12)",
 };
 
 const navButtonLeftStyle: React.CSSProperties = {
   ...navButtonBase,
-  left: 16,
+  left: 18,
 };
 
 const navButtonRightStyle: React.CSSProperties = {
   ...navButtonBase,
-  right: 16,
+  right: 18,
 };
 
 const zoomButtonStyle: React.CSSProperties = {
   position: "absolute",
-  right: 16,
-  bottom: 16,
+  right: 18,
+  bottom: 18,
   borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.7)",
-  background: "rgba(255,255,255,0.92)",
-  padding: "10px 14px",
-  fontWeight: 700,
+  border: "1px solid rgba(255,255,255,0.72)",
+  background: "rgba(255,255,255,0.93)",
+  backdropFilter: "blur(8px)",
+  padding: "10px 16px",
+  fontWeight: 800,
   cursor: "pointer",
+  color: "#171717",
+  boxShadow: "0 10px 24px rgba(23,23,23,0.12)",
 };
 
 const lightboxOverlayStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.82)",
+  background: "rgba(0,0,0,0.84)",
   zIndex: 1000,
   display: "flex",
   alignItems: "center",

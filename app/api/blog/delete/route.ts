@@ -20,7 +20,7 @@ export async function POST(req: Request) {
       );
     }
 
-    await deleteSheetRowBySlug("Blog", slug);
+    await deleteSheetRowBySlug("blog", slug);
 
     return NextResponse.json({
       ok: true,

@@ -70,9 +70,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   try {
     const [productsRaw, collectionsRaw, blogRaw] = await Promise.all([
-      getSheetData("Products"),
-      getSheetData("Collections"),
-      getSheetData("Blog"),
+      getSheetData("products"),
+      getSheetData("collections"),
+      getSheetData("blog"),
     ]);
 
     const products = (productsRaw as ProductItem[])

@@ -7,12 +7,22 @@ type CollectionCardProps = {
   href: string;
 };
 
+const FALLBACK_IMAGE =
+  "https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=1400&q=80";
+
+function getSafeImageSrc(value?: string) {
+  const src = String(value || "").trim();
+  return src || FALLBACK_IMAGE;
+}
+
 export default function CollectionCard({
   title,
   description,
   image,
   href,
 }: CollectionCardProps) {
+  const imageSrc = getSafeImageSrc(image);
+
   return (
     <Link
       href={href}
@@ -41,10 +51,7 @@ export default function CollectionCard({
           }}
         >
           <img
-            src={
-              image?.trim() ||
-              "https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=1400&q=80"
-            }
+            src={imageSrc}
             alt={title}
             style={{
               width: "100%",

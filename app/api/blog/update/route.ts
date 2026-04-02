@@ -114,7 +114,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const items = (await getSheetData("Blog")) as BlogRow[];
+    const items = (await getSheetData("blog")) as BlogRow[];
 
     const currentItem =
       items.find(
@@ -170,7 +170,7 @@ export async function POST(req: Request) {
     const createdAt = String(currentItem.created_at || now);
     const id = String(currentItem.id || "");
 
-    await updateSheetRowBySlug("Blog", originalSlug, [
+    await updateSheetRowBySlug("blog", originalSlug, [
       id,
       title,
       finalSlug,

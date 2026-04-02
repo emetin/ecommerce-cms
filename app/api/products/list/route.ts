@@ -4,7 +4,7 @@ import { getSheetData } from "../../../../lib/sheets";
 type ProductItem = Record<string, string>;
 
 const ALLOWED_STATUS = ["published", "draft", "archived"];
-const SHEET_NAME = "Products";
+const SHEET_NAME = "products";
 
 function normalize(value: unknown) {
   return String(value || "").trim().toLowerCase();

@@ -33,12 +33,16 @@ function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
 function isTrue(value: unknown) {
-  return String(value || "").trim().toLowerCase() === "true";
+  return normalizeLower(value) === "true";
 }
 
 function toSafeOrder(value: unknown) {
-  const num = Number(String(value || "").trim());
+  const num = Number(normalizeText(value));
   return Number.isFinite(num) ? num : 999999;
 }
 
@@ -55,18 +59,38 @@ function sortImages(images: ProductImageItem[]) {
   });
 }
 
-function getGalleryState(product: ProductItem, allImages: ProductImageItem[]) {
-  const slug = normalizeText(product.slug).toLowerCase();
+function buildImageMap(allImages: ProductImageItem[]) {
+  const map = new Map<string, ProductImageItem[]>();
 
-  const images = sortImages(
-    allImages.filter(
-      (item) => normalizeText(item.product_slug).toLowerCase() === slug
-    )
-  );
+  for (const item of allImages) {
+    const slug = normalizeLower(item.product_slug);
+    if (!slug) continue;
+
+    if (!map.has(slug)) {
+      map.set(slug, []);
+    }
+
+    map.get(slug)!.push(item);
+  }
+
+  for (const [slug, images] of map.entries()) {
+    map.set(slug, sortImages(images));
+  }
+
+  return map;
+}
+
+function getGalleryState(
+  product: ProductItem,
+  imageMap: Map<string, ProductImageItem[]>
+) {
+  const slug = normalizeLower(product.slug);
+  const images = imageMap.get(slug) || [];
 
   const mainImage = images.find((item) => isTrue(item.is_main)) || null;
   const firstImage = images[0] || null;
   const altCount = images.filter((item) => normalizeText(item.alt_text)).length;
+
   const primaryImage = normalizeImageUrl(
     mainImage?.image_url || firstImage?.image_url || product.image || ""
   );
@@ -110,6 +134,7 @@ export default function AdminProductsPage() {
   const [items, setItems] = useState<ProductItem[]>([]);
   const [allImages, setAllImages] = useState<ProductImageItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [imagesLoading, setImagesLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -179,20 +204,16 @@ export default function AdminProductsPage() {
     return Array.isArray(data.items) ? data.items : [];
   }, []);
 
-  const loadData = useCallback(async () => {
+  const loadProductsOnly = useCallback(async () => {
     try {
       setLoading(true);
       setErrorMessage("");
 
-      const [productData, imageItems] = await Promise.all([
-        loadProducts(),
-        loadAllImages(),
-      ]);
+      const productData = await loadProducts();
 
       setItems(Array.isArray(productData.items) ? productData.items : []);
       setTotal(Number(productData.total || 0));
       setTotalPages(Number(productData.totalPages || 1));
-      setAllImages(imageItems);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -200,11 +221,30 @@ export default function AdminProductsPage() {
     } finally {
       setLoading(false);
     }
-  }, [loadProducts, loadAllImages]);
+  }, [loadProducts]);
+
+  const loadImagesOnly = useCallback(async () => {
+    try {
+      setImagesLoading(true);
+
+      const imageItems = await loadAllImages();
+      setAllImages(imageItems);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "An unknown error occurred."
+      );
+    } finally {
+      setImagesLoading(false);
+    }
+  }, [loadAllImages]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadProductsOnly();
+  }, [loadProductsOnly]);
+
+  useEffect(() => {
+    loadImagesOnly();
+  }, [loadImagesOnly]);
 
   useEffect(() => {
     setPage(1);
@@ -236,7 +276,7 @@ export default function AdminProductsPage() {
         throw new Error(data?.error || "Failed to delete product.");
       }
 
-      await loadData();
+      await Promise.all([loadProductsOnly(), loadImagesOnly()]);
     } catch (error) {
       alert(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -245,6 +285,8 @@ export default function AdminProductsPage() {
       setDeleteLoadingSlug("");
     }
   }
+
+  const imageMap = useMemo(() => buildImageMap(allImages), [allImages]);
 
   const publishedCount = useMemo(
     () =>
@@ -269,7 +311,7 @@ export default function AdminProductsPage() {
     let lowImageCount = 0;
 
     items.forEach((item) => {
-      const state = getGalleryState(item, allImages);
+      const state = getGalleryState(item, imageMap);
 
       if (state.imageCount === 0) {
         missingGallery += 1;
@@ -291,7 +333,7 @@ export default function AdminProductsPage() {
       missingAltText,
       lowImageCount,
     };
-  }, [items, allImages]);
+  }, [items, imageMap]);
 
   return (
     <div style={{ display: "grid", gap: 24 }}>
@@ -396,7 +438,7 @@ export default function AdminProductsPage() {
         </div>
       </div>
 
-      {loading ? (
+      {loading || imagesLoading ? (
         <div style={cardStyle}>Loading...</div>
       ) : errorMessage ? (
         <div style={errorBoxStyle}>
@@ -425,7 +467,7 @@ export default function AdminProductsPage() {
               </thead>
               <tbody>
                 {items.map((item, index) => {
-                  const galleryState = getGalleryState(item, allImages);
+                  const galleryState = getGalleryState(item, imageMap);
                   const featured =
                     String(item.featured || "").toLowerCase() === "true";
 
@@ -1003,7 +1045,7 @@ const emptyStateStyle: React.CSSProperties = {
   background: "#fff",
   border: "1px solid #ddd3c5",
   borderRadius: 24,
-  padding: 28,
+  padding: 28,  
   color: "#6f6559",
   fontWeight: 700,
 };

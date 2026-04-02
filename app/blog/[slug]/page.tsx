@@ -30,7 +30,7 @@ export async function generateMetadata({
   const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
 
   try {
-    const items = (await getSheetData("Blog")) as BlogItem[];
+    const items = (await getSheetData("blog")) as BlogItem[];
     const post =
       items.find(
         (item) =>
@@ -77,7 +77,7 @@ export default async function BlogDetailPage({
   let errorMessage = "";
 
   try {
-    const items = (await getSheetData("Blog")) as BlogItem[];
+    const items = (await getSheetData("blog")) as BlogItem[];
 
     const foundPost =
       items.find(

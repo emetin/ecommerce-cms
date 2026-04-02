@@ -7,7 +7,7 @@ export default async function TestPage() {
   let errorMessage = "";
 
   try {
-    rawRows = await getSheetRows("Products");
+    rawRows = await getSheetRows("products");
     data = rowsToObjects(rawRows);
   } catch (error) {
     errorMessage =

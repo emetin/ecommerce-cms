@@ -13,7 +13,7 @@ export async function GET(req: Request) {
       .trim()
       .toLowerCase();
 
-    const posts = (await getSheetData("Blog")) as BlogItem[];
+    const posts = (await getSheetData("blog")) as BlogItem[];
 
     let items = posts.filter((item) => item && item.slug);
 

@@ -32,7 +32,7 @@ export default async function BlogPage() {
   let errorMessage = "";
 
   try {
-    const data = await getSheetData("Blog");
+    const data = await getSheetData("blog");
 
     posts = (data as BlogItem[]).filter(
       (item) => String(item.status || "").trim().toLowerCase() === "published"

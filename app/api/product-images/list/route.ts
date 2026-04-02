@@ -42,8 +42,7 @@ export async function GET(req: Request) {
     const productSlug = normalizeLower(searchParams.get("product_slug"));
 
     const images = (await getSheetData("product_images", {
-      forceFresh: true,
-      ttlSeconds: 30,
+      ttlSeconds: 300,
     })) as ProductImageItem[];
 
     let items = images.filter((item) => item && normalizeText(item.id));
@@ -64,7 +63,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "no-store, max-age=0",
+          "Cache-Control": "no-store",
         },
       }
     );

@@ -3,7 +3,7 @@ import { getSheetData } from "../../../../lib/sheets";
 
 type ProductItem = Record<string, string>;
 
-const SHEET_NAME = "Products";
+const SHEET_NAME = "products";
 
 export async function GET(req: Request) {
   try {

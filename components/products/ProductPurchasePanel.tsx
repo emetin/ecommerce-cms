@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { normalizeImageUrl } from "../../lib/image-url";
 
 export type VariantItem = {
   id?: string;
@@ -98,13 +97,6 @@ function buildVariantLabel(variant: VariantItem) {
     .filter((item) => item && item.toLowerCase() !== "default");
 
   return values.length ? values.join(" / ") : "Default";
-}
-
-function getVariantImage(variant?: VariantItem | null) {
-  if (!variant) return "";
-  return normalizeImageUrl(
-    String(variant.variant_image || variant.image_id || "").trim()
-  );
 }
 
 function getOptionMeta(
@@ -303,9 +295,7 @@ export default function ProductPurchasePanel({
 
   const inquiryHref = `/contact-us?product=${encodeURIComponent(
     product.title || "Product"
-  )}&variant=${encodeURIComponent(buildVariantLabel(selectedVariant || {} as VariantItem))}`;
-
-  const variantImage = getVariantImage(selectedVariant);
+  )}&variant=${encodeURIComponent(buildVariantLabel(selectedVariant || ({} as VariantItem)))}`;
 
   if (!activeVariants.length) {
     return (
@@ -430,29 +420,6 @@ export default function ProductPurchasePanel({
           value={selectedOption3}
           onChange={setSelectedOption3}
         />
-      ) : null}
-
-      {variantImage ? (
-        <div
-          style={{
-            marginTop: 20,
-            borderRadius: 20,
-            overflow: "hidden",
-            border: "1px solid #e5ddd2",
-            background: "#faf8f4",
-          }}
-        >
-          <img
-            src={variantImage}
-            alt={buildVariantLabel(selectedVariant || ({} as VariantItem))}
-            style={{
-              width: "100%",
-              aspectRatio: "1 / 1",
-              objectFit: "cover",
-              display: "block",
-            }}
-          />
-        </div>
       ) : null}
 
       <div

@@ -99,7 +99,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const existingPosts = (await getSheetData("Blog")) as BlogRecord[];
+    const existingPosts = (await getSheetData("blog")) as BlogRecord[];
 
     const normalizedTitle = title.toLowerCase();
     const normalizedSlug = finalSlug.toLowerCase();
@@ -135,7 +135,7 @@ export async function POST(req: Request) {
     const now = new Date().toISOString();
     const id = `blog_${Date.now()}`;
 
-    await appendSheetRow("Blog", [
+    await appendSheetRow("blog", [
       id,
       title,
       finalSlug,

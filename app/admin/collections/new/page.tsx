@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import ImportPanel from "../../../../components/admin/ImportPanel";
 
 function makeSlug(text: string) {
@@ -33,7 +33,66 @@ export default function NewCollectionPage() {
   const [resultMessage, setResultMessage] = useState("");
   const [resultError, setResultError] = useState("");
 
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState("");
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const suggestedSlug = useMemo(() => makeSlug(title), [title]);
+
+  async function handleImageUpload(
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImageUploadError("");
+    setImageUploading(true);
+
+    try {
+      if (!file.type.startsWith("image/")) {
+        throw new Error("Please select a valid image file.");
+      }
+
+      const maxSizeMb = 4;
+      if (file.size > maxSizeMb * 1024 * 1024) {
+        throw new Error(`Image must be smaller than ${maxSizeMb}MB.`);
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok || !data.url) {
+        throw new Error(data?.error || "Image upload failed.");
+      }
+
+      setImage(data.url);
+    } catch (error) {
+      setImageUploadError(
+        error instanceof Error ? error.message : "Image upload failed."
+      );
+    } finally {
+      setImageUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
+
+  function clearImage() {
+    setImage("");
+    setImageUploadError("");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -74,6 +133,7 @@ export default function NewCollectionPage() {
       setStatus("draft");
       setSeoTitle("");
       setSeoDescription("");
+      setImageUploadError("");
     } catch (error) {
       setResultError(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -170,12 +230,61 @@ export default function NewCollectionPage() {
             </div>
 
             <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Image URL</label>
-              <input
+              <label style={labelStyle}>Collection Image</label>
+
+              <div style={imageToolsWrapStyle}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  style={fileInputStyle}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  style={secondaryButtonStyle}
+                  disabled={imageUploading}
+                >
+                  {imageUploading ? "Uploading..." : "Upload Image"}
+                </button>
+
+                {image ? (
+                  <button
+                    type="button"
+                    onClick={clearImage}
+                    style={dangerSmallButtonStyle}
+                  >
+                    Remove Image
+                  </button>
+                ) : null}
+              </div>
+
+              {imageUploadError ? (
+                <div style={errorInlineStyle}>{imageUploadError}</div>
+              ) : null}
+
+              {image ? (
+                <div style={imagePreviewCardStyle}>
+                  <img
+                    src={image}
+                    alt={title || "Collection image"}
+                    style={imagePreviewStyle}
+                  />
+                </div>
+              ) : (
+                <div style={emptyImageBoxStyle}>No image selected.</div>
+              )}
+            </div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={labelStyle}>Image URL / Stored Value</label>
+              <textarea
                 value={image}
                 onChange={(e) => setImage(e.target.value)}
-                placeholder="https://..."
-                style={inputStyle}
+                placeholder="Paste image URL here or use Upload Image"
+                style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
               />
             </div>
 
@@ -317,6 +426,61 @@ const inputStyle: React.CSSProperties = {
   fontSize: 15,
 };
 
+const imageToolsWrapStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  alignItems: "center",
+  marginBottom: 14,
+};
+
+const fileInputStyle: React.CSSProperties = {
+  display: "none",
+};
+
+const imagePreviewCardStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 320,
+  borderRadius: 20,
+  overflow: "hidden",
+  border: "1px solid #e5ddd2",
+  background: "#faf8f4",
+  marginTop: 6,
+};
+
+const imagePreviewStyle: React.CSSProperties = {
+  width: "100%",
+  aspectRatio: "1 / 1",
+  objectFit: "cover",
+  display: "block",
+};
+
+const emptyImageBoxStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 320,
+  minHeight: 180,
+  borderRadius: 20,
+  border: "1px dashed #d9cfbf",
+  background: "#faf8f4",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "#7b7367",
+  fontWeight: 700,
+  marginTop: 6,
+  padding: 16,
+  textAlign: "center",
+};
+
+const errorInlineStyle: React.CSSProperties = {
+  marginBottom: 12,
+  padding: 12,
+  borderRadius: 12,
+  background: "#fff1f1",
+  border: "1px solid #efc9c9",
+  color: "#7a2222",
+};
+
 const buttonRowStyle: React.CSSProperties = {
   display: "flex",
   gap: 12,
@@ -352,6 +516,20 @@ const secondaryButtonStyle: React.CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
   textDecoration: "none",
+};
+
+const dangerSmallButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 42,
+  padding: "0 14px",
+  borderRadius: 12,
+  border: "1px solid #e5c9c9",
+  background: "#fff5f5",
+  color: "#8f2d2d",
+  fontWeight: 700,
+  cursor: "pointer",
 };
 
 const successBoxStyle: React.CSSProperties = {

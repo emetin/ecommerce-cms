@@ -16,6 +16,14 @@ type CollectionItem = {
   seo_description?: string;
 };
 
+const FALLBACK_IMAGE =
+  "https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=1400&q=80";
+
+function getSafeImageSrc(value?: string) {
+  const src = String(value || "").trim();
+  return src || FALLBACK_IMAGE;
+}
+
 export default function AdminCollectionsPage() {
   const [items, setItems] = useState<CollectionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -178,54 +186,70 @@ export default function AdminCollectionsPage() {
                 {filteredItems.map((item, index) => (
                   <tr key={item.id || item.slug || index}>
                     <td style={tdStyle}>
-                      <div style={{ display: "grid", gap: 6 }}>
-                        <div style={{ fontWeight: 800 }}>{item.title || "-"}</div>
-                        <div
-                          style={{
-                            color: "#6f6559",
-                            fontSize: 13,
-                            lineHeight: 1.6,
-                          }}
-                        >
-                          {item.description || "No description added yet."}
+                      <div style={titleCellWrapStyle}>
+                        <div style={thumbBoxStyle}>
+                          <img
+                            src={getSafeImageSrc(item.image)}
+                            alt={item.title || "Collection"}
+                            style={thumbImageStyle}
+                          />
+                        </div>
+
+                        <div style={{ display: "grid", gap: 6 }}>
+                          <div style={{ fontWeight: 800 }}>
+                            {item.title || "-"}
+                          </div>
+                          <div
+                            style={{
+                              color: "#6f6559",
+                              fontSize: 13,
+                              lineHeight: 1.6,
+                            }}
+                          >
+                            {item.description || "No description added yet."}
+                          </div>
                         </div>
                       </div>
                     </td>
+
                     <td style={tdStyle}>{item.slug || "-"}</td>
+
                     <td style={tdStyle}>
                       <StatusBadge value={item.status || "-"} />
                     </td>
+
                     <td style={tdStyle}>{item.updated_at || "-"}</td>
+
                     <td style={tdStyle}>
-  <div style={actionRowStyle}>
-    {item.slug ? (
-      <Link
-        href={`/admin/collections/${item.slug}`}
-        style={secondarySmallButtonStyle}
-      >
-        Edit
-      </Link>
-    ) : null}
+                      <div style={actionRowStyle}>
+                        {item.slug ? (
+                          <Link
+                            href={`/admin/collections/${item.slug}`}
+                            style={secondarySmallButtonStyle}
+                          >
+                            Edit
+                          </Link>
+                        ) : null}
 
-    {item.slug ? (
-      <Link
-        href={`/admin/collections/${item.slug}/products`}
-        style={secondarySmallButtonStyle}
-      >
-        Products
-      </Link>
-    ) : null}
+                        {item.slug ? (
+                          <Link
+                            href={`/admin/collections/${item.slug}/products`}
+                            style={secondarySmallButtonStyle}
+                          >
+                            Products
+                          </Link>
+                        ) : null}
 
-    {item.slug ? (
-      <Link
-        href={`/collections/${item.slug}`}
-        style={secondarySmallButtonStyle}
-      >
-        View
-      </Link>
-    ) : null}
-  </div>
-</td>
+                        {item.slug ? (
+                          <Link
+                            href={`/collections/${item.slug}`}
+                            style={secondarySmallButtonStyle}
+                          >
+                            View
+                          </Link>
+                        ) : null}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -393,6 +417,29 @@ const tdStyle: React.CSSProperties = {
   borderBottom: "1px solid #efe8dc",
   verticalAlign: "top",
   fontSize: 15,
+};
+
+const titleCellWrapStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 14,
+  alignItems: "flex-start",
+};
+
+const thumbBoxStyle: React.CSSProperties = {
+  width: 72,
+  minWidth: 72,
+  height: 72,
+  borderRadius: 14,
+  overflow: "hidden",
+  border: "1px solid #e5dccf",
+  background: "#f8f5ef",
+};
+
+const thumbImageStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+  display: "block",
 };
 
 const badgeStyle: React.CSSProperties = {

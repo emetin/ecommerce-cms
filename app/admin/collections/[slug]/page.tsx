@@ -173,24 +173,6 @@ export default function AdminCollectionDetailPage({
     }
   }
 
-  function readFileAsDataUrl(file: File) {
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-
-      reader.onload = () => {
-        const result = String(reader.result || "");
-        if (!result) {
-          reject(new Error("Failed to read file."));
-          return;
-        }
-        resolve(result);
-      };
-
-      reader.onerror = () => reject(new Error("Failed to read file."));
-      reader.readAsDataURL(file);
-    });
-  }
-
   async function handleImageUpload(
     e: React.ChangeEvent<HTMLInputElement>
   ) {
@@ -210,8 +192,21 @@ export default function AdminCollectionDetailPage({
         throw new Error(`Image must be smaller than ${maxSizeMb}MB.`);
       }
 
-      const dataUrl = await readFileAsDataUrl(file);
-      setImage(dataUrl);
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok || !data.url) {
+        throw new Error(data?.error || "Image upload failed.");
+      }
+
+      setImage(data.url);
     } catch (error) {
       setImageUploadError(
         error instanceof Error ? error.message : "Image upload failed."

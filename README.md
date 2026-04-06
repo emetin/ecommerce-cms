@@ -1,44 +1,56 @@
-# Patak Textile CMS
+# Global CMS
 
-Patak Textile CMS is a lightweight Next.js-based catalog website with an internal admin panel.  
-It is designed for a listing and catalog structure, not a full ecommerce checkout system.
+Global CMS is a lightweight and scalable content management system built with Next.js.  
+It uses Google Sheets as the primary data source and Google Drive for media storage.
 
-The project uses:
+This project is designed for structured catalog-based websites and internal content management workflows without relying on traditional e-commerce platforms.
 
-- Next.js App Router
-- TypeScript
-- Google Sheets as the main content source
-- Internal admin panel for products, collections, and blog
-- CSV / JSON / XML import-export support
+---
 
-## Project Purpose
+## Features
 
-This project is intended as a clean and manageable starting point for:
+- Next.js App Router architecture
+- TypeScript support
+- Google Sheets as the primary database
+- Google Drive integration for media storage
+- Internal admin panel
+- CSV / JSON / XML import and export
+- Modular and scalable structure
 
-- product listing pages
-- collection pages
-- blog pages
-- product detail pages
-- admin-based content management
+---
 
-The current structure is focused on a premium catalog presentation.  
-It is not intended to behave like a full Shopify-style store at this stage.
+## Purpose
 
-## Main Data Sources
+Global CMS is designed for:
 
-The project reads data from Google Sheets.
+- Product catalog websites
+- Collection-based content structures
+- Blog systems
+- B2B showcase platforms
 
-Required sheet names:
+This project is not a full e-commerce system.  
+It does not include cart, checkout, or payment infrastructure.
+
+---
+
+## Data Architecture
+
+The system reads core content from Google Sheets.
+
+### Required Sheets
+
+The following sheets must exist:
 
 - `products`
 - `collections`
 - `blog`
 - `product_variants`
 - `product_images`
+- `collection_products`
 
-## Products Sheet Header Order
+### Products Sheet Header Order
 
-The `products` sheet must use this exact header order:
+The `products` sheet must follow this exact header order:
 
 ```txt
 id

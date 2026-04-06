@@ -27,6 +27,8 @@ if (!PRIVATE_KEY) {
   throw new Error("Missing GOOGLE_PRIVATE_KEY.");
 }
 
+let sheetsClientInstance: ReturnType<typeof google.sheets> | null = null;
+
 function getAuth() {
   return new google.auth.JWT({
     email: CLIENT_EMAIL,
@@ -36,12 +38,18 @@ function getAuth() {
 }
 
 function getSheetsClient() {
+  if (sheetsClientInstance) {
+    return sheetsClientInstance;
+  }
+
   const auth = getAuth();
 
-  return google.sheets({
+  sheetsClientInstance = google.sheets({
     version: "v4",
     auth,
   });
+
+  return sheetsClientInstance;
 }
 
 function getSpreadsheetId(mode: "catalog" | "forms" = "catalog") {

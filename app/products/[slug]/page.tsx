@@ -1,6 +1,11 @@
+import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getSheetData } from "../../../lib/sheets";
+import {
+  findSheetItemByField,
+  findSheetItemsByField,
+  getSheetData,
+} from "../../../lib/sheets";
 import { buildPageMetadata } from "../../../lib/seo";
 import { normalizeImageUrl } from "../../../lib/image-url";
 import ProductDetailClient from "../../../components/products/ProductDetailClient";
@@ -84,6 +89,71 @@ function getPrimaryProductImage(
   );
 }
 
+const getPublishedProductBySlug = cache(async (slug: string) => {
+  const product = await findSheetItemByField<ProductItem>("products", "slug", slug);
+
+  if (!product) {
+    return null;
+  }
+
+  if (normalizeLower(product.status) !== "published") {
+    return null;
+  }
+
+  return product;
+});
+
+const getProductPageData = cache(async (slug: string) => {
+  const product = await getPublishedProductBySlug(slug);
+
+  if (!product) {
+    return {
+      product: null,
+      relatedProducts: [] as ProductItem[],
+      variants: [] as VariantItem[],
+      productImages: [] as ProductImageItem[],
+      allProductImages: [] as ProductImageItem[],
+    };
+  }
+
+  const [variantsData, productImages, allProducts] = await Promise.all([
+    findSheetItemsByField<VariantItem>("product_variants", "product_slug", slug),
+    findSheetItemsByField<ProductImageItem>("product_images", "product_slug", slug),
+    getSheetData("products"),
+  ]);
+
+  const filteredVariants = variantsData.filter((variant) => {
+    const variantStatus = normalizeLower(variant.status);
+    return ["", "published", "active"].includes(variantStatus);
+  });
+
+  const publishedProducts = (allProducts as ProductItem[]).filter(
+    (item) => normalizeLower(item.status) === "published"
+  );
+
+  const currentCollectionSlug = normalizeLower(product.collection_slug);
+
+  const relatedProducts = publishedProducts
+    .filter((item) => {
+      const itemSlug = normalizeLower(item.slug);
+      const itemCollectionSlug = normalizeLower(item.collection_slug);
+
+      return (
+        itemSlug !== slug &&
+        itemCollectionSlug === currentCollectionSlug
+      );
+    })
+    .slice(0, 3);
+
+  return {
+    product,
+    relatedProducts,
+    variants: filteredVariants,
+    productImages,
+    allProductImages: productImages,
+  };
+});
+
 export async function generateMetadata({
   params,
 }: {
@@ -93,20 +163,7 @@ export async function generateMetadata({
   const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
 
   try {
-    const [items, imageData] = await Promise.all([
-      getSheetData("products"),
-      getSheetData("product_images"),
-    ]);
-
-    const products = items as ProductItem[];
-    const allProductImages = imageData as ProductImageItem[];
-
-    const product =
-      products.find(
-        (item) =>
-          normalizeLower(item.slug) === decodedSlug &&
-          normalizeLower(item.status) === "published"
-      ) || null;
+    const { product, productImages } = await getProductPageData(decodedSlug);
 
     if (!product) {
       return buildPageMetadata({
@@ -115,10 +172,6 @@ export async function generateMetadata({
         path: `/products/${decodedSlug}`,
       });
     }
-
-    const productImages = allProductImages.filter(
-      (item) => normalizeLower(item.product_slug) === decodedSlug
-    );
 
     const primaryImage = getPrimaryProductImage(product, productImages);
 
@@ -149,88 +202,36 @@ export default async function ProductDetailPage({
   const { slug } = await params;
   const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
 
-  let product: ProductItem | null = null;
-  let relatedProducts: ProductItem[] = [];
-  let variants: VariantItem[] = [];
-  let productImages: ProductImageItem[] = [];
-  let allProductImages: ProductImageItem[] = [];
-  let errorMessage = "";
-
   try {
-    const [productData, variantData, imageData] = await Promise.all([
-      getSheetData("products"),
-      getSheetData("product_variants"),
-      getSheetData("product_images"),
-    ]);
+    const {
+      product,
+      relatedProducts,
+      variants,
+      productImages,
+      allProductImages,
+    } = await getProductPageData(decodedSlug);
 
-    const items = productData as ProductItem[];
-    const allVariants = variantData as VariantItem[];
-    allProductImages = imageData as ProductImageItem[];
-
-    const foundProduct =
-      items.find(
-        (item) =>
-          normalizeLower(item.slug) === decodedSlug &&
-          normalizeLower(item.status) === "published"
-      ) || null;
-
-    product = foundProduct;
-
-    if (foundProduct) {
-      const currentCollectionSlug = normalizeLower(foundProduct.collection_slug);
-
-      variants = allVariants.filter((variant) => {
-        const variantSlug = normalizeLower(variant.product_slug);
-        const variantStatus = normalizeLower(variant.status);
-
-        return (
-          variantSlug === decodedSlug &&
-          ["", "published", "active"].includes(variantStatus)
-        );
-      });
-
-      productImages = allProductImages.filter(
-        (item) => normalizeLower(item.product_slug) === decodedSlug
-      );
-
-      relatedProducts = items
-        .filter((item) => {
-          const itemSlug = normalizeLower(item.slug);
-          const itemStatus = normalizeLower(item.status);
-          const itemCollectionSlug = normalizeLower(item.collection_slug);
-
-          return (
-            itemSlug !== decodedSlug &&
-            itemStatus === "published" &&
-            itemCollectionSlug === currentCollectionSlug
-          );
-        })
-        .slice(0, 3);
+    if (!product) {
+      notFound();
     }
-  } catch (error) {
-    errorMessage =
-      error instanceof Error ? error.message : "Unknown error occurred.";
-  }
 
-  if (errorMessage) {
+    return (
+      <ProductDetailClient
+        product={product}
+        relatedProducts={relatedProducts}
+        variants={variants}
+        productImages={productImages}
+        allProductImages={allProductImages}
+      />
+    );
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error occurred.";
+
     return (
       <div style={{ padding: 40 }}>
         <strong>Error:</strong> {errorMessage}
       </div>
     );
   }
-
-  if (!product) {
-    notFound();
-  }
-
-  return (
-    <ProductDetailClient
-      product={product}
-      relatedProducts={relatedProducts}
-      variants={variants}
-      productImages={productImages}
-      allProductImages={allProductImages}
-    />
-  );
 }

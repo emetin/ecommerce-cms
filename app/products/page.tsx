@@ -19,23 +19,44 @@ export const metadata: Metadata = buildPageMetadata({
   path: "/products",
 });
 
+type PreparedProduct = ProductItem & {
+  preparedImage: string;
+  preparedTitle: string;
+  preparedDescription: string;
+  preparedHref: string;
+};
+
+function prepareProducts(
+  products: ProductItem[],
+  imagesBySlug: Map<string, Record<string, string>[]>
+): PreparedProduct[] {
+  const publishedProducts = getPublishedProducts(products);
+
+  return publishedProducts.map((product) => {
+    const slug = String(product.slug || "").trim().toLowerCase();
+    const productImages = imagesBySlug.get(slug) || [];
+    const primaryImage = getPrimaryProductImage(product, productImages);
+
+    return {
+      ...product,
+      preparedImage: primaryImage,
+      preparedTitle: product.title || "Untitled Product",
+      preparedDescription:
+        product.short_description ||
+        product.description ||
+        "Explore this textile product within the Patak Textile catalog structure.",
+      preparedHref: `/products/${product.slug || ""}`,
+    };
+  });
+}
+
 export default async function ProductsPage() {
-  let products: ProductItem[] = [];
+  let preparedProducts: PreparedProduct[] = [];
   let errorMessage = "";
 
   try {
-    const { products: allProducts, imagesBySlug } = await getProductsAndImages();
-
-    products = getPublishedProducts(allProducts).map((product) => {
-      const slug = String(product.slug || "").trim().toLowerCase();
-      const productImages = imagesBySlug.get(slug) || [];
-      const primaryImage = getPrimaryProductImage(product, productImages);
-
-      return {
-        ...product,
-        image: primaryImage,
-      };
-    });
+    const { products, imagesBySlug } = await getProductsAndImages(1800);
+    preparedProducts = prepareProducts(products, imagesBySlug);
   } catch (error) {
     errorMessage =
       error instanceof Error ? error.message : "Unknown error occurred.";
@@ -124,7 +145,7 @@ export default async function ProductsPage() {
                 fontWeight: 700,
               }}
             >
-              {products.length} published products
+              {preparedProducts.length} published products
             </div>
           </div>
         </Container>
@@ -138,7 +159,7 @@ export default async function ProductsPage() {
             </div>
           </Container>
         </Section>
-      ) : products.length === 0 ? (
+      ) : preparedProducts.length === 0 ? (
         <Section>
           <Container>
             <div className="empty-state">
@@ -157,17 +178,13 @@ export default async function ProductsPage() {
             />
 
             <div className="cards-grid cards-grid--3">
-              {products.map((product, index) => (
+              {preparedProducts.map((product, index) => (
                 <ProductCard
                   key={`${product.slug || product.title || "product"}-${index}`}
-                  title={product.title || "Untitled Product"}
-                  description={
-                    product.short_description ||
-                    product.description ||
-                    "Explore this textile product within the Patak Textile catalog structure."
-                  }
-                  image={product.image || ""}
-                  href={`/products/${product.slug || ""}`}
+                  title={product.preparedTitle}
+                  description={product.preparedDescription}
+                  image={product.preparedImage}
+                  href={product.preparedHref}
                 />
               ))}
             </div>

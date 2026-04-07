@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSheetData } from "../../../../lib/sheets";
+import { findSheetItemsByField, getSheetData } from "../../../../lib/sheets";
 
 type ProductImageItem = Record<string, string>;
 
@@ -36,34 +36,41 @@ function sortImages(items: ProductImageItem[]) {
   });
 }
 
+function filterValidImages(items: ProductImageItem[]) {
+  return items.filter((item) => item && normalizeText(item.id));
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const productSlug = normalizeLower(searchParams.get("product_slug"));
 
-    const images = (await getSheetData("product_images", {
-      ttlSeconds: 300,
-    })) as ProductImageItem[];
-
-    let items = images.filter((item) => item && normalizeText(item.id));
+    let items: ProductImageItem[] = [];
 
     if (productSlug) {
-      items = items.filter(
-        (item) => normalizeLower(item.product_slug) === productSlug
-      );
+      items = (await findSheetItemsByField<ProductImageItem>(
+        "product_images",
+        "product_slug",
+        productSlug,
+        { ttlSeconds: 1800 }
+      )) as ProductImageItem[];
+    } else {
+      items = (await getSheetData("product_images", {
+        ttlSeconds: 1800,
+      })) as ProductImageItem[];
     }
 
-    items = sortImages(items);
+    const sortedItems = sortImages(filterValidImages(items));
 
     return NextResponse.json(
       {
         ok: true,
-        total: items.length,
-        items,
+        total: sortedItems.length,
+        items: sortedItems,
       },
       {
         headers: {
-          "Cache-Control": "no-store",
+          "Cache-Control": "private, max-age=60, stale-while-revalidate=1800",
         },
       }
     );

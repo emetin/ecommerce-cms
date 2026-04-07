@@ -9,15 +9,16 @@ type ProductCardProps = {
   collectionLabel?: string;
 };
 
+const FALLBACK_IMAGE =
+  "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1200&q=80";
+
 export default function ProductCard({
   title,
   description,
   image,
   href,
 }: ProductCardProps) {
-  const finalImage =
-    normalizeImageUrl(image?.trim()) ||
-    "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1200&q=80";
+  const finalImage = normalizeImageUrl(String(image || "").trim()) || FALLBACK_IMAGE;
 
   return (
     <Link
@@ -49,6 +50,8 @@ export default function ProductCard({
           <img
             src={finalImage}
             alt={title}
+            loading="lazy"
+            decoding="async"
             style={{
               width: "100%",
               aspectRatio: "1 / 0.82",

@@ -1,5 +1,9 @@
+function normalizeText(value?: string) {
+  return String(value || "").trim();
+}
+
 export function extractGoogleDriveFileId(url: string) {
-  const value = String(url || "").trim();
+  const value = normalizeText(url);
   if (!value) return "";
 
   const patterns = [
@@ -21,7 +25,7 @@ export function extractGoogleDriveFileId(url: string) {
 }
 
 export function normalizeImageUrl(url?: string) {
-  const value = String(url || "").trim();
+  const value = normalizeText(url);
   if (!value) return "";
 
   if (
@@ -42,8 +46,7 @@ export function normalizeImageUrl(url?: string) {
 export function normalizeImageUrls(urls: string[]) {
   return urls
     .map((item) => normalizeImageUrl(item))
-    .map((item) => item.trim())
-    .filter(Boolean);
+    .filter((item) => Boolean(normalizeText(item)));
 }
 
 export function getCanonicalImageKey(url?: string) {
@@ -55,7 +58,7 @@ export function getCanonicalImageKey(url?: string) {
     return `drive:${driveId}`;
   }
 
-  return normalized.trim().toLowerCase();
+  return normalized.toLowerCase();
 }
 
 export function areSameImageUrls(a?: string, b?: string) {

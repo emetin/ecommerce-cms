@@ -3,11 +3,15 @@ import { getSheetData } from "../../../../lib/sheets";
 
 type ProductItem = Record<string, string>;
 
-const ALLOWED_STATUS = ["published", "draft", "archived"];
+const ALLOWED_STATUS = ["published", "draft", "archived"] as const;
 const SHEET_NAME = "products";
 
-function normalize(value: unknown) {
-  return String(value || "").trim().toLowerCase();
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
 }
 
 function toListItem(item: ProductItem) {
@@ -24,12 +28,34 @@ function toListItem(item: ProductItem) {
   };
 }
 
+function matchesQuery(item: ProductItem, query: string) {
+  if (!query) return true;
+
+  const title = normalizeLower(item.title);
+  const slug = normalizeLower(item.slug);
+  const collectionSlug = normalizeLower(item.collection_slug);
+  const shortDescription = normalizeLower(item.short_description);
+
+  return (
+    title.includes(query) ||
+    slug.includes(query) ||
+    collectionSlug.includes(query) ||
+    shortDescription.includes(query)
+  );
+}
+
+function compareByUpdatedAtDesc(a: ProductItem, b: ProductItem) {
+  const aUpdated = normalizeText(a.updated_at);
+  const bUpdated = normalizeText(b.updated_at);
+  return bUpdated.localeCompare(aUpdated);
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    const statusParam = normalize(searchParams.get("status"));
-    const queryParam = normalize(searchParams.get("q"));
+    const statusParam = normalizeLower(searchParams.get("status"));
+    const queryParam = normalizeLower(searchParams.get("q"));
 
     const limitParam = Number(searchParams.get("limit") || "50");
     const pageParam = Number(searchParams.get("page") || "1");
@@ -42,46 +68,35 @@ export async function GET(req: Request) {
     const page =
       Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
 
+    if (
+      statusParam &&
+      !ALLOWED_STATUS.includes(
+        statusParam as (typeof ALLOWED_STATUS)[number]
+      )
+    ) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid status filter." },
+        { status: 400 }
+      );
+    }
+
     const products = (await getSheetData(SHEET_NAME, {
-      ttlSeconds: 300,
+      ttlSeconds: 1800,
     })) as ProductItem[];
 
-    let items = products.filter((item) => item && normalize(item.slug));
+    let items = products.filter((item) => item && normalizeLower(item.slug));
 
     if (statusParam) {
-      if (!ALLOWED_STATUS.includes(statusParam)) {
-        return NextResponse.json(
-          { ok: false, error: "Invalid status filter." },
-          { status: 400 }
-        );
-      }
-
       items = items.filter(
-        (item) => normalize(item.status) === statusParam
+        (item) => normalizeLower(item.status) === statusParam
       );
     }
 
     if (queryParam) {
-      items = items.filter((item) => {
-        const title = normalize(item.title);
-        const slug = normalize(item.slug);
-        const collectionSlug = normalize(item.collection_slug);
-        const shortDescription = normalize(item.short_description);
-
-        return (
-          title.includes(queryParam) ||
-          slug.includes(queryParam) ||
-          collectionSlug.includes(queryParam) ||
-          shortDescription.includes(queryParam)
-        );
-      });
+      items = items.filter((item) => matchesQuery(item, queryParam));
     }
 
-    items = items.sort((a, b) => {
-      const aUpdated = String(a.updated_at || "");
-      const bUpdated = String(b.updated_at || "");
-      return bUpdated.localeCompare(aUpdated);
-    });
+    items.sort(compareByUpdatedAtDesc);
 
     const total = items.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -102,7 +117,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "no-store",
+          "Cache-Control": "private, max-age=60, stale-while-revalidate=1800",
         },
       }
     );

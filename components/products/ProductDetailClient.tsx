@@ -1,18 +1,21 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import Container from "../ui/Container";
 import Section from "../ui/Section";
 import SectionHeading from "../ui/SectionHeading";
 import ButtonLink from "../ui/ButtonLink";
 import ProductCard from "../cards/ProductCard";
-import ProductGallery from "./ProductGallery";
-import ProductPurchasePanel, { VariantItem } from "./ProductPurchasePanel";
+import type { VariantItem } from "./ProductPurchasePanel";
 import {
   areSameImageUrls,
   normalizeImageUrl,
   uniqueImageUrls,
 } from "../../lib/image-url";
+
+const ProductGallery = dynamic(() => import("./ProductGallery"));
+const ProductPurchasePanel = dynamic(() => import("./ProductPurchasePanel"));
 
 type ProductItem = {
   id?: string;
@@ -126,7 +129,9 @@ function buildOrderedGallery(
   );
 
   const variantUrls = variants
-    .map((variant) => normalizeImageUrl(variant.variant_image || variant.image_id || ""))
+    .map((variant) =>
+      normalizeImageUrl(variant.variant_image || variant.image_id || "")
+    )
     .filter(Boolean);
 
   return uniqueImageUrls([
@@ -152,7 +157,9 @@ export default function ProductDetailClient({
   productImages,
   allProductImages,
 }: ProductDetailClientProps) {
-  const [selectedVariant, setSelectedVariant] = useState<VariantItem | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<VariantItem | null>(
+    null
+  );
   const [selectedImage, setSelectedImage] = useState("");
 
   const baseGalleryImages = useMemo(
@@ -167,7 +174,9 @@ export default function ProductDetailClient({
 
   const selectedVariantImage = useMemo(() => {
     return normalizeImageUrl(
-      String(selectedVariant?.variant_image || selectedVariant?.image_id || "").trim()
+      String(
+        selectedVariant?.variant_image || selectedVariant?.image_id || ""
+      ).trim()
     );
   }, [selectedVariant]);
 
@@ -200,6 +209,29 @@ export default function ProductDetailClient({
   }, [primaryImage, selectedImage, selectedVariantImage]);
 
   const collectionLabel = formatCollectionLabel(product.collection_slug);
+
+  const relatedPrimaryImageMap = useMemo(() => {
+    const imagesBySlug = new Map<string, ProductImageItem[]>();
+
+    for (const image of allProductImages) {
+      const slug = normalizeLower(image.product_slug);
+      if (!slug) continue;
+
+      const current = imagesBySlug.get(slug) || [];
+      current.push(image);
+      imagesBySlug.set(slug, current);
+    }
+
+    const result = new Map<string, string>();
+
+    for (const item of relatedProducts) {
+      const slug = normalizeLower(item.slug);
+      const relatedImages = imagesBySlug.get(slug) || [];
+      result.set(slug, getPrimaryProductImage(item, relatedImages));
+    }
+
+    return result;
+  }, [allProductImages, relatedProducts]);
 
   return (
     <>
@@ -437,15 +469,8 @@ export default function ProductDetailClient({
             <div className="cards-grid cards-grid--3">
               {relatedProducts.map((item, index) => {
                 const relatedSlug = normalizeLower(item.slug);
-
-                const relatedImages = allProductImages.filter(
-                  (image) => normalizeLower(image.product_slug) === relatedSlug
-                );
-
-                const relatedPrimaryImage = getPrimaryProductImage(
-                  item,
-                  relatedImages
-                );
+                const relatedPrimaryImage =
+                  relatedPrimaryImageMap.get(relatedSlug) || "";
 
                 return (
                   <ProductCard

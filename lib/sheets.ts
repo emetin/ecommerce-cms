@@ -11,7 +11,7 @@ const FORMS_SHEET_ID = process.env.GOOGLE_FORMS_SHEET_ID;
 const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
-const DEFAULT_TTL_SECONDS = 300;
+const DEFAULT_TTL_SECONDS = 1800;
 const DEFAULT_RETRY_COUNT = 3;
 const DEFAULT_RETRY_DELAY_MS = 500;
 
@@ -28,6 +28,8 @@ if (!PRIVATE_KEY) {
 }
 
 let sheetsClientInstance: ReturnType<typeof google.sheets> | null = null;
+
+type SheetObject = Record<string, string>;
 
 function getAuth() {
   return new google.auth.JWT({
@@ -116,6 +118,14 @@ function clearSheetCache(sheetName: string) {
   deleteCacheByPrefix(`sheet:${sheetName}:`);
 }
 
+function normalizeCellValue(value: unknown) {
+  return String(value || "").trim();
+}
+
+function normalizeCellValueLower(value: unknown) {
+  return normalizeCellValue(value).toLowerCase();
+}
+
 export async function getSheetRows(
   sheetName: string,
   options?: { forceFresh?: boolean; ttlSeconds?: number }
@@ -175,7 +185,7 @@ export async function getSheetData(
   const cacheKey = getObjectsCacheKey(sheetName);
 
   if (!forceFresh) {
-    const cached = getCache<Record<string, string>[]>(cacheKey);
+    const cached = getCache<SheetObject[]>(cacheKey);
 
     if (cached) {
       return cached;
@@ -192,6 +202,36 @@ export async function getSheetData(
   setCache(cacheKey, data, ttlSeconds);
 
   return data;
+}
+
+export async function findSheetItemByField<T extends SheetObject>(
+  sheetName: string,
+  fieldName: string,
+  fieldValue: string,
+  options?: { forceFresh?: boolean; ttlSeconds?: number }
+) {
+  const data = (await getSheetData(sheetName, options)) as T[];
+  const normalizedTarget = normalizeCellValueLower(fieldValue);
+
+  return (
+    data.find(
+      (item) => normalizeCellValueLower(item[fieldName]) === normalizedTarget
+    ) || null
+  );
+}
+
+export async function findSheetItemsByField<T extends SheetObject>(
+  sheetName: string,
+  fieldName: string,
+  fieldValue: string,
+  options?: { forceFresh?: boolean; ttlSeconds?: number }
+) {
+  const data = (await getSheetData(sheetName, options)) as T[];
+  const normalizedTarget = normalizeCellValueLower(fieldValue);
+
+  return data.filter(
+    (item) => normalizeCellValueLower(item[fieldName]) === normalizedTarget
+  );
 }
 
 export async function appendSheetRow(sheetName: string, row: string[]) {

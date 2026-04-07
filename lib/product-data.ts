@@ -50,6 +50,14 @@ function isTrue(value?: string) {
   return normalizeLower(value) === "true";
 }
 
+function hasValidSlug(item: ProductItem) {
+  return Boolean(normalizeLower(item.slug));
+}
+
+function hasValidImageRecord(item: ProductImageItem) {
+  return Boolean(normalizeText(item.id) || normalizeText(item.image_url));
+}
+
 export function sortProductImages(images: ProductImageItem[]) {
   return [...images].sort((a, b) => {
     const aMain = isTrue(a.is_main);
@@ -67,26 +75,27 @@ export function sortProductImages(images: ProductImageItem[]) {
 }
 
 export function groupProductImagesBySlug(productImages: ProductImageItem[]) {
-  const map = new Map<string, ProductImageItem[]>();
+  const grouped = new Map<string, ProductImageItem[]>();
 
   for (const item of productImages) {
+    if (!hasValidImageRecord(item)) continue;
+
     const slug = normalizeLower(item.product_slug);
     if (!slug) continue;
 
-    const existing = map.get(slug);
-
-    if (existing) {
-      existing.push(item);
+    const current = grouped.get(slug);
+    if (current) {
+      current.push(item);
     } else {
-      map.set(slug, [item]);
+      grouped.set(slug, [item]);
     }
   }
 
-  for (const [slug, items] of map.entries()) {
-    map.set(slug, sortProductImages(items));
+  for (const [slug, items] of grouped.entries()) {
+    grouped.set(slug, sortProductImages(items));
   }
 
-  return map;
+  return grouped;
 }
 
 export function getPrimaryProductImage(
@@ -101,14 +110,22 @@ export function getPrimaryProductImage(
   );
 }
 
-export async function getProductsAndImages() {
-  const [productData, imageData] = await Promise.all([
-    getSheetData("products"),
-    getSheetData("product_images"),
+export async function getAllProducts(ttlSeconds = 1800) {
+  const productData = await getSheetData("products", { ttlSeconds });
+  return (productData as ProductItem[]).filter(hasValidSlug);
+}
+
+export async function getAllProductImages(ttlSeconds = 1800) {
+  const imageData = await getSheetData("product_images", { ttlSeconds });
+  return imageData as ProductImageItem[];
+}
+
+export async function getProductsAndImages(ttlSeconds = 1800) {
+  const [products, allProductImages] = await Promise.all([
+    getAllProducts(ttlSeconds),
+    getAllProductImages(ttlSeconds),
   ]);
 
-  const products = productData as ProductItem[];
-  const allProductImages = imageData as ProductImageItem[];
   const imagesBySlug = groupProductImagesBySlug(allProductImages);
 
   return {
@@ -120,7 +137,10 @@ export async function getProductsAndImages() {
 
 export function getPublishedProducts(products: ProductItem[]) {
   return products
-    .filter((item) => normalizeLower(item.status) === "published")
+    .filter(
+      (item) =>
+        hasValidSlug(item) && normalizeLower(item.status) === "published"
+    )
     .sort((a, b) => {
       const aFeatured = normalizeLower(a.featured) === "true";
       const bFeatured = normalizeLower(b.featured) === "true";

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import {
   type DriveEntityType,
-  uploadFileToDrive,
-} from "../../../lib/drive";
+  replaceFileOnDrive,
+} from "../../../../lib/drive";
 
 const ALLOWED_ENTITY_TYPES: DriveEntityType[] = [
   "product",
@@ -33,6 +33,7 @@ export async function POST(req: Request) {
     const file = formData.get("file");
     const entityTypeRaw = normalizeText(formData.get("entityType"));
     const alt = normalizeText(formData.get("alt"));
+    const oldFileId = normalizeText(formData.get("oldFileId"));
 
     if (!(file instanceof File)) {
       return NextResponse.json(
@@ -44,17 +45,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!entityTypeRaw) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'entityType is required. Use "product", "collection", or "blog".',
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!isValidEntityType(entityTypeRaw)) {
+    if (!entityTypeRaw || !isValidEntityType(entityTypeRaw)) {
       return NextResponse.json(
         {
           ok: false,
@@ -85,11 +76,16 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await uploadFileToDrive(file, entityTypeRaw, alt);
+    const result = await replaceFileOnDrive({
+      file,
+      entityType: entityTypeRaw,
+      alt,
+      oldFileId,
+    });
 
     return NextResponse.json({
       ok: true,
-      message: "Image uploaded successfully.",
+      message: "Image replaced successfully.",
       entity_type: result.entityType,
       file_id: result.fileId,
       file_name: result.fileName,
@@ -102,7 +98,7 @@ export async function POST(req: Request) {
       {
         ok: false,
         error:
-          error instanceof Error ? error.message : "Failed to upload image.",
+          error instanceof Error ? error.message : "Failed to replace image.",
       },
       { status: 500 }
     );

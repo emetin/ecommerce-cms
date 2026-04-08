@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import ImportPanel from "../../../../components/admin/ImportPanel";
 
 function makeSlug(text: string) {
@@ -26,6 +26,9 @@ export default function NewProductPage() {
   const [description, setDescription] = useState("");
   const [shortDescription, setShortDescription] = useState("");
   const [image, setImage] = useState("");
+  const [imageFileId, setImageFileId] = useState("");
+  const [imageAlt, setImageAlt] = useState("");
+  const [imageUploadedAt, setImageUploadedAt] = useState("");
   const [gallery, setGallery] = useState("");
   const [collectionSlug, setCollectionSlug] = useState("");
   const [status, setStatus] = useState("draft");
@@ -42,7 +45,74 @@ export default function NewProductPage() {
   const [resultError, setResultError] = useState("");
   const [createdSlug, setCreatedSlug] = useState("");
 
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState("");
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const suggestedSlug = useMemo(() => makeSlug(title), [title]);
+
+  async function handleImageUpload(
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImageUploadError("");
+    setImageUploading(true);
+
+    try {
+      if (!file.type.startsWith("image/")) {
+        throw new Error("Please select a valid image file.");
+      }
+
+      const maxSizeMb = 8;
+      if (file.size > maxSizeMb * 1024 * 1024) {
+        throw new Error(`Image must be smaller than ${maxSizeMb}MB.`);
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("entityType", "product");
+      formData.append("alt", title || file.name || "Product image");
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok || !data.url) {
+        throw new Error(data?.error || "Image upload failed.");
+      }
+
+      setImage(data.url || "");
+      setImageFileId(data.file_id || "");
+      setImageAlt(data.alt || title || file.name || "");
+      setImageUploadedAt(data.uploaded_at || "");
+    } catch (error) {
+      setImageUploadError(
+        error instanceof Error ? error.message : "Image upload failed."
+      );
+    } finally {
+      setImageUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
+
+  function clearImage() {
+    setImage("");
+    setImageFileId("");
+    setImageAlt("");
+    setImageUploadedAt("");
+    setImageUploadError("");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -66,6 +136,9 @@ export default function NewProductPage() {
           description,
           short_description: shortDescription,
           image,
+          image_file_id: imageFileId,
+          image_alt: imageAlt,
+          image_uploaded_at: imageUploadedAt,
           gallery,
           collection_slug: collectionSlug,
           status,
@@ -97,6 +170,9 @@ export default function NewProductPage() {
       setDescription("");
       setShortDescription("");
       setImage("");
+      setImageFileId("");
+      setImageAlt("");
+      setImageUploadedAt("");
       setGallery("");
       setCollectionSlug("");
       setStatus("draft");
@@ -107,6 +183,7 @@ export default function NewProductPage() {
       setProductCategory("");
       setType("");
       setTags("");
+      setImageUploadError("");
     } catch (error) {
       setResultError(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -271,11 +348,90 @@ export default function NewProductPage() {
             </div>
 
             <div style={{ gridColumn: "1 / -1" }}>
+              <label style={labelStyle}>Primary Product Image</label>
+
+              <div style={imageToolsWrapStyle}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  style={fileInputStyle}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  style={secondaryButtonStyle}
+                  disabled={imageUploading}
+                >
+                  {imageUploading ? "Uploading..." : "Upload Image"}
+                </button>
+
+                {image ? (
+                  <button
+                    type="button"
+                    onClick={clearImage}
+                    style={dangerSmallButtonStyle}
+                  >
+                    Remove Image
+                  </button>
+                ) : null}
+              </div>
+
+              {imageUploadError ? (
+                <div style={errorInlineStyle}>{imageUploadError}</div>
+              ) : null}
+
+              {image ? (
+                <div style={imagePreviewCardStyle}>
+                  <img
+                    src={image}
+                    alt={imageAlt || title || "Product image"}
+                    style={imagePreviewStyle}
+                  />
+                </div>
+              ) : (
+                <div style={emptyImageBoxStyle}>No image selected.</div>
+              )}
+            </div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
               <label style={labelStyle}>Image URL</label>
               <input
                 value={image}
                 onChange={(e) => setImage(e.target.value)}
                 placeholder="https://..."
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Image File ID</label>
+              <input
+                value={imageFileId}
+                onChange={(e) => setImageFileId(e.target.value)}
+                placeholder="Google Drive file id"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Image Alt</label>
+              <input
+                value={imageAlt}
+                onChange={(e) => setImageAlt(e.target.value)}
+                placeholder="Product image alt text"
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={labelStyle}>Image Uploaded At</label>
+              <input
+                value={imageUploadedAt}
+                onChange={(e) => setImageUploadedAt(e.target.value)}
+                placeholder="ISO date"
                 style={inputStyle}
               />
             </div>
@@ -371,7 +527,7 @@ export default function NewProductPage() {
         <ImportPanel
           endpoint="/api/shopify/import"
           description="Upload a CSV or JSON file, or paste content manually. This is suitable for Shopify, Zoho, or your own prepared files after adapting headers to the Patak structure."
-          csvHeader="id,title,slug,description,short_description,image,gallery,collection_slug,status,featured,created_at,updated_at,seo_title,seo_description,vendor,product_category,type,tags"
+          csvHeader="id,title,slug,description,short_description,image,image_file_id,image_alt,image_uploaded_at,gallery,collection_slug,status,featured,seo_title,seo_description,created_at,updated_at,vendor,product_category,type,tags"
         />
       </div>
     </div>
@@ -489,6 +645,61 @@ const inputStyle: React.CSSProperties = {
   fontSize: 15,
 };
 
+const imageToolsWrapStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  alignItems: "center",
+  marginBottom: 14,
+};
+
+const fileInputStyle: React.CSSProperties = {
+  display: "none",
+};
+
+const imagePreviewCardStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 320,
+  borderRadius: 20,
+  overflow: "hidden",
+  border: "1px solid #e5ddd2",
+  background: "#faf8f4",
+  marginTop: 6,
+};
+
+const imagePreviewStyle: React.CSSProperties = {
+  width: "100%",
+  aspectRatio: "1 / 1",
+  objectFit: "cover",
+  display: "block",
+};
+
+const emptyImageBoxStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 320,
+  minHeight: 180,
+  borderRadius: 20,
+  border: "1px dashed #d9cfbf",
+  background: "#faf8f4",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "#7b7367",
+  fontWeight: 700,
+  marginTop: 6,
+  padding: 16,
+  textAlign: "center",
+};
+
+const errorInlineStyle: React.CSSProperties = {
+  marginBottom: 12,
+  padding: 12,
+  borderRadius: 12,
+  background: "#fff1f1",
+  border: "1px solid #efc9c9",
+  color: "#7a2222",
+};
+
 const buttonRowStyle: React.CSSProperties = {
   display: "flex",
   gap: 12,
@@ -556,6 +767,20 @@ const secondarySmallButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   textDecoration: "none",
   fontSize: 14,
+};
+
+const dangerSmallButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 42,
+  padding: "0 14px",
+  borderRadius: 12,
+  border: "1px solid #e5c9c9",
+  background: "#fff5f5",
+  color: "#8f2d2d",
+  fontWeight: 700,
+  cursor: "pointer",
 };
 
 const successBoxStyle: React.CSSProperties = {

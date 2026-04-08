@@ -7,6 +7,9 @@ type CollectionRecord = {
   slug?: string;
   description?: string;
   image?: string;
+  image_file_id?: string;
+  image_alt?: string;
+  image_uploaded_at?: string;
   status?: string;
   created_at?: string;
   updated_at?: string;
@@ -49,6 +52,9 @@ export async function POST(req: Request) {
     const slugInput = normalizeText(body?.slug);
     const description = normalizeText(body?.description);
     const image = normalizeText(body?.image);
+    const imageFileId = normalizeText(body?.image_file_id);
+    const imageAlt = normalizeText(body?.image_alt);
+    const imageUploadedAt = normalizeText(body?.image_uploaded_at);
     const status = normalizeStatus(body?.status);
     const seoTitle = normalizeText(body?.seo_title);
     const seoDescription = normalizeText(body?.seo_description);
@@ -132,6 +138,9 @@ export async function POST(req: Request) {
       finalSlug,
       description,
       image,
+      imageFileId,
+      imageAlt,
+      imageUploadedAt,
       status,
       now,
       now,
@@ -149,6 +158,9 @@ export async function POST(req: Request) {
           slug: finalSlug,
           description,
           image,
+          image_file_id: imageFileId,
+          image_alt: imageAlt,
+          image_uploaded_at: imageUploadedAt,
           status,
           created_at: now,
           updated_at: now,

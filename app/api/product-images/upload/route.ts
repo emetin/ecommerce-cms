@@ -1,12 +1,25 @@
 import { NextResponse } from "next/server";
-import { uploadProductImageToDrive } from "../../../../lib/drive";
+import { uploadFileToDrive } from "../../../../lib/drive";
+
+const ALLOWED_MIME_TYPES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+];
+
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
 
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
     const file = formData.get("file");
+    const alt = normalizeText(formData.get("alt"));
 
-    if (!file || !(file instanceof File)) {
+    if (!(file instanceof File)) {
       return NextResponse.json(
         {
           ok: false,
@@ -16,15 +29,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const allowedTypes = [
-      "image/jpeg",
-      "image/jpg",
-      "image/png",
-      "image/webp",
-      "image/gif",
-    ];
-
-    if (!allowedTypes.includes(file.type)) {
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
       return NextResponse.json(
         {
           ok: false,
@@ -34,14 +39,28 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await uploadProductImageToDrive(file);
+    const maxSizeMb = 8;
+    if (file.size > maxSizeMb * 1024 * 1024) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Image must be smaller than ${maxSizeMb}MB.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const result = await uploadFileToDrive(file, "product", alt);
 
     return NextResponse.json({
       ok: true,
-      message: "Image uploaded successfully to Google Drive.",
+      message: "Product image uploaded successfully to Google Drive.",
       file_id: result.fileId,
       file_name: result.fileName,
       url: result.url,
+      alt: result.alt,
+      uploaded_at: result.uploadedAt,
+      entity_type: result.entityType,
     });
   } catch (error) {
     return NextResponse.json(

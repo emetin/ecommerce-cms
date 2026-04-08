@@ -25,6 +25,9 @@ export default function NewCollectionPage() {
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [image, setImage] = useState("");
+  const [imageFileId, setImageFileId] = useState("");
+  const [imageAlt, setImageAlt] = useState("");
+  const [imageUploadedAt, setImageUploadedAt] = useState("");
   const [status, setStatus] = useState("draft");
   const [seoTitle, setSeoTitle] = useState("");
   const [seoDescription, setSeoDescription] = useState("");
@@ -54,13 +57,15 @@ export default function NewCollectionPage() {
         throw new Error("Please select a valid image file.");
       }
 
-      const maxSizeMb = 4;
+      const maxSizeMb = 8;
       if (file.size > maxSizeMb * 1024 * 1024) {
         throw new Error(`Image must be smaller than ${maxSizeMb}MB.`);
       }
 
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("entityType", "collection");
+      formData.append("alt", title || file.name || "Collection image");
 
       const response = await fetch("/api/upload", {
         method: "POST",
@@ -73,7 +78,10 @@ export default function NewCollectionPage() {
         throw new Error(data?.error || "Image upload failed.");
       }
 
-      setImage(data.url);
+      setImage(data.url || "");
+      setImageFileId(data.file_id || "");
+      setImageAlt(data.alt || title || file.name || "");
+      setImageUploadedAt(data.uploaded_at || "");
     } catch (error) {
       setImageUploadError(
         error instanceof Error ? error.message : "Image upload failed."
@@ -88,6 +96,9 @@ export default function NewCollectionPage() {
 
   function clearImage() {
     setImage("");
+    setImageFileId("");
+    setImageAlt("");
+    setImageUploadedAt("");
     setImageUploadError("");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -112,6 +123,9 @@ export default function NewCollectionPage() {
           slug,
           description,
           image,
+          image_file_id: imageFileId,
+          image_alt: imageAlt,
+          image_uploaded_at: imageUploadedAt,
           status,
           seo_title: seoTitle,
           seo_description: seoDescription,
@@ -130,6 +144,9 @@ export default function NewCollectionPage() {
       setSlug("");
       setDescription("");
       setImage("");
+      setImageFileId("");
+      setImageAlt("");
+      setImageUploadedAt("");
       setStatus("draft");
       setSeoTitle("");
       setSeoDescription("");
@@ -269,7 +286,7 @@ export default function NewCollectionPage() {
                 <div style={imagePreviewCardStyle}>
                   <img
                     src={image}
-                    alt={title || "Collection image"}
+                    alt={imageAlt || title || "Collection image"}
                     style={imagePreviewStyle}
                   />
                 </div>
@@ -285,6 +302,36 @@ export default function NewCollectionPage() {
                 onChange={(e) => setImage(e.target.value)}
                 placeholder="Paste image URL here or use Upload Image"
                 style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Image File ID</label>
+              <input
+                value={imageFileId}
+                onChange={(e) => setImageFileId(e.target.value)}
+                placeholder="Google Drive file id"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Image Alt</label>
+              <input
+                value={imageAlt}
+                onChange={(e) => setImageAlt(e.target.value)}
+                placeholder="Collection image alt text"
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={labelStyle}>Image Uploaded At</label>
+              <input
+                value={imageUploadedAt}
+                onChange={(e) => setImageUploadedAt(e.target.value)}
+                placeholder="ISO date"
+                style={inputStyle}
               />
             </div>
 
@@ -336,7 +383,7 @@ export default function NewCollectionPage() {
         <ImportPanel
           endpoint="/api/collections/import"
           description="Upload a CSV or JSON file, or paste content manually. This panel is suitable for collection data adapted to the Patak structure."
-          csvHeader="id,title,slug,description,image,status,created_at,updated_at,seo_title,seo_description"
+          csvHeader="id,title,slug,description,image,image_file_id,image_alt,image_uploaded_at,status,created_at,updated_at,seo_title,seo_description"
         />
       </div>
     </div>

@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useMemo, useRef, useState } from "react";
-import { normalizeImageUrl } from "../../../../../lib/image-url";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ProductImageItem = {
   id?: string;
   product_slug?: string;
   image_url?: string;
+  image_file_id?: string;
+  image_uploaded_at?: string;
   sort_order?: string;
   alt_text?: string;
   is_main?: string;
@@ -15,19 +16,11 @@ type ProductImageItem = {
   updated_at?: string;
 };
 
-type UploadQueueItem = {
-  localId: string;
-  file: File;
-  preview: string;
-  alt_text: string;
-  is_main: boolean;
+type ProductItem = {
+  title?: string;
+  slug?: string;
+  image?: string;
 };
-
-const MAX_BULK_UPLOAD = 10;
-
-function normalizeText(value: unknown) {
-  return String(value || "").trim();
-}
 
 function isTrue(value?: string) {
   return String(value || "").trim().toLowerCase() === "true";
@@ -38,8 +31,8 @@ function toSafeOrder(value?: string) {
   return Number.isFinite(num) ? num : 999999;
 }
 
-function sortImages(images: ProductImageItem[]) {
-  return [...images].sort((a, b) => {
+function sortImages(items: ProductImageItem[]) {
+  return [...items].sort((a, b) => {
     const aMain = isTrue(a.is_main);
     const bMain = isTrue(b.is_main);
 
@@ -51,13 +44,6 @@ function sortImages(images: ProductImageItem[]) {
   });
 }
 
-function moveItem<T>(array: T[], fromIndex: number, toIndex: number) {
-  const copy = [...array];
-  const [item] = copy.splice(fromIndex, 1);
-  copy.splice(toIndex, 0, item);
-  return copy;
-}
-
 export default function AdminProductImagesPage({
   params,
 }: {
@@ -66,341 +52,287 @@ export default function AdminProductImagesPage({
   const { slug: rawSlug } = use(params);
   const slug = decodeURIComponent(rawSlug);
 
+  const [product, setProduct] = useState<ProductItem | null>(null);
   const [items, setItems] = useState<ProductImageItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [pageError, setPageError] = useState("");
 
-  const [editingId, setEditingId] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [sortOrder, setSortOrder] = useState("");
-  const [altText, setAltText] = useState("");
-  const [isMain, setIsMain] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [resultMessage, setResultMessage] = useState("");
+  const [resultError, setResultError] = useState("");
 
-  const [saving, setSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState("");
-  const [saveError, setSaveError] = useState("");
+  const [newAltText, setNewAltText] = useState("");
+  const [newSortOrder, setNewSortOrder] = useState("");
+  const [newIsMain, setNewIsMain] = useState("false");
 
-  const [deleteLoadingId, setDeleteLoadingId] = useState("");
-  const [fileUploading, setFileUploading] = useState(false);
-  const [bulkUploading, setBulkUploading] = useState(false);
-  const [reorderSaving, setReorderSaving] = useState(false);
+  const [replacingId, setReplacingId] = useState("");
+  const [deletingId, setDeletingId] = useState("");
+  const [savingId, setSavingId] = useState("");
 
-  const [queue, setQueue] = useState<UploadQueueItem[]>([]);
-  const dragIndexRef = useRef<number | null>(null);
+  const createInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
 
-  async function loadImages() {
+  const sortedItems = useMemo(() => sortImages(items), [items]);
+
+  const loadPage = useCallback(async () => {
     try {
       setLoading(true);
-      setErrorMessage("");
+      setPageError("");
 
-      const response = await fetch(
-        `/api/product-images/list?product_slug=${encodeURIComponent(slug)}`,
-        { cache: "no-store" }
-      );
+      const [productResponse, imagesResponse] = await Promise.all([
+        fetch(`/api/products/get?slug=${encodeURIComponent(slug)}`, {
+          cache: "no-store",
+        }),
+        fetch(`/api/product-images/list?product_slug=${encodeURIComponent(slug)}`, {
+          cache: "no-store",
+        }),
+      ]);
 
-      const data = await response.json();
+      const productData = await productResponse.json();
+      const imagesData = await imagesResponse.json();
 
-      if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to load product images.");
+      if (!productResponse.ok || !productData.ok) {
+        throw new Error(productData?.error || "Failed to load product.");
       }
 
-      setItems(sortImages(data.items || []));
+      if (!imagesResponse.ok || !imagesData.ok) {
+        throw new Error(imagesData?.error || "Failed to load product images.");
+      }
+
+      setProduct(productData.item || null);
+      setItems(Array.isArray(imagesData.items) ? imagesData.items : []);
     } catch (error) {
-      setErrorMessage(
+      setPageError(
         error instanceof Error ? error.message : "An unknown error occurred."
       );
     } finally {
       setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    loadImages();
   }, [slug]);
 
-  const hasPendingReorder = useMemo(() => {
-    return items.some(
-      (item, index) => Number(item.sort_order || "999") !== index + 1
-    );
-  }, [items]);
+  useEffect(() => {
+    loadPage();
+  }, [loadPage]);
 
-  function resetForm() {
-    setEditingId("");
-    setImageUrl("");
-    setSortOrder("");
-    setAltText("");
-    setIsMain(false);
-    setSaveError("");
-    setSaveMessage("");
+  async function syncProductMainImage(nextItems: ProductImageItem[]) {
+    const mainItem =
+      nextItems.find((item) => isTrue(item.is_main)) ||
+      sortImages(nextItems)[0] ||
+      null;
+
+    await fetch("/api/products/update", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        slug,
+        title: product?.title || slug,
+        image: mainItem?.image_url || "",
+        image_file_id: mainItem?.image_file_id || "",
+        image_alt: mainItem?.alt_text || "",
+        image_uploaded_at: mainItem?.image_uploaded_at || "",
+      }),
+    });
   }
 
-  function handleEdit(item: ProductImageItem) {
-    setEditingId(String(item.id || ""));
-    setImageUrl(String(item.image_url || ""));
-    setSortOrder(String(item.sort_order || ""));
-    setAltText(String(item.alt_text || ""));
-    setIsMain(String(item.is_main || "").trim().toLowerCase() === "true");
-    setSaveError("");
-    setSaveMessage("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
+  async function handleCreateImage(
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  async function handleFileUpload(file: File) {
+    setUploadError("");
+    setResultMessage("");
+    setResultError("");
+    setUploading(true);
+
     try {
-      setFileUploading(true);
-      setSaveError("");
-      setSaveMessage("");
-
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("entityType", "product");
+      formData.append("alt", newAltText || file.name || "Product gallery image");
 
-      const response = await fetch("/api/upload/image", {
+      const uploadResponse = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
 
-      const data = await response.json();
+      const uploadData = await uploadResponse.json();
 
-      if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Upload failed.");
+      if (!uploadResponse.ok || !uploadData.ok || !uploadData.url) {
+        throw new Error(uploadData?.error || "Failed to upload image.");
       }
 
-      setImageUrl(data.url || "");
-      setSaveMessage("Image uploaded successfully. Save it to continue.");
-    } catch (error) {
-      setSaveError(
-        error instanceof Error ? error.message : "An unknown error occurred."
-      );
-    } finally {
-      setFileUploading(false);
-    }
-  }
-
-  function handleQueueFiles(files: FileList | null) {
-    if (!files?.length) return;
-
-    const incoming = Array.from(files);
-
-    if (queue.length + incoming.length > MAX_BULK_UPLOAD) {
-      setSaveError(`You can upload up to ${MAX_BULK_UPLOAD} images at once.`);
-      return;
-    }
-
-    const nextItems: UploadQueueItem[] = incoming.map((file, index) => ({
-      localId: `${Date.now()}-${index}-${file.name}`,
-      file,
-      preview: URL.createObjectURL(file),
-      alt_text: "",
-      is_main: false,
-    }));
-
-    setSaveError("");
-    setQueue((prev) => [...prev, ...nextItems]);
-  }
-
-  function updateQueueItem(localId: string, patch: Partial<UploadQueueItem>) {
-    setQueue((prev) => {
-      let next = prev.map((item) =>
-        item.localId === localId ? { ...item, ...patch } : item
-      );
-
-      if (patch.is_main === true) {
-        next = next.map((item) =>
-          item.localId === localId
-            ? { ...item, is_main: true }
-            : { ...item, is_main: false }
-        );
-      }
-
-      return next;
-    });
-  }
-
-  function removeQueueItem(localId: string) {
-    setQueue((prev) => {
-      const target = prev.find((item) => item.localId === localId);
-      if (target?.preview) {
-        URL.revokeObjectURL(target.preview);
-      }
-      return prev.filter((item) => item.localId !== localId);
-    });
-  }
-
-  async function uploadSingleFile(file: File) {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await fetch("/api/upload/image", {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = await response.json();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(data?.error || "Upload failed.");
-    }
-
-    return String(data.url || "").trim();
-  }
-
-  async function handleBulkUpload() {
-    if (queue.length === 0) return;
-
-    try {
-      setBulkUploading(true);
-      setSaveError("");
-      setSaveMessage("");
-
-      for (let i = 0; i < queue.length; i += 1) {
-        const queueItem = queue[i];
-        const uploadedUrl = await uploadSingleFile(queueItem.file);
-
-        const response = await fetch("/api/product-images/create", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            product_slug: slug,
-            image_url: uploadedUrl,
-            sort_order: String(items.length + i + 1),
-            alt_text: queueItem.alt_text,
-            is_main: queueItem.is_main ? "true" : "false",
-          }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.ok) {
-          throw new Error(data?.error || "Failed to create product image.");
-        }
-      }
-
-      queue.forEach((item) => {
-        if (item.preview) {
-          URL.revokeObjectURL(item.preview);
-        }
-      });
-
-      setQueue([]);
-      setSaveMessage("Bulk upload completed successfully.");
-      await loadImages();
-    } catch (error) {
-      setSaveError(
-        error instanceof Error ? error.message : "Bulk upload failed."
-      );
-    } finally {
-      setBulkUploading(false);
-    }
-  }
-
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-
-    setSaving(true);
-    setSaveMessage("");
-    setSaveError("");
-
-    try {
-      const endpoint = editingId
-        ? "/api/product-images/update"
-        : "/api/product-images/create";
-
-      const payload = editingId
-        ? {
-            id: editingId,
-            image_url: imageUrl,
-            sort_order: sortOrder,
-            alt_text: altText,
-            is_main: isMain ? "true" : "false",
-          }
-        : {
-            product_slug: slug,
-            image_url: imageUrl,
-            sort_order: sortOrder || String(items.length + 1),
-            alt_text: altText,
-            is_main: isMain ? "true" : "false",
-          };
-
-      const response = await fetch(endpoint, {
+      const createResponse = await fetch("/api/product-images/create", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          product_slug: slug,
+          image_url: uploadData.url,
+          image_file_id: uploadData.file_id,
+          image_uploaded_at: uploadData.uploaded_at,
+          sort_order: newSortOrder,
+          alt_text: newAltText || uploadData.alt || "",
+          is_main: newIsMain,
+        }),
       });
 
-      const data = await response.json();
+      const createData = await createResponse.json();
 
-      if (!response.ok || !data.ok) {
-        throw new Error(
-          data?.error ||
-            (editingId ? "Failed to update image." : "Failed to create image.")
-        );
+      if (!createResponse.ok || !createData.ok) {
+        throw new Error(createData?.error || "Failed to save gallery image.");
       }
 
-      setSaveMessage(
-        editingId
-          ? "Product image updated successfully."
-          : "Product image added successfully."
-      );
+      const nextItems = [...items, createData.item];
+      setItems(nextItems);
 
-      resetForm();
-      await loadImages();
+      if (String(newIsMain) === "true") {
+        await handleSetMain(createData.item.id);
+      } else {
+        await syncProductMainImage(nextItems);
+      }
+
+      setNewAltText("");
+      setNewSortOrder("");
+      setNewIsMain("false");
+      setResultMessage("Gallery image added successfully.");
     } catch (error) {
-      setSaveError(
-        error instanceof Error ? error.message : "An unknown error occurred."
+      setUploadError(
+        error instanceof Error ? error.message : "Failed to add gallery image."
       );
     } finally {
-      setSaving(false);
+      setUploading(false);
+      if (createInputRef.current) {
+        createInputRef.current.value = "";
+      }
     }
   }
 
-  async function handleDelete(id?: string) {
-    if (!id) return;
+  async function handleReplaceImage(
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = e.target.files?.[0];
+    if (!file || !replacingId) return;
 
+    setUploadError("");
+    setResultMessage("");
+    setResultError("");
+    setUploading(true);
+
+    try {
+      const current = items.find((item) => item.id === replacingId);
+
+      if (!current) {
+        throw new Error("Selected gallery image was not found.");
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("entityType", "product");
+      formData.append("alt", current.alt_text || file.name || "Product gallery image");
+      formData.append("oldFileId", current.image_file_id || "");
+
+      const replaceResponse = await fetch("/api/media/replace", {
+        method: "POST",
+        body: formData,
+      });
+
+      const replaceData = await replaceResponse.json();
+
+      if (!replaceResponse.ok || !replaceData.ok || !replaceData.url) {
+        throw new Error(replaceData?.error || "Failed to replace gallery image.");
+      }
+
+      const updateResponse = await fetch("/api/product-images/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: current.id,
+          product_slug: current.product_slug,
+          image_url: replaceData.url,
+          image_file_id: replaceData.file_id,
+          image_uploaded_at: replaceData.uploaded_at,
+          sort_order: current.sort_order,
+          alt_text: current.alt_text,
+          is_main: current.is_main,
+        }),
+      });
+
+      const updateData = await updateResponse.json();
+
+      if (!updateResponse.ok || !updateData.ok) {
+        throw new Error(updateData?.error || "Failed to update gallery image row.");
+      }
+
+      const nextItems = items.map((item) =>
+        item.id === replacingId ? updateData.item : item
+      );
+
+      setItems(nextItems);
+      await syncProductMainImage(nextItems);
+      setResultMessage("Gallery image replaced successfully.");
+    } catch (error) {
+      setUploadError(
+        error instanceof Error ? error.message : "Failed to replace gallery image."
+      );
+    } finally {
+      setUploading(false);
+      setReplacingId("");
+      if (replaceInputRef.current) {
+        replaceInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handleDeleteImage(item: ProductImageItem) {
     const confirmed = window.confirm(
-      "Are you sure you want to delete this image?"
+      "Are you sure you want to delete this gallery image?"
     );
 
     if (!confirmed) return;
 
     try {
-      setDeleteLoadingId(id);
+      setDeletingId(item.id || "");
 
       const response = await fetch("/api/product-images/delete", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({
+          id: item.id,
+          delete_drive_file: true,
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to delete image.");
+        throw new Error(data?.error || "Failed to delete gallery image.");
       }
 
-      if (editingId === id) {
-        resetForm();
-      }
-
-      await loadImages();
+      const nextItems = items.filter((image) => image.id !== item.id);
+      setItems(nextItems);
+      await syncProductMainImage(nextItems);
+      setResultMessage("Gallery image deleted successfully.");
     } catch (error) {
-      alert(
-        error instanceof Error ? error.message : "An unknown error occurred."
+      setResultError(
+        error instanceof Error ? error.message : "Failed to delete gallery image."
       );
     } finally {
-      setDeleteLoadingId("");
+      setDeletingId("");
     }
   }
 
-  async function handleSetMain(item: ProductImageItem) {
+  async function handleSaveImage(item: ProductImageItem) {
     try {
-      setSaveError("");
-      setSaveMessage("");
+      setSavingId(item.id || "");
 
       const response = await fetch("/api/product-images/update", {
         method: "POST",
@@ -409,60 +341,53 @@ export default function AdminProductImagesPage({
         },
         body: JSON.stringify({
           id: item.id,
+          product_slug: item.product_slug,
           image_url: item.image_url,
+          image_file_id: item.image_file_id,
+          image_uploaded_at: item.image_uploaded_at,
           sort_order: item.sort_order,
           alt_text: item.alt_text,
-          is_main: "true",
+          is_main: item.is_main,
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to set main image.");
+        throw new Error(data?.error || "Failed to save gallery image.");
       }
 
-      setSaveMessage("Main image updated successfully.");
-      await loadImages();
-    } catch (error) {
-      setSaveError(
-        error instanceof Error ? error.message : "Failed to set main image."
+      const nextItems = items.map((image) =>
+        image.id === item.id ? data.item : image
       );
+
+      setItems(nextItems);
+      await syncProductMainImage(nextItems);
+      setResultMessage("Gallery image updated successfully.");
+    } catch (error) {
+      setResultError(
+        error instanceof Error ? error.message : "Failed to update gallery image."
+      );
+    } finally {
+      setSavingId("");
     }
   }
 
-  function handleMoveUp(index: number) {
-    if (index <= 0) return;
-    setItems((prev) => moveItem(prev, index, index - 1));
-  }
+  async function handleSetMain(targetId?: string) {
+    if (!targetId) return;
 
-  function handleMoveDown(index: number) {
-    setItems((prev) => {
-      if (index >= prev.length - 1) return prev;
-      return moveItem(prev, index, index + 1);
-    });
-  }
-
-  function handleDragStart(index: number) {
-    dragIndexRef.current = index;
-  }
-
-  function handleDrop(index: number) {
-    const dragIndex = dragIndexRef.current;
-    if (dragIndex === null || dragIndex === index) return;
-
-    setItems((prev) => moveItem(prev, dragIndex, index));
-    dragIndexRef.current = null;
-  }
-
-  async function handleSaveReorder() {
     try {
-      setReorderSaving(true);
-      setSaveError("");
-      setSaveMessage("");
+      setResultMessage("");
+      setResultError("");
 
-      for (let i = 0; i < items.length; i += 1) {
-        const item = items[i];
+      const updatedItems = [...items];
+
+      for (const item of updatedItems) {
+        const nextIsMain = item.id === targetId ? "true" : "false";
+
+        if (String(item.is_main || "false") === nextIsMain) {
+          continue;
+        }
 
         const response = await fetch("/api/product-images/update", {
           method: "POST",
@@ -471,29 +396,44 @@ export default function AdminProductImagesPage({
           },
           body: JSON.stringify({
             id: item.id,
+            product_slug: item.product_slug,
             image_url: item.image_url,
-            sort_order: String(i + 1),
+            image_file_id: item.image_file_id,
+            image_uploaded_at: item.image_uploaded_at,
+            sort_order: item.sort_order,
             alt_text: item.alt_text,
-            is_main: isTrue(item.is_main) ? "true" : "false",
+            is_main: nextIsMain,
           }),
         });
 
         const data = await response.json();
 
         if (!response.ok || !data.ok) {
-          throw new Error(data?.error || "Failed to save reorder.");
+          throw new Error(data?.error || "Failed to set main image.");
+        }
+
+        const index = updatedItems.findIndex((x) => x.id === item.id);
+        if (index !== -1) {
+          updatedItems[index] = data.item;
         }
       }
 
-      setSaveMessage("Image order updated successfully.");
-      await loadImages();
+      setItems(updatedItems);
+      await syncProductMainImage(updatedItems);
+      setResultMessage("Main image updated successfully.");
     } catch (error) {
-      setSaveError(
-        error instanceof Error ? error.message : "Failed to save image order."
+      setResultError(
+        error instanceof Error ? error.message : "Failed to set main image."
       );
-    } finally {
-      setReorderSaving(false);
     }
+  }
+
+  if (loading) {
+    return <div style={cardStyle}>Loading...</div>;
+  }
+
+  if (pageError) {
+    return <div style={errorBoxStyle}>{pageError}</div>;
   }
 
   return (
@@ -503,379 +443,225 @@ export default function AdminProductImagesPage({
           <Link href={`/admin/products/${slug}`} style={backLinkStyle}>
             ← Back to Product
           </Link>
-          <h1 style={titleStyle}>Product Images</h1>
+          <h1 style={titleStyle}>Image Manager</h1>
           <p style={subtitleStyle}>
-            Manage gallery images, choose the main image, bulk upload files,
-            and reorder the gallery with drag & drop or quick controls.
+            Manage gallery images for <strong>{product?.title || slug}</strong>.
           </p>
+        </div>
+
+        <div style={headerActionsStyle}>
+          <Link href={`/products/${slug}`} style={secondaryButtonStyle}>
+            View Product
+          </Link>
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "0.95fr 1.05fr",
-          gap: 24,
-        }}
-      >
-        <form onSubmit={handleSubmit} style={cardStyle}>
-          <div style={formHeaderRowStyle}>
-            <h2 style={sectionTitleStyle}>
-              {editingId ? "Edit Image" : "Add Image"}
-            </h2>
+      <div style={cardStyle}>
+        <h2 style={sectionTitleStyle}>Add New Gallery Image</h2>
 
-            {editingId ? (
-              <button
-                type="button"
-                onClick={resetForm}
-                style={secondaryButtonStyle}
-              >
-                Cancel Edit
-              </button>
-            ) : null}
-          </div>
-
-          <div style={noticeBoxStyle}>
-            The image marked as <strong>Main Image</strong> becomes the product’s
-            primary display image across listing and detail pages.
-          </div>
-
-          <div style={formGridStyle}>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Upload from Computer</label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    handleFileUpload(file);
-                  }
-                }}
-                style={inputStyle}
-              />
-              {fileUploading ? (
-                <div style={helperTextStyle}>Uploading...</div>
-              ) : null}
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Image URL</label>
-              <input
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                placeholder="https://..."
-                style={inputStyle}
-                required
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Sort Order</label>
-              <input
-                value={sortOrder}
-                onChange={(e) => setSortOrder(e.target.value)}
-                placeholder="1"
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Alt Text</label>
-              <input
-                value={altText}
-                onChange={(e) => setAltText(e.target.value)}
-                placeholder="Luxury towel detail"
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={checkboxWrapStyle}>
-                <input
-                  type="checkbox"
-                  checked={isMain}
-                  onChange={(e) => setIsMain(e.target.checked)}
-                />
-                <span>Set as main image</span>
-              </label>
-            </div>
-
-            {imageUrl ? (
-              <div style={{ gridColumn: "1 / -1" }}>
-                <label style={labelStyle}>Preview</label>
-                <div style={previewWrapStyle}>
-                  <img
-                    src={normalizeImageUrl(imageUrl)}
-                    alt={altText || "Preview"}
-                    style={previewImageStyle}
-                  />
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div style={buttonRowStyle}>
-            <button type="submit" style={primaryButtonStyle} disabled={saving}>
-              {saving
-                ? editingId
-                  ? "Updating..."
-                  : "Saving..."
-                : editingId
-                  ? "Update Image"
-                  : "Add Image"}
-            </button>
-          </div>
-
-          {saveMessage ? <div style={successBoxStyle}>{saveMessage}</div> : null}
-          {saveError ? <div style={errorBoxStyle}>{saveError}</div> : null}
-        </form>
-
-        <div style={cardStyle}>
-          <h2 style={sectionTitleStyle}>Bulk Upload</h2>
-          <div style={noticeBoxStyle}>
-            Select up to 10 images, add alt text, and upload all in one step.
-          </div>
-
+        <div style={formGridStyle}>
           <div>
-            <label style={labelStyle}>
-              Upload Multiple Images (max {MAX_BULK_UPLOAD})
-            </label>
+            <label style={labelStyle}>Alt Text</label>
             <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(e) => handleQueueFiles(e.target.files)}
+              value={newAltText}
+              onChange={(e) => setNewAltText(e.target.value)}
               style={inputStyle}
+              placeholder="Gallery image alt text"
             />
           </div>
 
-          {queue.length > 0 ? (
-            <>
-              <div
-                style={{
-                  marginTop: 12,
-                  fontSize: 13,
-                  color: "#6f6559",
-                  fontWeight: 700,
-                }}
-              >
-                {queue.length} / {MAX_BULK_UPLOAD} images ready
-              </div>
-
-              <div style={queueGridStyle}>
-                {queue.map((item, index) => (
-                  <div key={item.localId} style={queueCardStyle}>
-                    <img
-                      src={item.preview}
-                      alt={item.file.name}
-                      style={queueImageStyle}
-                    />
-
-                    <div style={{ display: "grid", gap: 10 }}>
-                      <div style={queueTitleStyle}>
-                        {index + 1}. {item.file.name}
-                      </div>
-
-                      <input
-                        value={item.alt_text}
-                        onChange={(e) =>
-                          updateQueueItem(item.localId, {
-                            alt_text: e.target.value,
-                          })
-                        }
-                        placeholder="Alt text"
-                        style={smallInputStyle}
-                      />
-
-                      <label style={checkboxWrapStyle}>
-                        <input
-                          type="checkbox"
-                          checked={item.is_main}
-                          onChange={(e) =>
-                            updateQueueItem(item.localId, {
-                              is_main: e.target.checked,
-                            })
-                          }
-                        />
-                        <span>Main image</span>
-                      </label>
-
-                      <button
-                        type="button"
-                        onClick={() => removeQueueItem(item.localId)}
-                        style={dangerSmallButtonStyle}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={buttonRowStyle}>
-                <button
-                  type="button"
-                  onClick={handleBulkUpload}
-                  style={primaryButtonStyle}
-                  disabled={bulkUploading}
-                >
-                  {bulkUploading ? "Uploading..." : "Upload All"}
-                </button>
-              </div>
-            </>
-          ) : (
-            <div style={emptyStateStyle}>No files in queue yet.</div>
-          )}
-        </div>
-      </div>
-
-      <div style={cardStyle}>
-        <div style={reorderHeaderStyle}>
           <div>
-            <h2 style={sectionTitleStyle}>Existing Images</h2>
-            <p style={subtitleStyle}>
-              Drag images to reorder them or use the small up/down buttons.
-            </p>
+            <label style={labelStyle}>Sort Order</label>
+            <input
+              value={newSortOrder}
+              onChange={(e) => setNewSortOrder(e.target.value)}
+              style={inputStyle}
+              placeholder="1"
+            />
           </div>
 
-          <button
-            type="button"
-            onClick={handleSaveReorder}
-            style={primaryButtonStyle}
-            disabled={reorderSaving || !hasPendingReorder}
-          >
-            {reorderSaving ? "Saving Order..." : "Save Order"}
-          </button>
+          <div>
+            <label style={labelStyle}>Is Main</label>
+            <select
+              value={newIsMain}
+              onChange={(e) => setNewIsMain(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="false">false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Upload</label>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <input
+                ref={createInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleCreateImage}
+                style={{ display: "none" }}
+              />
+
+              <button
+                type="button"
+                style={primaryButtonStyle}
+                onClick={() => createInputRef.current?.click()}
+                disabled={uploading}
+              >
+                {uploading ? "Uploading..." : "Upload New Image"}
+              </button>
+            </div>
+          </div>
         </div>
 
-        {loading ? (
-          <div>Loading...</div>
-        ) : errorMessage ? (
-          <div style={errorBoxStyle}>{errorMessage}</div>
-        ) : items.length === 0 ? (
-          <div style={emptyStateStyle}>No product images added yet.</div>
-        ) : (
-          <div style={listStyle}>
-            {items.map((item, index) => {
-              const itemIsMain =
-                String(item.is_main || "").trim().toLowerCase() === "true";
-
-              return (
-                <div
-                  key={item.id || index}
-                  style={listCardStyle}
-                  draggable
-                  onDragStart={() => handleDragStart(index)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => handleDrop(index)}
-                >
-                  <img
-                    src={normalizeImageUrl(item.image_url || "")}
-                    alt={item.alt_text || "Product image"}
-                    style={imageStyle}
-                  />
-
-                  <div style={{ display: "grid", gap: 8 }}>
-                    <div style={metaRowStyle}>
-                      <strong>Sort:</strong> {index + 1}
-                    </div>
-
-                    <div style={metaRowStyle}>
-                      <strong>Alt:</strong> {item.alt_text || "-"}
-                    </div>
-
-                    <div style={metaRowStyle}>
-                      <strong>Status:</strong>{" "}
-                      {itemIsMain ? (
-                        <span style={mainBadgeStyle}>Main Image</span>
-                      ) : (
-                        <span style={subtleBadgeStyle}>Gallery Image</span>
-                      )}
-                    </div>
-
-                    <div style={urlStyle}>{item.image_url || "-"}</div>
-
-                    <div style={miniReorderWrapStyle}>
-                      <button
-                        type="button"
-                        onClick={() => handleMoveUp(index)}
-                        style={iconSmallButtonStyle}
-                        disabled={index === 0}
-                      >
-                        ↑
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleMoveDown(index)}
-                        style={iconSmallButtonStyle}
-                        disabled={index === items.length - 1}
-                      >
-                        ↓
-                      </button>
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: 10,
-                        display: "flex",
-                        gap: 10,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      {!itemIsMain ? (
-                        <button
-                          type="button"
-                          onClick={() => handleSetMain(item)}
-                          style={primarySmallButtonStyle}
-                        >
-                          Set Main
-                        </button>
-                      ) : null}
-
-                      <button
-                        type="button"
-                        onClick={() => handleEdit(item)}
-                        style={editSmallButtonStyle}
-                      >
-                        Edit
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(item.id)}
-                        style={dangerSmallButtonStyle}
-                        disabled={deleteLoadingId === item.id}
-                      >
-                        {deleteLoadingId === item.id ? "Deleting..." : "Delete"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {saveMessage ? <div style={successBoxStyle}>{saveMessage}</div> : null}
-        {saveError ? <div style={errorBoxStyle}>{saveError}</div> : null}
+        {uploadError ? <div style={errorBoxStyle}>{uploadError}</div> : null}
+        {resultMessage ? <div style={successBoxStyle}>{resultMessage}</div> : null}
+        {resultError ? <div style={errorBoxStyle}>{resultError}</div> : null}
       </div>
 
-      <div style={cardStyle}>
-        <h2 style={sectionTitleStyle}>Variant Image Binding</h2>
-        <div style={noticeBoxStyle}>
-          Open the variant image screen to connect gallery images with product variants.
-        </div>
+      <input
+        ref={replaceInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleReplaceImage}
+        style={{ display: "none" }}
+      />
 
-        <div style={buttonRowStyle}>
-          <Link
-            href={`/admin/products/${slug}/variant-images`}
-            style={primaryButtonStyle}
-          >
-            Open Variant Image Binding
-          </Link>
-        </div>
+      <div style={gridStyle}>
+        {sortedItems.length === 0 ? (
+          <div style={emptyStateStyle}>No gallery images found.</div>
+        ) : (
+          sortedItems.map((item) => (
+            <div key={item.id} style={imageCardStyle}>
+              <img
+                src={item.image_url || ""}
+                alt={item.alt_text || "Gallery image"}
+                style={imageStyle}
+              />
+
+              <div style={imageMetaStyle}>
+                <div style={badgeRowStyle}>
+                  {isTrue(item.is_main) ? (
+                    <span style={mainBadgeStyle}>Main</span>
+                  ) : (
+                    <span style={secondaryBadgeStyle}>Gallery</span>
+                  )}
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Alt Text</label>
+                  <input
+                    value={item.alt_text || ""}
+                    onChange={(e) =>
+                      setItems((prev) =>
+                        prev.map((image) =>
+                          image.id === item.id
+                            ? { ...image, alt_text: e.target.value }
+                            : image
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Sort Order</label>
+                  <input
+                    value={item.sort_order || ""}
+                    onChange={(e) =>
+                      setItems((prev) =>
+                        prev.map((image) =>
+                          image.id === item.id
+                            ? { ...image, sort_order: e.target.value }
+                            : image
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div>
+                  <label style={labelStyle}>File ID</label>
+                  <input
+                    value={item.image_file_id || ""}
+                    onChange={(e) =>
+                      setItems((prev) =>
+                        prev.map((image) =>
+                          image.id === item.id
+                            ? { ...image, image_file_id: e.target.value }
+                            : image
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div>
+                  <label style={labelStyle}>Uploaded At</label>
+                  <input
+                    value={item.image_uploaded_at || ""}
+                    onChange={(e) =>
+                      setItems((prev) =>
+                        prev.map((image) =>
+                          image.id === item.id
+                            ? { ...image, image_uploaded_at: e.target.value }
+                            : image
+                        )
+                      )
+                    }
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div style={buttonWrapStyle}>
+                  <button
+                    type="button"
+                    style={secondaryButtonStyle}
+                    onClick={() => {
+                      setReplacingId(item.id || "");
+                      replaceInputRef.current?.click();
+                    }}
+                    disabled={uploading}
+                  >
+                    {replacingId === item.id && uploading
+                      ? "Replacing..."
+                      : "Replace"}
+                  </button>
+
+                  <button
+                    type="button"
+                    style={secondaryButtonStyle}
+                    onClick={() => handleSetMain(item.id)}
+                  >
+                    Set Main
+                  </button>
+
+                  <button
+                    type="button"
+                    style={primaryButtonStyle}
+                    onClick={() => handleSaveImage(item)}
+                    disabled={savingId === item.id}
+                  >
+                    {savingId === item.id ? "Saving..." : "Save"}
+                  </button>
+
+                  <button
+                    type="button"
+                    style={dangerButtonStyle}
+                    onClick={() => handleDeleteImage(item)}
+                    disabled={deletingId === item.id}
+                  >
+                    {deletingId === item.id ? "Deleting..." : "Delete"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -898,7 +684,7 @@ const backLinkStyle: React.CSSProperties = {
 };
 
 const titleStyle: React.CSSProperties = {
-  fontSize: 38,
+  fontSize: 40,
   lineHeight: 1.1,
   margin: "10px 0 10px",
   fontWeight: 800,
@@ -910,6 +696,12 @@ const subtitleStyle: React.CSSProperties = {
   fontSize: 16,
 };
 
+const headerActionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
 const cardStyle: React.CSSProperties = {
   background: "#fff",
   border: "1px solid #ddd3c5",
@@ -918,30 +710,10 @@ const cardStyle: React.CSSProperties = {
   boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
 };
 
-const formHeaderRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
-  marginBottom: 18,
-};
-
 const sectionTitleStyle: React.CSSProperties = {
-  margin: 0,
+  margin: "0 0 18px",
   fontSize: 24,
   fontWeight: 800,
-};
-
-const noticeBoxStyle: React.CSSProperties = {
-  marginBottom: 18,
-  padding: 14,
-  borderRadius: 16,
-  background: "#f8f5ef",
-  border: "1px solid #e3dbcf",
-  color: "#5f564c",
-  fontSize: 14,
-  lineHeight: 1.7,
 };
 
 const formGridStyle: React.CSSProperties = {
@@ -950,120 +722,97 @@ const formGridStyle: React.CSSProperties = {
   gap: 16,
 };
 
+const gridStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 20,
+};
+
+const imageCardStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #ddd3c5",
+  borderRadius: 24,
+  overflow: "hidden",
+  display: "grid",
+  gridTemplateColumns: "320px 1fr",
+};
+
+const imageStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+  minHeight: 240,
+  background: "#f4f4f4",
+};
+
+const imageMetaStyle: React.CSSProperties = {
+  padding: 20,
+  display: "grid",
+  gap: 14,
+};
+
+const badgeRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const mainBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 30,
+  padding: "0 12px",
+  borderRadius: 999,
+  background: "#edf8f1",
+  color: "#1d6a43",
+  border: "1px solid #cfe7d8",
+  fontWeight: 800,
+  fontSize: 12,
+};
+
+const secondaryBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 30,
+  padding: "0 12px",
+  borderRadius: 999,
+  background: "#f3f3f3",
+  color: "#5e5e5e",
+  border: "1px solid #dddddd",
+  fontWeight: 800,
+  fontSize: 12,
+};
+
 const labelStyle: React.CSSProperties = {
   display: "block",
   marginBottom: 8,
   fontWeight: 800,
-  fontSize: 15,
+  fontSize: 14,
 };
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  minHeight: 52,
-  padding: "14px 16px",
-  borderRadius: 16,
-  border: "1px solid #d9cfbf",
-  background: "#fcfbf8",
-  outline: "none",
-  fontSize: 15,
-};
-
-const smallInputStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 42,
-  padding: "10px 12px",
-  borderRadius: 12,
-  border: "1px solid #d9cfbf",
-  background: "#fcfbf8",
-  outline: "none",
-  fontSize: 14,
-};
-
-const helperTextStyle: React.CSSProperties = {
-  marginTop: 8,
-  fontSize: 13,
-  color: "#7d7266",
-};
-
-const checkboxWrapStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 10,
-  fontWeight: 700,
-  fontSize: 15,
-  cursor: "pointer",
-};
-
-const previewWrapStyle: React.CSSProperties = {
-  border: "1px solid #e8dfd2",
-  borderRadius: 18,
-  padding: 12,
-  background: "#fcfbf8",
-};
-
-const previewImageStyle: React.CSSProperties = {
-  width: "100%",
-  maxWidth: 260,
-  aspectRatio: "1 / 1",
-  objectFit: "cover",
+  minHeight: 48,
+  padding: "12px 14px",
   borderRadius: 14,
-  display: "block",
-  background: "#f5f5f5",
-};
-
-const queueGridStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 14,
-  marginTop: 16,
-};
-
-const queueCardStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "110px 1fr",
-  gap: 14,
-  padding: 14,
-  borderRadius: 18,
-  border: "1px solid #e8dfd2",
+  border: "1px solid #d9cfbf",
   background: "#fcfbf8",
-};
-
-const queueImageStyle: React.CSSProperties = {
-  width: "100%",
-  aspectRatio: "1 / 1",
-  objectFit: "cover",
-  borderRadius: 12,
-  background: "#f5f5f5",
-};
-
-const queueTitleStyle: React.CSSProperties = {
-  fontWeight: 800,
+  outline: "none",
   fontSize: 14,
-  lineHeight: 1.5,
-  wordBreak: "break-word",
 };
 
-const reorderHeaderStyle: React.CSSProperties = {
+const buttonWrapStyle: React.CSSProperties = {
   display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 16,
+  gap: 10,
   flexWrap: "wrap",
-  marginBottom: 18,
-};
-
-const buttonRowStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 12,
-  marginTop: 24,
-  flexWrap: "wrap",
+  marginTop: 6,
 };
 
 const primaryButtonStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 48,
-  padding: "0 18px",
+  minHeight: 44,
+  padding: "0 16px",
   borderRadius: 14,
   border: "1px solid #2f7d62",
   background: "#2f7d62",
@@ -1077,75 +826,29 @@ const secondaryButtonStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 42,
+  minHeight: 44,
   padding: "0 16px",
-  borderRadius: 12,
+  borderRadius: 14,
   border: "1px solid #d9cfbf",
   background: "#fff",
   color: "#171717",
   fontWeight: 800,
   cursor: "pointer",
+  textDecoration: "none",
 };
 
-const primarySmallButtonStyle: React.CSSProperties = {
+const dangerButtonStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 38,
-  padding: "0 14px",
-  borderRadius: 12,
-  border: "1px solid #2f7d62",
-  background: "#2f7d62",
-  color: "#fff",
-  fontWeight: 700,
-  cursor: "pointer",
-  fontSize: 14,
-};
-
-const editSmallButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 38,
-  padding: "0 14px",
-  borderRadius: 12,
-  border: "1px solid #d9cfbf",
-  background: "#fff",
-  color: "#171717",
-  fontWeight: 700,
-  cursor: "pointer",
-  fontSize: 14,
-};
-
-const iconSmallButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: 38,
-  minWidth: 38,
-  height: 38,
-  borderRadius: 12,
-  border: "1px solid #d9cfbf",
-  background: "#fff",
-  color: "#171717",
-  fontWeight: 800,
-  cursor: "pointer",
-  fontSize: 14,
-};
-
-const dangerSmallButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 38,
-  padding: "0 14px",
-  borderRadius: 12,
+  minHeight: 44,
+  padding: "0 16px",
+  borderRadius: 14,
   border: "1px solid #e5c9c9",
   background: "#fff5f5",
   color: "#8f2d2d",
-  fontWeight: 700,
+  fontWeight: 800,
   cursor: "pointer",
-  fontSize: 14,
 };
 
 const successBoxStyle: React.CSSProperties = {
@@ -1166,75 +869,10 @@ const errorBoxStyle: React.CSSProperties = {
 };
 
 const emptyStateStyle: React.CSSProperties = {
-  padding: 18,
-  borderRadius: 16,
-  background: "#f8f5ef",
-};
-
-const listStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 16,
-};
-
-const listCardStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "140px 1fr",
-  gap: 16,
-  border: "1px solid #e8dfd2",
-  borderRadius: 18,
-  padding: 14,
-};
-
-const imageStyle: React.CSSProperties = {
-  width: "100%",
-  aspectRatio: "1 / 1",
-  objectFit: "cover",
-  borderRadius: 12,
-  background: "#f5f5f5",
-};
-
-const metaRowStyle: React.CSSProperties = {
-  fontSize: 14,
-  color: "#2a2a2a",
-};
-
-const mainBadgeStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 28,
-  padding: "0 10px",
-  borderRadius: 999,
-  background: "#eef8f0",
-  color: "#1f6a45",
-  border: "1px solid #cfe5d4",
-  fontWeight: 800,
-  fontSize: 12,
-};
-
-const subtleBadgeStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 28,
-  padding: "0 10px",
-  borderRadius: 999,
-  background: "#f5f3ef",
+  background: "#fff",
+  border: "1px solid #ddd3c5",
+  borderRadius: 20,
+  padding: 20,
   color: "#6f6559",
-  border: "1px solid #e3dbcf",
-  fontWeight: 800,
-  fontSize: 12,
-};
-
-const urlStyle: React.CSSProperties = {
-  fontSize: 13,
-  color: "#6f6559",
-  wordBreak: "break-all",
-};
-
-const miniReorderWrapStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-  flexWrap: "wrap",
+  fontWeight: 700,
 };

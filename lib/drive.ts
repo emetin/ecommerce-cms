@@ -1,8 +1,24 @@
 import { google } from "googleapis";
 
+export type DriveEntityType = "product" | "collection" | "blog";
+
+export type DriveUploadResult = {
+  fileId: string;
+  fileName: string;
+  url: string;
+  alt: string;
+  uploadedAt: string;
+  entityType: DriveEntityType;
+};
+
 const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-const PRODUCT_IMAGE_FOLDER_ID = process.env.GOOGLE_DRIVE_PRODUCT_IMAGE_FOLDER_ID;
+
+const DRIVE_FOLDER_IDS: Record<DriveEntityType, string | undefined> = {
+  product: process.env.GOOGLE_DRIVE_PRODUCT_IMAGE_FOLDER_ID,
+  collection: process.env.GOOGLE_DRIVE_COLLECTION_IMAGE_FOLDER_ID,
+  blog: process.env.GOOGLE_DRIVE_BLOG_IMAGE_FOLDER_ID,
+};
 
 if (!CLIENT_EMAIL) {
   throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL.");
@@ -12,17 +28,11 @@ if (!PRIVATE_KEY) {
   throw new Error("Missing GOOGLE_PRIVATE_KEY.");
 }
 
-if (!PRODUCT_IMAGE_FOLDER_ID) {
-  throw new Error("Missing GOOGLE_DRIVE_PRODUCT_IMAGE_FOLDER_ID.");
-}
-
 function getDriveAuth() {
   return new google.auth.JWT({
     email: CLIENT_EMAIL,
     key: PRIVATE_KEY,
-    scopes: [
-      "https://www.googleapis.com/auth/drive",
-    ],
+    scopes: ["https://www.googleapis.com/auth/drive"],
   });
 }
 
@@ -36,29 +46,73 @@ function getDriveClient() {
 }
 
 function sanitizeFileName(fileName: string) {
-  return fileName
+  return String(fileName || "image")
     .toLowerCase()
+    .trim()
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
     .replace(/[^a-z0-9.\-_]/g, "-")
-    .replace(/-+/g, "-");
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
-export async function uploadProductImageToDrive(file: File) {
+function sanitizeAltText(value: string) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function getFolderIdByEntityType(entityType: DriveEntityType) {
+  const folderId = DRIVE_FOLDER_IDS[entityType];
+
+  if (!folderId) {
+    throw new Error(
+      `Missing Google Drive folder env for entity type "${entityType}".`
+    );
+  }
+
+  return folderId;
+}
+
+function buildPublicUrl(fileId: string) {
+  return `https://drive.google.com/uc?export=view&id=${fileId}`;
+}
+
+function buildFileName(entityType: DriveEntityType, originalName: string) {
+  const timestamp = Date.now();
+  const safeFileName = sanitizeFileName(originalName || "image");
+  return `${entityType}-${timestamp}-${safeFileName}`;
+}
+
+export async function uploadFileToDrive(
+  file: File,
+  entityType: DriveEntityType,
+  alt?: string
+): Promise<DriveUploadResult> {
+  if (!(file instanceof File)) {
+    throw new Error("A valid file is required.");
+  }
+
+  const folderId = getFolderIdByEntityType(entityType);
   const drive = getDriveClient();
 
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
-  const timestamp = Date.now();
-  const safeFileName = sanitizeFileName(file.name || "image");
-  const finalFileName = `${timestamp}-${safeFileName}`;
+  const finalFileName = buildFileName(entityType, file.name || "image");
+  const uploadedAt = new Date().toISOString();
 
   const createdFile = await drive.files.create({
     requestBody: {
       name: finalFileName,
-      parents: [PRODUCT_IMAGE_FOLDER_ID!],
+      parents: [folderId],
     },
     media: {
-      mimeType: file.type,
+      mimeType: file.type || "application/octet-stream",
       body: buffer as any,
     },
     fields: "id,name,webViewLink,webContentLink",
@@ -78,11 +132,63 @@ export async function uploadProductImageToDrive(file: File) {
     },
   });
 
-  const publicUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
-
   return {
     fileId,
     fileName: finalFileName,
-    url: publicUrl,
+    url: buildPublicUrl(fileId),
+    alt: sanitizeAltText(alt || file.name || entityType),
+    uploadedAt,
+    entityType,
   };
+}
+
+export async function deleteFileFromDrive(fileId: string) {
+  const normalizedFileId = String(fileId || "").trim();
+
+  if (!normalizedFileId) {
+    throw new Error("fileId is required to delete a Drive file.");
+  }
+
+  const drive = getDriveClient();
+  await drive.files.delete({
+    fileId: normalizedFileId,
+  });
+
+  return {
+    ok: true,
+    fileId: normalizedFileId,
+  };
+}
+
+export async function replaceFileOnDrive(params: {
+  file: File;
+  entityType: DriveEntityType;
+  alt?: string;
+  oldFileId?: string;
+}) {
+  const { file, entityType, alt, oldFileId } = params;
+
+  const uploaded = await uploadFileToDrive(file, entityType, alt);
+
+  const normalizedOldFileId = String(oldFileId || "").trim();
+
+  if (normalizedOldFileId && normalizedOldFileId !== uploaded.fileId) {
+    try {
+      await deleteFileFromDrive(normalizedOldFileId);
+    } catch (error) {
+      console.error(
+        "Drive old file delete failed after successful replacement:",
+        error
+      );
+    }
+  }
+
+  return uploaded;
+}
+
+/**
+ * Backward-compatible helper for old product upload callers.
+ */
+export async function uploadProductImageToDrive(file: File, alt?: string) {
+  return uploadFileToDrive(file, "product", alt);
 }

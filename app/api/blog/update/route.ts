@@ -8,6 +8,9 @@ type BlogRow = {
   excerpt?: string;
   content?: string;
   image?: string;
+  image_file_id?: string;
+  image_alt?: string;
+  image_uploaded_at?: string;
   status?: string;
   featured?: string;
   created_at?: string;
@@ -59,6 +62,9 @@ export async function POST(req: Request) {
     const excerpt = normalizeText(body?.excerpt);
     const content = normalizeText(body?.content);
     const image = normalizeText(body?.image);
+    const imageFileId = normalizeText(body?.image_file_id);
+    const imageAlt = normalizeText(body?.image_alt);
+    const imageUploadedAt = normalizeText(body?.image_uploaded_at);
     const status = normalizeStatus(body?.status);
     const featured = normalizeBooleanString(body?.featured, "false");
 
@@ -177,6 +183,9 @@ export async function POST(req: Request) {
       excerpt,
       content,
       image,
+      imageFileId,
+      imageAlt,
+      imageUploadedAt,
       status,
       featured,
       createdAt,
@@ -193,6 +202,9 @@ export async function POST(req: Request) {
         excerpt,
         content,
         image,
+        image_file_id: imageFileId,
+        image_alt: imageAlt,
+        image_uploaded_at: imageUploadedAt,
         status,
         featured,
         created_at: createdAt,

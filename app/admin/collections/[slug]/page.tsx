@@ -9,6 +9,9 @@ type CollectionItem = {
   slug?: string;
   description?: string;
   image?: string;
+  image_file_id?: string;
+  image_alt?: string;
+  image_uploaded_at?: string;
   status?: string;
   seo_title?: string;
   seo_description?: string;
@@ -35,6 +38,9 @@ export default function AdminCollectionDetailPage({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [image, setImage] = useState("");
+  const [imageFileId, setImageFileId] = useState("");
+  const [imageAlt, setImageAlt] = useState("");
+  const [imageUploadedAt, setImageUploadedAt] = useState("");
   const [status, setStatus] = useState("draft");
   const [seoTitle, setSeoTitle] = useState("");
   const [seoDescription, setSeoDescription] = useState("");
@@ -78,6 +84,9 @@ export default function AdminCollectionDetailPage({
       setTitle(found.title || "");
       setDescription(found.description || "");
       setImage(found.image || "");
+      setImageFileId(found.image_file_id || "");
+      setImageAlt(found.image_alt || "");
+      setImageUploadedAt(found.image_uploaded_at || "");
       setStatus(found.status || "draft");
       setSeoTitle(found.seo_title || "");
       setSeoDescription(found.seo_description || "");
@@ -116,6 +125,9 @@ export default function AdminCollectionDetailPage({
           title: normalizeText(title),
           description: normalizeText(description),
           image: normalizeText(image),
+          image_file_id: normalizeText(imageFileId),
+          image_alt: normalizeText(imageAlt),
+          image_uploaded_at: normalizeText(imageUploadedAt),
           status: normalizeText(status).toLowerCase(),
           seo_title: normalizeText(seoTitle),
           seo_description: normalizeText(seoDescription),
@@ -148,6 +160,18 @@ export default function AdminCollectionDetailPage({
 
     try {
       setDeleteLoading(true);
+
+      if (imageFileId) {
+        await fetch("/api/media/delete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            file_id: imageFileId,
+          }),
+        });
+      }
 
       const response = await fetch("/api/collections/delete", {
         method: "POST",
@@ -183,19 +207,13 @@ export default function AdminCollectionDetailPage({
     setImageUploading(true);
 
     try {
-      if (!file.type.startsWith("image/")) {
-        throw new Error("Please select a valid image file.");
-      }
-
-      const maxSizeMb = 4;
-      if (file.size > maxSizeMb * 1024 * 1024) {
-        throw new Error(`Image must be smaller than ${maxSizeMb}MB.`);
-      }
-
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("entityType", "collection");
+      formData.append("alt", title || file.name || "Collection image");
+      formData.append("oldFileId", imageFileId || "");
 
-      const response = await fetch("/api/upload", {
+      const response = await fetch("/api/media/replace", {
         method: "POST",
         body: formData,
       });
@@ -206,7 +224,10 @@ export default function AdminCollectionDetailPage({
         throw new Error(data?.error || "Image upload failed.");
       }
 
-      setImage(data.url);
+      setImage(data.url || "");
+      setImageFileId(data.file_id || "");
+      setImageAlt(data.alt || "");
+      setImageUploadedAt(data.uploaded_at || "");
     } catch (error) {
       setImageUploadError(
         error instanceof Error ? error.message : "Image upload failed."
@@ -219,9 +240,29 @@ export default function AdminCollectionDetailPage({
     }
   }
 
-  function clearImage() {
+  async function clearImage() {
+    try {
+      if (imageFileId) {
+        await fetch("/api/media/delete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            file_id: imageFileId,
+          }),
+        });
+      }
+    } catch (error) {
+      console.error("Failed to delete image from Drive:", error);
+    }
+
     setImage("");
+    setImageFileId("");
+    setImageAlt("");
+    setImageUploadedAt("");
     setImageUploadError("");
+
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -322,7 +363,7 @@ export default function AdminCollectionDetailPage({
                 style={secondaryButtonStyle}
                 disabled={imageUploading}
               >
-                {imageUploading ? "Uploading..." : "Upload Image"}
+                {imageUploading ? "Uploading..." : "Replace Image"}
               </button>
 
               {image ? (
@@ -344,7 +385,7 @@ export default function AdminCollectionDetailPage({
               <div style={imagePreviewCardStyle}>
                 <img
                   src={image}
-                  alt={title || "Collection image"}
+                  alt={imageAlt || title || "Collection image"}
                   style={imagePreviewStyle}
                 />
               </div>
@@ -359,7 +400,37 @@ export default function AdminCollectionDetailPage({
               value={image}
               onChange={(e) => setImage(e.target.value)}
               style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
-              placeholder="Paste image URL here or use Upload Image"
+              placeholder="Paste image URL here or use Replace Image"
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Image File ID</label>
+            <input
+              value={imageFileId}
+              onChange={(e) => setImageFileId(e.target.value)}
+              style={inputStyle}
+              placeholder="Google Drive file id"
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Image Alt</label>
+            <input
+              value={imageAlt}
+              onChange={(e) => setImageAlt(e.target.value)}
+              style={inputStyle}
+              placeholder="Collection image alt"
+            />
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>Image Uploaded At</label>
+            <input
+              value={imageUploadedAt}
+              onChange={(e) => setImageUploadedAt(e.target.value)}
+              style={inputStyle}
+              placeholder="ISO date"
             />
           </div>
 

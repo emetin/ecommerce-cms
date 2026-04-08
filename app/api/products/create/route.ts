@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { appendSheetRow, getSheetData } from "../../../../lib/sheets";
-import { SHEET_CONFIG } from "../../../../lib/import-export";
 
 type ProductRecord = {
   id?: string;
@@ -9,6 +8,9 @@ type ProductRecord = {
   description?: string;
   short_description?: string;
   image?: string;
+  image_file_id?: string;
+  image_alt?: string;
+  image_uploaded_at?: string;
   gallery?: string;
   collection_slug?: string;
   status?: string;
@@ -64,6 +66,9 @@ export async function POST(req: Request) {
     const description = normalizeText(body?.description);
     const shortDescription = normalizeText(body?.short_description);
     const image = normalizeText(body?.image);
+    const imageFileId = normalizeText(body?.image_file_id);
+    const imageAlt = normalizeText(body?.image_alt);
+    const imageUploadedAt = normalizeText(body?.image_uploaded_at);
     const gallery = normalizeText(body?.gallery);
     const collectionSlug = normalizeText(body?.collection_slug);
     const status = normalizeStatus(body?.status);
@@ -141,38 +146,60 @@ export async function POST(req: Request) {
     const now = new Date().toISOString();
     const id = `prd_${Date.now()}`;
 
-    const item: Record<string, string> = {
+    const finalSeoTitle = seoTitle || title;
+    const finalSeoDescription = seoDescription || shortDescription || description;
+
+    await appendSheetRow(SHEET_NAME, [
       id,
       title,
-      slug: finalSlug,
+      finalSlug,
       description,
-      short_description: shortDescription,
+      shortDescription,
       image,
+      imageFileId,
+      imageAlt,
+      imageUploadedAt,
       gallery,
-      collection_slug: collectionSlug,
+      collectionSlug,
       status,
       featured,
-      seo_title: seoTitle || title,
-      seo_description: seoDescription || shortDescription || description,
-      created_at: now,
-      updated_at: now,
+      finalSeoTitle,
+      finalSeoDescription,
+      now,
+      now,
       vendor,
-      product_category: productCategory,
+      productCategory,
       type,
       tags,
-    };
-
-    const rowValues = SHEET_CONFIG.products.headers.map(
-      (header) => item[header] || ""
-    );
-
-    await appendSheetRow(SHEET_NAME, rowValues);
+    ]);
 
     return NextResponse.json(
       {
         ok: true,
         message: "Product created successfully.",
-        item,
+        item: {
+          id,
+          title,
+          slug: finalSlug,
+          description,
+          short_description: shortDescription,
+          image,
+          image_file_id: imageFileId,
+          image_alt: imageAlt,
+          image_uploaded_at: imageUploadedAt,
+          gallery,
+          collection_slug: collectionSlug,
+          status,
+          featured,
+          seo_title: finalSeoTitle,
+          seo_description: finalSeoDescription,
+          created_at: now,
+          updated_at: now,
+          vendor,
+          product_category: productCategory,
+          type,
+          tags,
+        },
       },
       { status: 201 }
     );

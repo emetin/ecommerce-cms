@@ -11,6 +11,9 @@ type ProductItem = {
   description?: string;
   short_description?: string;
   image?: string;
+  image_file_id?: string;
+  image_alt?: string;
+  image_uploaded_at?: string;
   gallery?: string;
   collection_slug?: string;
   status?: string;
@@ -127,6 +130,9 @@ export default function AdminProductDetailPage({
   const [description, setDescription] = useState("");
   const [shortDescription, setShortDescription] = useState("");
   const [image, setImage] = useState("");
+  const [imageFileId, setImageFileId] = useState("");
+  const [imageAlt, setImageAlt] = useState("");
+  const [imageUploadedAt, setImageUploadedAt] = useState("");
   const [gallery, setGallery] = useState("");
   const [collectionSlug, setCollectionSlug] = useState("");
   const [statusValue, setStatusValue] = useState("draft");
@@ -142,6 +148,9 @@ export default function AdminProductDetailPage({
   const [productSaveMessage, setProductSaveMessage] = useState("");
   const [productSaveError, setProductSaveError] = useState("");
   const [productDeleteLoading, setProductDeleteLoading] = useState(false);
+
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState("");
 
   const [option1Name, setOption1Name] = useState("Size");
   const [option1Value, setOption1Value] = useState("");
@@ -171,6 +180,7 @@ export default function AdminProductDetailPage({
   const productLoadedSlugRef = useRef("");
   const variantsLoadedSlugRef = useRef("");
   const imagesLoadedSlugRef = useRef("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadProduct = useCallback(async () => {
     try {
@@ -201,6 +211,9 @@ export default function AdminProductDetailPage({
       setDescription(foundProduct.description || "");
       setShortDescription(foundProduct.short_description || "");
       setImage(foundProduct.image || "");
+      setImageFileId(foundProduct.image_file_id || "");
+      setImageAlt(foundProduct.image_alt || "");
+      setImageUploadedAt(foundProduct.image_uploaded_at || "");
       setGallery(foundProduct.gallery || "");
       setCollectionSlug(foundProduct.collection_slug || "");
       setStatusValue(foundProduct.status || "draft");
@@ -341,6 +354,77 @@ export default function AdminProductDetailPage({
     };
   }, [sortedImages]);
 
+  async function handlePrimaryImageReplace(
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImageUploadError("");
+    setImageUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("entityType", "product");
+      formData.append("alt", title || file.name || "Product image");
+      formData.append("oldFileId", imageFileId || "");
+
+      const response = await fetch("/api/media/replace", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok || !data.url) {
+        throw new Error(data?.error || "Image replace failed.");
+      }
+
+      setImage(data.url || "");
+      setImageFileId(data.file_id || "");
+      setImageAlt(data.alt || "");
+      setImageUploadedAt(data.uploaded_at || "");
+    } catch (error) {
+      setImageUploadError(
+        error instanceof Error ? error.message : "Image replace failed."
+      );
+    } finally {
+      setImageUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handlePrimaryImageRemove() {
+    try {
+      if (imageFileId) {
+        await fetch("/api/media/delete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            file_id: imageFileId,
+          }),
+        });
+      }
+    } catch (error) {
+      console.error("Failed to delete product image from Drive:", error);
+    }
+
+    setImage("");
+    setImageFileId("");
+    setImageAlt("");
+    setImageUploadedAt("");
+    setImageUploadError("");
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
   async function handleProductSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
@@ -360,6 +444,9 @@ export default function AdminProductDetailPage({
           description,
           short_description: shortDescription,
           image,
+          image_file_id: imageFileId,
+          image_alt: imageAlt,
+          image_uploaded_at: imageUploadedAt,
           gallery,
           collection_slug: collectionSlug,
           status: statusValue,
@@ -400,6 +487,18 @@ export default function AdminProductDetailPage({
 
     try {
       setProductDeleteLoading(true);
+
+      if (imageFileId) {
+        await fetch("/api/media/delete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            file_id: imageFileId,
+          }),
+        });
+      }
 
       const response = await fetch("/api/products/delete", {
         method: "POST",
@@ -695,7 +794,7 @@ export default function AdminProductDetailPage({
             <div style={mainPreviewWrapStyle}>
               <img
                 src={currentPrimaryImageUrl}
-                alt={product.title || "Product image"}
+                alt={imageAlt || product.title || "Product image"}
                 style={mainPreviewImageStyle}
               />
               <div style={mainPreviewMetaStyle}>
@@ -824,40 +923,93 @@ export default function AdminProductDetailPage({
 
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={labelStyle}>Primary Image Field</label>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handlePrimaryImageReplace}
+                style={{ display: "none" }}
+              />
+
+              <button
+                type="button"
+                style={secondaryButtonStyle}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={imageUploading}
+              >
+                {imageUploading ? "Uploading..." : "Replace Primary Image"}
+              </button>
+
+              {image ? (
+                <button
+                  type="button"
+                  style={dangerSmallButtonStyle}
+                  onClick={handlePrimaryImageRemove}
+                >
+                  Remove Primary Image
+                </button>
+              ) : null}
+            </div>
+
+            {imageUploadError ? (
+              <div style={errorBoxStyle}>{imageUploadError}</div>
+            ) : null}
+
             <input
               value={image}
-              readOnly
-              placeholder="This is synced by Image Manager when a main image is selected"
-              style={{
-                ...inputStyle,
-                background: "#f5f1ea",
-                color: "#7a7267",
-                cursor: "not-allowed",
-              }}
+              onChange={(e) => setImage(e.target.value)}
+              placeholder="Main product image URL"
+              style={inputStyle}
             />
+
             <div style={helperTextStyle}>
-              This field is synced automatically from Image Manager and is kept
-              only for compatibility.
+              This field is usually synced from Image Manager, but can also be
+              stored with metadata for media traceability.
             </div>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Image File ID</label>
+            <input
+              value={imageFileId}
+              onChange={(e) => setImageFileId(e.target.value)}
+              placeholder="Google Drive file id"
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Image Alt</label>
+            <input
+              value={imageAlt}
+              onChange={(e) => setImageAlt(e.target.value)}
+              placeholder="Product image alt text"
+              style={inputStyle}
+            />
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>Image Uploaded At</label>
+            <input
+              value={imageUploadedAt}
+              onChange={(e) => setImageUploadedAt(e.target.value)}
+              placeholder="ISO date"
+              style={inputStyle}
+            />
           </div>
 
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={labelStyle}>Legacy Gallery Field</label>
             <textarea
               value={gallery}
-              readOnly
+              onChange={(e) => setGallery(e.target.value)}
               placeholder="Legacy comma-separated image URLs"
-              style={{
-                ...inputStyle,
-                minHeight: 110,
-                resize: "vertical",
-                background: "#f5f1ea",
-                color: "#7a7267",
-                cursor: "not-allowed",
-              }}
+              style={{ ...inputStyle, minHeight: 110, resize: "vertical" }}
             />
             <div style={helperTextStyle}>
-              Legacy field only. Gallery should be managed from Image Manager.
+              Legacy field only. Gallery should mainly be managed from Image Manager.
             </div>
           </div>
 

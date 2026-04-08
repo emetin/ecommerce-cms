@@ -26,6 +26,9 @@ export async function POST(req: Request) {
     const title = normalizeText(body?.title);
     const description = normalizeText(body?.description);
     const image = normalizeText(body?.image);
+    const imageFileId = normalizeText(body?.image_file_id);
+    const imageAlt = normalizeText(body?.image_alt);
+    const imageUploadedAt = normalizeText(body?.image_uploaded_at);
     const status = normalizeStatus(body?.status);
     const seoTitle = normalizeText(body?.seo_title);
     const seoDescription = normalizeText(body?.seo_description);
@@ -73,6 +76,9 @@ export async function POST(req: Request) {
       slug,
       description,
       image,
+      image_file_id: imageFileId,
+      image_alt: imageAlt,
+      image_uploaded_at: imageUploadedAt,
       status,
       updated_at: updatedAt,
       seo_title: seoTitle || title,

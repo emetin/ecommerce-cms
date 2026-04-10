@@ -9,7 +9,21 @@ function normalizeText(value: unknown) {
 }
 
 function normalizeBooleanString(value: unknown, fallback = "false") {
-  return String(value || fallback).trim().toLowerCase();
+  return String(value || fallback).trim().toLowerCase() === "true"
+    ? "true"
+    : "false";
+}
+
+function extractFileNameFromUrl(url: string) {
+  const normalized = normalizeText(url);
+
+  if (!normalized) {
+    return "";
+  }
+
+  const cleanUrl = normalized.split("?")[0].split("#")[0];
+  const parts = cleanUrl.split("/");
+  return parts[parts.length - 1] || "";
 }
 
 export async function POST(req: Request) {
@@ -17,9 +31,9 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     const id = normalizeText(body?.id);
-    const productSlug = normalizeText(body?.product_slug);
+    const productSlug = normalizeText(body?.product_slug).toLowerCase();
     const imageUrl = normalizeText(body?.image_url);
-    const imageFileId = normalizeText(body?.image_file_id);
+    const rawImageFileId = normalizeText(body?.image_file_id);
     const imageUploadedAt = normalizeText(body?.image_uploaded_at);
     const sortOrder = normalizeText(body?.sort_order);
     const altText = normalizeText(body?.alt_text);
@@ -46,16 +60,23 @@ export async function POST(req: Request) {
     const headers = await getSheetHeaders("product_images");
     const updatedAt = new Date().toISOString();
 
+    const nextImageUrl = imageUrl || current.image_url || "";
+    const nextImageFileId =
+      rawImageFileId ||
+      current.image_file_id ||
+      extractFileNameFromUrl(nextImageUrl);
+
     const merged: Record<string, string> = {
       ...current,
       id,
       product_slug: productSlug || current.product_slug || "",
-      image_url: imageUrl || current.image_url || "",
-      image_file_id: imageFileId,
-      image_uploaded_at: imageUploadedAt,
-      sort_order: sortOrder,
-      alt_text: altText,
+      image_url: nextImageUrl,
+      image_file_id: nextImageFileId,
+      image_uploaded_at: imageUploadedAt || current.image_uploaded_at || "",
+      sort_order: sortOrder || current.sort_order || "",
+      alt_text: altText || current.alt_text || "",
       is_main: isMain,
+      created_at: current.created_at || "",
       updated_at: updatedAt,
     };
 

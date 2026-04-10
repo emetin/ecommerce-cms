@@ -1,15 +1,66 @@
 import { NextResponse } from "next/server";
+import fs from "fs";
+import path from "path";
 import { getSheetData } from "../../../../lib/sheets";
 import { deleteSheetRowById } from "../../../../lib/sheets-row-utils";
-import { deleteFileFromDrive } from "../../../../lib/drive";
 
 type ProductImageRecord = {
   id?: string;
   image_file_id?: string;
+  image_url?: string;
 };
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
+}
+
+function getUploadsBaseDir() {
+  return path.join(process.cwd(), "public", "uploads");
+}
+
+function tryDeleteFile(filePath: string) {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return true;
+    }
+  } catch (error) {
+    console.error("Local file delete failed:", error);
+  }
+
+  return false;
+}
+
+function resolveLocalFilePath(params: {
+  imageUrl?: string;
+  imageFileId?: string;
+}) {
+  const imageUrl = normalizeText(params.imageUrl);
+  const imageFileId = path.basename(normalizeText(params.imageFileId));
+  const uploadsBaseDir = getUploadsBaseDir();
+
+  if (imageUrl.startsWith("/uploads/")) {
+    const relativePath = imageUrl.replace(/^\/+/, "");
+    const fullPath = path.join(process.cwd(), "public", relativePath.replace(/^uploads\//, "uploads/"));
+
+    if (fullPath.startsWith(uploadsBaseDir)) {
+      return fullPath;
+    }
+  }
+
+  if (imageFileId) {
+    const possibleDirs = ["product", "collection", "blog"];
+
+    for (const dir of possibleDirs) {
+      const fullPath = path.join(uploadsBaseDir, dir, imageFileId);
+
+      if (fullPath.startsWith(uploadsBaseDir) && fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function POST(req: Request) {
@@ -17,8 +68,9 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     const id = normalizeText(body?.id);
-    const deleteDriveFile =
-      String(body?.delete_drive_file || "false").trim().toLowerCase() === "true";
+    const deleteLocalFile =
+      String(body?.delete_drive_file || "false").trim().toLowerCase() === "true" ||
+      String(body?.delete_local_file || "false").trim().toLowerCase() === "true";
 
     if (!id) {
       return NextResponse.json(
@@ -38,11 +90,18 @@ export async function POST(req: Request) {
       );
     }
 
-    if (deleteDriveFile && current.image_file_id) {
-      try {
-        await deleteFileFromDrive(current.image_file_id);
-      } catch (error) {
-        console.error("Drive delete failed during product image delete:", error);
+    let deletedLocalFile = false;
+    let deletedLocalFilePath = "";
+
+    if (deleteLocalFile) {
+      const localFilePath = resolveLocalFilePath({
+        imageUrl: current.image_url,
+        imageFileId: current.image_file_id,
+      });
+
+      if (localFilePath) {
+        deletedLocalFile = tryDeleteFile(localFilePath);
+        deletedLocalFilePath = localFilePath;
       }
     }
 
@@ -52,6 +111,8 @@ export async function POST(req: Request) {
       ok: true,
       message: "Product image deleted successfully.",
       id,
+      deleted_local_file: deletedLocalFile,
+      deleted_local_file_path: deletedLocalFilePath,
     });
   } catch (error) {
     return NextResponse.json(

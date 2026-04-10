@@ -1,3 +1,4 @@
+import { Readable } from "stream";
 import { google } from "googleapis";
 
 export type DriveEntityType = "product" | "collection" | "blog";
@@ -13,6 +14,7 @@ export type DriveUploadResult = {
 
 const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+const IMPERSONATE_USER = process.env.GOOGLE_IMPERSONATE_USER;
 
 const DRIVE_FOLDER_IDS: Record<DriveEntityType, string | undefined> = {
   product: process.env.GOOGLE_DRIVE_PRODUCT_IMAGE_FOLDER_ID,
@@ -28,11 +30,16 @@ if (!PRIVATE_KEY) {
   throw new Error("Missing GOOGLE_PRIVATE_KEY.");
 }
 
+if (!IMPERSONATE_USER) {
+  throw new Error("Missing GOOGLE_IMPERSONATE_USER.");
+}
+
 function getDriveAuth() {
   return new google.auth.JWT({
     email: CLIENT_EMAIL,
     key: PRIVATE_KEY,
     scopes: ["https://www.googleapis.com/auth/drive"],
+    subject: IMPERSONATE_USER,
   });
 }
 
@@ -102,6 +109,7 @@ export async function uploadFileToDrive(
 
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
+  const stream = Readable.from(buffer);
 
   const finalFileName = buildFileName(entityType, file.name || "image");
   const uploadedAt = new Date().toISOString();
@@ -113,9 +121,10 @@ export async function uploadFileToDrive(
     },
     media: {
       mimeType: file.type || "application/octet-stream",
-      body: buffer as any,
+      body: stream,
     },
     fields: "id,name,webViewLink,webContentLink",
+    supportsAllDrives: true,
   });
 
   const fileId = createdFile.data.id;
@@ -124,13 +133,18 @@ export async function uploadFileToDrive(
     throw new Error("Failed to upload file to Google Drive.");
   }
 
-  await drive.permissions.create({
-    fileId,
-    requestBody: {
-      role: "reader",
-      type: "anyone",
-    },
-  });
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: {
+        role: "reader",
+        type: "anyone",
+      },
+      supportsAllDrives: true,
+    });
+  } catch (error) {
+    console.error("Drive permission create failed:", error);
+  }
 
   return {
     fileId,
@@ -150,8 +164,10 @@ export async function deleteFileFromDrive(fileId: string) {
   }
 
   const drive = getDriveClient();
+
   await drive.files.delete({
     fileId: normalizedFileId,
+    supportsAllDrives: true,
   });
 
   return {

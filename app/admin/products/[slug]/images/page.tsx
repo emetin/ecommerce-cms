@@ -50,7 +50,7 @@ export default function AdminProductImagesPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug: rawSlug } = use(params);
-  const slug = decodeURIComponent(rawSlug);
+  const slug = decodeURIComponent(rawSlug).trim().toLowerCase();
 
   const [product, setProduct] = useState<ProductItem | null>(null);
   const [items, setItems] = useState<ProductImageItem[]>([]);
@@ -173,8 +173,8 @@ export default function AdminProductImagesPage({
         body: JSON.stringify({
           product_slug: slug,
           image_url: uploadData.url,
-          image_file_id: uploadData.file_id,
-          image_uploaded_at: uploadData.uploaded_at,
+          image_file_id: uploadData.file_id || uploadData.file_name || "",
+          image_uploaded_at: uploadData.uploaded_at || new Date().toISOString(),
           sort_order: newSortOrder,
           alt_text: newAltText || uploadData.alt || "",
           is_main: newIsMain,
@@ -233,18 +233,20 @@ export default function AdminProductImagesPage({
       const formData = new FormData();
       formData.append("file", file);
       formData.append("entityType", "product");
-      formData.append("alt", current.alt_text || file.name || "Product gallery image");
-      formData.append("oldFileId", current.image_file_id || "");
+      formData.append(
+        "alt",
+        current.alt_text || file.name || "Product gallery image"
+      );
 
-      const replaceResponse = await fetch("/api/media/replace", {
+      const uploadResponse = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
 
-      const replaceData = await replaceResponse.json();
+      const uploadData = await uploadResponse.json();
 
-      if (!replaceResponse.ok || !replaceData.ok || !replaceData.url) {
-        throw new Error(replaceData?.error || "Failed to replace gallery image.");
+      if (!uploadResponse.ok || !uploadData.ok || !uploadData.url) {
+        throw new Error(uploadData?.error || "Failed to replace gallery image.");
       }
 
       const updateResponse = await fetch("/api/product-images/update", {
@@ -255,9 +257,9 @@ export default function AdminProductImagesPage({
         body: JSON.stringify({
           id: current.id,
           product_slug: current.product_slug,
-          image_url: replaceData.url,
-          image_file_id: replaceData.file_id,
-          image_uploaded_at: replaceData.uploaded_at,
+          image_url: uploadData.url,
+          image_file_id: uploadData.file_id || uploadData.file_name || "",
+          image_uploaded_at: uploadData.uploaded_at || new Date().toISOString(),
           sort_order: current.sort_order,
           alt_text: current.alt_text,
           is_main: current.is_main,
@@ -307,7 +309,7 @@ export default function AdminProductImagesPage({
         },
         body: JSON.stringify({
           id: item.id,
-          delete_drive_file: true,
+          delete_local_file: true,
         }),
       });
 

@@ -30,12 +30,17 @@ type ProductItem = {
   product_category?: string;
   type?: string;
   tags?: string;
+  image_file_id?: string;
+  image_alt?: string;
+  image_uploaded_at?: string;
 };
 
 type ProductImageItem = {
   id?: string;
   product_slug?: string;
   image_url?: string;
+  image_file_id?: string;
+  image_uploaded_at?: string;
   sort_order?: string;
   alt_text?: string;
   is_main?: string;
@@ -90,9 +95,19 @@ function getPrimaryProductImage(
 }
 
 const getPublishedProductBySlug = cache(async (slug: string) => {
-  const product = await findSheetItemByField<ProductItem>("products", "slug", slug);
+  const normalizedSlug = normalizeLower(slug);
+
+  const product = await findSheetItemByField<ProductItem>(
+    "products",
+    "slug",
+    normalizedSlug
+  );
 
   if (!product) {
+    return null;
+  }
+
+  if (normalizeLower(product.slug) !== normalizedSlug) {
     return null;
   }
 
@@ -104,7 +119,8 @@ const getPublishedProductBySlug = cache(async (slug: string) => {
 });
 
 const getProductPageData = cache(async (slug: string) => {
-  const product = await getPublishedProductBySlug(slug);
+  const normalizedSlug = normalizeLower(slug);
+  const product = await getPublishedProductBySlug(normalizedSlug);
 
   if (!product) {
     return {
@@ -117,8 +133,16 @@ const getProductPageData = cache(async (slug: string) => {
   }
 
   const [variantsData, productImages, allProducts] = await Promise.all([
-    findSheetItemsByField<VariantItem>("product_variants", "product_slug", slug),
-    findSheetItemsByField<ProductImageItem>("product_images", "product_slug", slug),
+    findSheetItemsByField<VariantItem>(
+      "product_variants",
+      "product_slug",
+      normalizedSlug
+    ),
+    findSheetItemsByField<ProductImageItem>(
+      "product_images",
+      "product_slug",
+      normalizedSlug
+    ),
     getSheetData("products"),
   ]);
 
@@ -139,7 +163,7 @@ const getProductPageData = cache(async (slug: string) => {
       const itemCollectionSlug = normalizeLower(item.collection_slug);
 
       return (
-        itemSlug !== slug &&
+        itemSlug !== normalizedSlug &&
         itemCollectionSlug === currentCollectionSlug
       );
     })
@@ -202,36 +226,25 @@ export default async function ProductDetailPage({
   const { slug } = await params;
   const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
 
-  try {
-    const {
-      product,
-      relatedProducts,
-      variants,
-      productImages,
-      allProductImages,
-    } = await getProductPageData(decodedSlug);
+  const {
+    product,
+    relatedProducts,
+    variants,
+    productImages,
+    allProductImages,
+  } = await getProductPageData(decodedSlug);
 
-    if (!product) {
-      notFound();
-    }
-
-    return (
-      <ProductDetailClient
-        product={product}
-        relatedProducts={relatedProducts}
-        variants={variants}
-        productImages={productImages}
-        allProductImages={allProductImages}
-      />
-    );
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error occurred.";
-
-    return (
-      <div style={{ padding: 40 }}>
-        <strong>Error:</strong> {errorMessage}
-      </div>
-    );
+  if (!product) {
+    notFound();
   }
+
+  return (
+    <ProductDetailClient
+      product={product}
+      relatedProducts={relatedProducts}
+      variants={variants}
+      productImages={productImages}
+      allProductImages={allProductImages}
+    />
+  );
 }

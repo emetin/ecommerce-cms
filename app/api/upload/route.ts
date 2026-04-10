@@ -1,15 +1,8 @@
 import { NextResponse } from "next/server";
-import {
-  type DriveEntityType,
-  uploadFileToDrive,
-} from "../../../lib/drive";
+import fs from "fs";
+import path from "path";
 
-const ALLOWED_ENTITY_TYPES: DriveEntityType[] = [
-  "product",
-  "collection",
-  "blog",
-];
-
+const ALLOWED_ENTITY_TYPES = ["product", "collection", "blog"] as const;
 const ALLOWED_MIME_TYPES = [
   "image/jpeg",
   "image/jpg",
@@ -22,8 +15,19 @@ function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
-function isValidEntityType(value: string): value is DriveEntityType {
-  return ALLOWED_ENTITY_TYPES.includes(value as DriveEntityType);
+function sanitizeFileName(fileName: string) {
+  return String(fileName || "image")
+    .toLowerCase()
+    .trim()
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9.\-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export async function POST(req: Request) {
@@ -31,7 +35,7 @@ export async function POST(req: Request) {
     const formData = await req.formData();
 
     const file = formData.get("file");
-    const entityTypeRaw = normalizeText(formData.get("entityType"));
+    const entityType = normalizeText(formData.get("entityType"));
     const alt = normalizeText(formData.get("alt"));
 
     if (!(file instanceof File)) {
@@ -44,21 +48,11 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!entityTypeRaw) {
+    if (!entityType || !ALLOWED_ENTITY_TYPES.includes(entityType as any)) {
       return NextResponse.json(
         {
           ok: false,
           error: 'entityType is required. Use "product", "collection", or "blog".',
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!isValidEntityType(entityTypeRaw)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Invalid entityType. Use "product", "collection", or "blog".',
         },
         { status: 400 }
       );
@@ -85,19 +79,42 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await uploadFileToDrive(file, entityTypeRaw, alt);
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+
+    const uploadedAt = new Date().toISOString();
+    const safeOriginalName = sanitizeFileName(file.name || "image");
+    const fileName = `${entityType}-${Date.now()}-${safeOriginalName}`;
+
+    const uploadDir = path.join(
+      process.cwd(),
+      "public",
+      "uploads",
+      entityType
+    );
+
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    const filePath = path.join(uploadDir, fileName);
+    fs.writeFileSync(filePath, buffer);
+
+    const url = `/uploads/${entityType}/${fileName}`;
 
     return NextResponse.json({
       ok: true,
       message: "Image uploaded successfully.",
-      entity_type: result.entityType,
-      file_id: result.fileId,
-      file_name: result.fileName,
-      url: result.url,
-      alt: result.alt,
-      uploaded_at: result.uploadedAt,
+      entity_type: entityType,
+      file_id: fileName,
+      file_name: fileName,
+      url,
+      alt: alt || file.name || entityType,
+      uploaded_at: uploadedAt,
     });
   } catch (error) {
+    console.error("Local upload failed:", error);
+
     return NextResponse.json(
       {
         ok: false,

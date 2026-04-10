@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 
 type BlogItem = {
   id?: string;
@@ -39,11 +39,12 @@ function makeSlug(text: string) {
 export default function AdminBlogEditPage({
   params,
 }: {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
 }) {
+  const { slug: rawSlug } = use(params);
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const originalSlug = decodeURIComponent(params.slug).trim().toLowerCase();
+  const originalSlug = decodeURIComponent(rawSlug).trim().toLowerCase();
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");

@@ -12,29 +12,53 @@ export type DriveUploadResult = {
   entityType: DriveEntityType;
 };
 
-const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-const PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-const IMPERSONATE_USER = process.env.GOOGLE_IMPERSONATE_USER;
-
-const DRIVE_FOLDER_IDS: Record<DriveEntityType, string | undefined> = {
-  product: process.env.GOOGLE_DRIVE_PRODUCT_IMAGE_FOLDER_ID,
-  collection: process.env.GOOGLE_DRIVE_COLLECTION_IMAGE_FOLDER_ID,
-  blog: process.env.GOOGLE_DRIVE_BLOG_IMAGE_FOLDER_ID,
-};
-
-if (!CLIENT_EMAIL) {
-  throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL.");
+function getClientEmail() {
+  return process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "";
 }
 
-if (!PRIVATE_KEY) {
-  throw new Error("Missing GOOGLE_PRIVATE_KEY.");
+function getPrivateKey() {
+  return process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n") || "";
 }
 
-if (!IMPERSONATE_USER) {
-  throw new Error("Missing GOOGLE_IMPERSONATE_USER.");
+function getImpersonateUser() {
+  return process.env.GOOGLE_IMPERSONATE_USER || "";
+}
+
+function getDriveFolderIds(): Record<DriveEntityType, string | undefined> {
+  return {
+    product: process.env.GOOGLE_DRIVE_PRODUCT_IMAGE_FOLDER_ID,
+    collection: process.env.GOOGLE_DRIVE_COLLECTION_IMAGE_FOLDER_ID,
+    blog: process.env.GOOGLE_DRIVE_BLOG_IMAGE_FOLDER_ID,
+  };
+}
+
+function assertDriveEnv() {
+  const CLIENT_EMAIL = getClientEmail();
+  const PRIVATE_KEY = getPrivateKey();
+  const IMPERSONATE_USER = getImpersonateUser();
+
+  if (!CLIENT_EMAIL) {
+    throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL.");
+  }
+
+  if (!PRIVATE_KEY) {
+    throw new Error("Missing GOOGLE_PRIVATE_KEY.");
+  }
+
+  if (!IMPERSONATE_USER) {
+    throw new Error("Missing GOOGLE_IMPERSONATE_USER.");
+  }
+
+  return {
+    CLIENT_EMAIL,
+    PRIVATE_KEY,
+    IMPERSONATE_USER,
+  };
 }
 
 function getDriveAuth() {
+  const { CLIENT_EMAIL, PRIVATE_KEY, IMPERSONATE_USER } = assertDriveEnv();
+
   return new google.auth.JWT({
     email: CLIENT_EMAIL,
     key: PRIVATE_KEY,
@@ -74,7 +98,7 @@ function sanitizeAltText(value: string) {
 }
 
 function getFolderIdByEntityType(entityType: DriveEntityType) {
-  const folderId = DRIVE_FOLDER_IDS[entityType];
+  const folderId = getDriveFolderIds()[entityType];
 
   if (!folderId) {
     throw new Error(
@@ -202,9 +226,6 @@ export async function replaceFileOnDrive(params: {
   return uploaded;
 }
 
-/**
- * Backward-compatible helper for old product upload callers.
- */
 export async function uploadProductImageToDrive(file: File, alt?: string) {
   return uploadFileToDrive(file, "product", alt);
 }

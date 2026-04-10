@@ -10,7 +10,7 @@ const ALLOWED_MIME_TYPES = [
 ];
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
 export async function POST(req: Request) {

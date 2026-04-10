@@ -49,22 +49,20 @@ function resolveLocalFilePath(params: {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const fileId = normalizeText(body?.file_id);
-    const imageUrl = normalizeText(body?.image_url);
 
-    if (!fileId && !imageUrl) {
+    const imageUrl = normalizeText(body?.image_url);
+    const imageFileId = normalizeText(body?.image_file_id);
+
+    if (!imageUrl && !imageFileId) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "file_id or image_url is required.",
-        },
+        { ok: false, error: "image_url or image_file_id is required." },
         { status: 400 }
       );
     }
 
     const localFilePath = resolveLocalFilePath({
       imageUrl,
-      imageFileId: fileId,
+      imageFileId,
     });
 
     if (!localFilePath) {
@@ -79,8 +77,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      message: "Local file deleted successfully.",
-      file_id: fileId,
       deleted: true,
       deleted_file_path: localFilePath,
     });
@@ -89,7 +85,9 @@ export async function POST(req: Request) {
       {
         ok: false,
         error:
-          error instanceof Error ? error.message : "Failed to delete local file.",
+          error instanceof Error
+            ? error.message
+            : "Failed to delete local upload file.",
       },
       { status: 500 }
     );

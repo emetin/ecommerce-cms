@@ -12,7 +12,13 @@ const ALLOWED_MIME_TYPES = [
 ];
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
+}
+
+function normalizeBool(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase() === "true";
 }
 
 function sanitizeFileName(fileName: string) {
@@ -30,6 +36,61 @@ function sanitizeFileName(fileName: string) {
     .replace(/^-+|-+$/g, "");
 }
 
+function getUploadsBaseDir() {
+  return path.resolve(process.cwd(), "public", "uploads");
+}
+
+function isSafeUploadPath(fullPath: string) {
+  return path.resolve(fullPath).startsWith(getUploadsBaseDir());
+}
+
+function tryDeleteFile(filePath: string) {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return true;
+    }
+  } catch (error) {
+    console.error("Local old file delete failed:", error);
+  }
+
+  return false;
+}
+
+function resolveOldLocalFilePath(params: {
+  oldImageUrl?: string;
+  oldImageFileId?: string;
+  entityType?: string;
+}) {
+  const oldImageUrl = normalizeText(params.oldImageUrl);
+  const oldImageFileId = path.basename(normalizeText(params.oldImageFileId));
+  const entityType = normalizeText(params.entityType);
+  const uploadsBaseDir = getUploadsBaseDir();
+
+  if (oldImageUrl.startsWith("/uploads/")) {
+    const relativePath = oldImageUrl.replace(/^\/+/, "");
+    const fullPath = path.resolve(process.cwd(), "public", relativePath);
+
+    if (isSafeUploadPath(fullPath)) {
+      return fullPath;
+    }
+  }
+
+  if (oldImageFileId) {
+    const dirs = entityType ? [entityType] : ["product", "collection", "blog"];
+
+    for (const dir of dirs) {
+      const fullPath = path.resolve(uploadsBaseDir, dir, oldImageFileId);
+
+      if (isSafeUploadPath(fullPath) && fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return null;
+}
+
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
@@ -37,6 +98,10 @@ export async function POST(req: Request) {
     const file = formData.get("file");
     const entityType = normalizeText(formData.get("entityType"));
     const alt = normalizeText(formData.get("alt"));
+
+    const deleteOldFile = normalizeBool(formData.get("deleteOldFile"));
+    const oldImageUrl = normalizeText(formData.get("oldImageUrl"));
+    const oldImageFileId = normalizeText(formData.get("oldImageFileId"));
 
     if (!(file instanceof File)) {
       return NextResponse.json(
@@ -86,7 +151,7 @@ export async function POST(req: Request) {
     const safeOriginalName = sanitizeFileName(file.name || "image");
     const fileName = `${entityType}-${Date.now()}-${safeOriginalName}`;
 
-    const uploadDir = path.join(
+    const uploadDir = path.resolve(
       process.cwd(),
       "public",
       "uploads",
@@ -97,8 +162,35 @@ export async function POST(req: Request) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
 
-    const filePath = path.join(uploadDir, fileName);
+    const filePath = path.resolve(uploadDir, fileName);
+
+    if (!isSafeUploadPath(filePath)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid upload path.",
+        },
+        { status: 400 }
+      );
+    }
+
     fs.writeFileSync(filePath, buffer);
+
+    let deletedOldFile = false;
+    let deletedOldFilePath = "";
+
+    if (deleteOldFile) {
+      const oldLocalPath = resolveOldLocalFilePath({
+        oldImageUrl,
+        oldImageFileId,
+        entityType,
+      });
+
+      if (oldLocalPath) {
+        deletedOldFile = tryDeleteFile(oldLocalPath);
+        deletedOldFilePath = oldLocalPath;
+      }
+    }
 
     const url = `/uploads/${entityType}/${fileName}`;
 
@@ -111,6 +203,8 @@ export async function POST(req: Request) {
       url,
       alt: alt || file.name || entityType,
       uploaded_at: uploadedAt,
+      deleted_old_file: deletedOldFile,
+      deleted_old_file_path: deletedOldFilePath,
     });
   } catch (error) {
     console.error("Local upload failed:", error);

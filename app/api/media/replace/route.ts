@@ -1,14 +1,8 @@
 import { NextResponse } from "next/server";
-import {
-  type DriveEntityType,
-  replaceFileOnDrive,
-} from "../../../../lib/drive";
+import fs from "fs";
+import path from "path";
 
-const ALLOWED_ENTITY_TYPES: DriveEntityType[] = [
-  "product",
-  "collection",
-  "blog",
-];
+const ALLOWED_ENTITY_TYPES = ["product", "collection", "blog"] as const;
 
 const ALLOWED_MIME_TYPES = [
   "image/jpeg",
@@ -19,11 +13,77 @@ const ALLOWED_MIME_TYPES = [
 ];
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
-function isValidEntityType(value: string): value is DriveEntityType {
-  return ALLOWED_ENTITY_TYPES.includes(value as DriveEntityType);
+function sanitizeFileName(fileName: string) {
+  return String(fileName || "image")
+    .toLowerCase()
+    .trim()
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9.\-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function getUploadsBaseDir() {
+  return path.resolve(process.cwd(), "public", "uploads");
+}
+
+function isSafeUploadPath(fullPath: string) {
+  return path.resolve(fullPath).startsWith(getUploadsBaseDir());
+}
+
+function tryDeleteFile(filePath: string) {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return true;
+    }
+  } catch (error) {
+    console.error("Local old file delete failed:", error);
+  }
+
+  return false;
+}
+
+function resolveOldLocalFilePath(params: {
+  oldImageUrl?: string;
+  oldImageFileId?: string;
+  entityType?: string;
+}) {
+  const oldImageUrl = normalizeText(params.oldImageUrl);
+  const oldImageFileId = path.basename(normalizeText(params.oldImageFileId));
+  const entityType = normalizeText(params.entityType);
+  const uploadsBaseDir = getUploadsBaseDir();
+
+  if (oldImageUrl.startsWith("/uploads/")) {
+    const relativePath = oldImageUrl.replace(/^\/+/, "");
+    const fullPath = path.resolve(process.cwd(), "public", relativePath);
+
+    if (isSafeUploadPath(fullPath)) {
+      return fullPath;
+    }
+  }
+
+  if (oldImageFileId) {
+    const dirs = entityType ? [entityType] : ["product", "collection", "blog"];
+
+    for (const dir of dirs) {
+      const fullPath = path.resolve(uploadsBaseDir, dir, oldImageFileId);
+
+      if (isSafeUploadPath(fullPath) && fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function POST(req: Request) {
@@ -31,9 +91,10 @@ export async function POST(req: Request) {
     const formData = await req.formData();
 
     const file = formData.get("file");
-    const entityTypeRaw = normalizeText(formData.get("entityType"));
+    const entityType = normalizeText(formData.get("entityType"));
     const alt = normalizeText(formData.get("alt"));
     const oldFileId = normalizeText(formData.get("oldFileId"));
+    const oldImageUrl = normalizeText(formData.get("oldImageUrl"));
 
     if (!(file instanceof File)) {
       return NextResponse.json(
@@ -45,7 +106,10 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!entityTypeRaw || !isValidEntityType(entityTypeRaw)) {
+    if (
+      !entityType ||
+      !ALLOWED_ENTITY_TYPES.includes(entityType as (typeof ALLOWED_ENTITY_TYPES)[number])
+    ) {
       return NextResponse.json(
         {
           ok: false,
@@ -76,22 +140,65 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await replaceFileOnDrive({
-      file,
-      entityType: entityTypeRaw,
-      alt,
-      oldFileId,
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+
+    const uploadedAt = new Date().toISOString();
+    const safeOriginalName = sanitizeFileName(file.name || "image");
+    const fileName = `${entityType}-${Date.now()}-${safeOriginalName}`;
+
+    const uploadDir = path.resolve(
+      process.cwd(),
+      "public",
+      "uploads",
+      entityType
+    );
+
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    const filePath = path.resolve(uploadDir, fileName);
+
+    if (!isSafeUploadPath(filePath)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid upload path.",
+        },
+        { status: 400 }
+      );
+    }
+
+    fs.writeFileSync(filePath, buffer);
+
+    let deletedOldFile = false;
+    let deletedOldFilePath = "";
+
+    const oldLocalPath = resolveOldLocalFilePath({
+      oldImageUrl,
+      oldImageFileId: oldFileId,
+      entityType,
     });
+
+    if (oldLocalPath) {
+      deletedOldFile = tryDeleteFile(oldLocalPath);
+      deletedOldFilePath = oldLocalPath;
+    }
+
+    const url = `/uploads/${entityType}/${fileName}`;
 
     return NextResponse.json({
       ok: true,
       message: "Image replaced successfully.",
-      entity_type: result.entityType,
-      file_id: result.fileId,
-      file_name: result.fileName,
-      url: result.url,
-      alt: result.alt,
-      uploaded_at: result.uploadedAt,
+      entity_type: entityType,
+      file_id: fileName,
+      file_name: fileName,
+      url,
+      alt: alt || file.name || entityType,
+      uploaded_at: uploadedAt,
+      deleted_old_file: deletedOldFile,
+      deleted_old_file_path: deletedOldFilePath,
     });
   } catch (error) {
     return NextResponse.json(

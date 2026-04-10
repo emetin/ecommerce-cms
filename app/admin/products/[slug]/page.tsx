@@ -60,6 +60,7 @@ type ProductImageItem = {
   id?: string;
   product_slug?: string;
   image_url?: string;
+  image_file_id?: string;
   sort_order?: string;
   alt_text?: string;
   is_main?: string;
@@ -115,7 +116,7 @@ export default function AdminProductDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug: rawSlug } = use(params);
-  const slug = decodeURIComponent(rawSlug);
+  const slug = decodeURIComponent(rawSlug).trim().toLowerCase();
 
   const [product, setProduct] = useState<ProductItem | null>(null);
   const [variants, setVariants] = useState<VariantItem[]>([]);
@@ -189,9 +190,7 @@ export default function AdminProductDetailPage({
 
       const productResponse = await fetch(
         `/api/products/get?slug=${encodeURIComponent(slug)}`,
-        {
-          cache: "no-store",
-        }
+        { cache: "no-store" }
       );
 
       const productData = await productResponse.json();
@@ -239,9 +238,7 @@ export default function AdminProductDetailPage({
 
       const response = await fetch(
         `/api/variants/list?product_slug=${encodeURIComponent(slug)}`,
-        {
-          cache: "no-store",
-        }
+        { cache: "no-store" }
       );
 
       const data = await response.json();
@@ -265,9 +262,7 @@ export default function AdminProductDetailPage({
 
       const response = await fetch(
         `/api/product-images/list?product_slug=${encodeURIComponent(slug)}`,
-        {
-          cache: "no-store",
-        }
+        { cache: "no-store" }
       );
 
       const data = await response.json();
@@ -368,6 +363,7 @@ export default function AdminProductDetailPage({
       formData.append("file", file);
       formData.append("entityType", "product");
       formData.append("alt", title || file.name || "Product image");
+      formData.append("oldImageUrl", image || "");
       formData.append("oldFileId", imageFileId || "");
 
       const response = await fetch("/api/media/replace", {
@@ -399,7 +395,7 @@ export default function AdminProductDetailPage({
 
   async function handlePrimaryImageRemove() {
     try {
-      if (imageFileId) {
+      if (image || imageFileId) {
         await fetch("/api/media/delete", {
           method: "POST",
           headers: {
@@ -407,11 +403,12 @@ export default function AdminProductDetailPage({
           },
           body: JSON.stringify({
             file_id: imageFileId,
+            image_url: image,
           }),
         });
       }
     } catch (error) {
-      console.error("Failed to delete product image from Drive:", error);
+      console.error("Failed to delete primary image local file:", error);
     }
 
     setImage("");
@@ -467,8 +464,7 @@ export default function AdminProductDetailPage({
       }
 
       setProductSaveMessage("Product updated successfully.");
-      await loadProduct();
-      await loadImages();
+      await Promise.all([loadProduct(), loadImages()]);
     } catch (error) {
       setProductSaveError(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -487,18 +483,6 @@ export default function AdminProductDetailPage({
 
     try {
       setProductDeleteLoading(true);
-
-      if (imageFileId) {
-        await fetch("/api/media/delete", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            file_id: imageFileId,
-          }),
-        });
-      }
 
       const response = await fetch("/api/products/delete", {
         method: "POST",
@@ -924,7 +908,14 @@ export default function AdminProductDetailPage({
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={labelStyle}>Primary Image Field</label>
 
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                marginBottom: 12,
+              }}
+            >
               <input
                 ref={fileInputRef}
                 type="file"
@@ -975,7 +966,7 @@ export default function AdminProductDetailPage({
             <input
               value={imageFileId}
               onChange={(e) => setImageFileId(e.target.value)}
-              placeholder="Google Drive file id"
+              placeholder="Local file name"
               style={inputStyle}
             />
           </div>

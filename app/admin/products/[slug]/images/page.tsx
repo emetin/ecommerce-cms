@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { normalizeImageUrl } from "../../../../../lib/image-url";
 
 type ProductImageItem = {
   id?: string;
@@ -20,6 +21,9 @@ type ProductItem = {
   title?: string;
   slug?: string;
   image?: string;
+  image_file_id?: string;
+  image_alt?: string;
+  image_uploaded_at?: string;
 };
 
 function isTrue(value?: string) {
@@ -121,20 +125,33 @@ export default function AdminProductImagesPage({
       sortImages(nextItems)[0] ||
       null;
 
-    await fetch("/api/products/update", {
+    const response = await fetch("/api/products/update", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         slug,
-        title: product?.title || slug,
         image: mainItem?.image_url || "",
         image_file_id: mainItem?.image_file_id || "",
         image_alt: mainItem?.alt_text || "",
         image_uploaded_at: mainItem?.image_uploaded_at || "",
       }),
     });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data?.error || "Failed to sync product main image.");
+    }
+
+    setProduct((prev) => ({
+      ...(prev || {}),
+      image: mainItem?.image_url || "",
+      image_file_id: mainItem?.image_file_id || "",
+      image_alt: mainItem?.alt_text || "",
+      image_uploaded_at: mainItem?.image_uploaded_at || "",
+    }));
   }
 
   async function handleCreateImage(
@@ -191,7 +208,7 @@ export default function AdminProductImagesPage({
       setItems(nextItems);
 
       if (String(newIsMain) === "true") {
-        await handleSetMain(createData.item.id);
+        await handleSetMain(createData.item.id, nextItems);
       } else {
         await syncProductMainImage(nextItems);
       }
@@ -237,6 +254,9 @@ export default function AdminProductImagesPage({
         "alt",
         current.alt_text || file.name || "Product gallery image"
       );
+      formData.append("deleteOldFile", "true");
+      formData.append("oldImageUrl", current.image_url || "");
+      formData.append("oldImageFileId", current.image_file_id || "");
 
       const uploadResponse = await fetch("/api/upload", {
         method: "POST",
@@ -301,6 +321,8 @@ export default function AdminProductImagesPage({
 
     try {
       setDeletingId(item.id || "");
+      setResultMessage("");
+      setResultError("");
 
       const response = await fetch("/api/product-images/delete", {
         method: "POST",
@@ -335,6 +357,8 @@ export default function AdminProductImagesPage({
   async function handleSaveImage(item: ProductImageItem) {
     try {
       setSavingId(item.id || "");
+      setResultMessage("");
+      setResultError("");
 
       const response = await fetch("/api/product-images/update", {
         method: "POST",
@@ -375,14 +399,15 @@ export default function AdminProductImagesPage({
     }
   }
 
-  async function handleSetMain(targetId?: string) {
+  async function handleSetMain(targetId?: string, sourceItems?: ProductImageItem[]) {
     if (!targetId) return;
 
     try {
       setResultMessage("");
       setResultError("");
 
-      const updatedItems = [...items];
+      const baseItems = sourceItems || items;
+      const updatedItems = [...baseItems];
 
       for (const item of updatedItems) {
         const nextIsMain = item.id === targetId ? "true" : "false";
@@ -537,7 +562,7 @@ export default function AdminProductImagesPage({
           sortedItems.map((item) => (
             <div key={item.id} style={imageCardStyle}>
               <img
-                src={item.image_url || ""}
+                src={normalizeImageUrl(item.image_url || "")}
                 alt={item.alt_text || "Gallery image"}
                 style={imageStyle}
               />

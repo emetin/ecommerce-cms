@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { addToDraftOrder } from "../b2b/order-draft";
 
 export type VariantItem = {
   id?: string;
@@ -15,6 +16,10 @@ export type VariantItem = {
   barcode?: string;
   price?: string;
   compare_at_price?: string;
+  price_standard?: string;
+  price_wholesale?: string;
+  price_distributor?: string;
+  price_vip?: string;
   inventory_tracker?: string;
   inventory_policy?: string;
   fulfillment_service?: string;
@@ -25,6 +30,10 @@ export type VariantItem = {
   weight?: string;
   weight_unit?: string;
   box_quantity?: string;
+  min_order_quantity?: string;
+  quantity_step?: string;
+  inventory_quantity?: string;
+  is_available?: string;
   status?: string;
   created_at?: string;
   updated_at?: string;
@@ -38,6 +47,14 @@ type ProductPurchasePanelProps = {
   };
   variants: VariantItem[];
   onVariantChange?: (variant: VariantItem | null) => void;
+};
+
+type CustomerSession = {
+  customerId: string;
+  email: string;
+  companyName: string;
+  priceTier: string;
+  currency: string;
 };
 
 function parsePrice(value?: string) {
@@ -67,10 +84,10 @@ function parsePrice(value?: string) {
   return Number.isFinite(num) ? num : 0;
 }
 
-function formatMoney(value: number) {
+function formatMoney(value: number, currency = "USD") {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: currency || "USD",
   }).format(value || 0);
 }
 
@@ -145,11 +162,64 @@ function filterOutDefaultVariantsWhenRealOnesExist(variants: VariantItem[]) {
   );
 }
 
+function toSafeInt(value: unknown, fallback = 1) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? Math.floor(num) : fallback;
+}
+
+function resolveCustomerPrice(variant: VariantItem | null, priceTier?: string) {
+  if (!variant) return 0;
+
+  const tier = normalizeLower(priceTier || "standard");
+
+  if (tier === "vip") {
+    return (
+      parsePrice(variant.price_vip) ||
+      parsePrice(variant.price_wholesale) ||
+      parsePrice(variant.price_standard) ||
+      parsePrice(variant.price)
+    );
+  }
+
+  if (tier === "distributor") {
+    return (
+      parsePrice(variant.price_distributor) ||
+      parsePrice(variant.price_wholesale) ||
+      parsePrice(variant.price_standard) ||
+      parsePrice(variant.price)
+    );
+  }
+
+  if (tier === "wholesale") {
+    return (
+      parsePrice(variant.price_wholesale) ||
+      parsePrice(variant.price_standard) ||
+      parsePrice(variant.price)
+    );
+  }
+
+  return parsePrice(variant.price_standard) || parsePrice(variant.price);
+}
+
+function isVariantAvailable(variant: VariantItem | null) {
+  if (!variant) return false;
+
+  const availability = normalizeLower(variant.is_available);
+
+  if (!availability) return true;
+
+  return ["true", "yes", "available", "active", "in-stock"].includes(availability);
+}
+
 export default function ProductPurchasePanel({
   product,
   variants,
   onVariantChange,
 }: ProductPurchasePanelProps) {
+  const [customer, setCustomer] = useState<CustomerSession | null>(null);
+  const [customerLoading, setCustomerLoading] = useState(true);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+
   const activeVariants = useMemo(() => {
     const published = variants.filter((variant) =>
       ["", "published", "active"].includes(normalizeLower(variant.status))
@@ -177,12 +247,39 @@ export default function ProductPurchasePanel({
   const [selectedOption1, setSelectedOption1] = useState("");
   const [selectedOption2, setSelectedOption2] = useState("");
   const [selectedOption3, setSelectedOption3] = useState("");
+  const [quantity, setQuantity] = useState(1);
 
   useEffect(() => {
     setSelectedOption1(option1.values[0] || "");
     setSelectedOption2("");
     setSelectedOption3("");
   }, [option1.values]);
+
+  useEffect(() => {
+    async function loadCustomer() {
+      try {
+        setCustomerLoading(true);
+
+        const response = await fetch("/api/customer-auth/me", {
+          cache: "no-store",
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data?.authenticated) {
+          setCustomer(data.customer || null);
+        } else {
+          setCustomer(null);
+        }
+      } catch {
+        setCustomer(null);
+      } finally {
+        setCustomerLoading(false);
+      }
+    }
+
+    loadCustomer();
+  }, []);
 
   const availableOption2Values = useMemo(() => {
     if (!option2.values.length) return [];
@@ -206,8 +303,7 @@ export default function ProductPurchasePanel({
 
     const scoped = activeVariants.filter((variant) => {
       const option1Matches =
-        !option1.values.length ||
-        normalize(variant.option1_value) === selectedOption1;
+        !option1.values.length || normalize(variant.option1_value) === selectedOption1;
 
       const option2Matches =
         !option2.values.length ||
@@ -286,65 +382,125 @@ export default function ProductPurchasePanel({
     onVariantChange?.(selectedVariant);
   }, [selectedVariant, onVariantChange]);
 
-  const price = parsePrice(selectedVariant?.price);
+  const minOrderQuantity = toSafeInt(selectedVariant?.min_order_quantity, 1);
+  const quantityStep = toSafeInt(selectedVariant?.quantity_step, 1);
+
+  useEffect(() => {
+    setQuantity(minOrderQuantity);
+  }, [minOrderQuantity, selectedVariant?.id]);
+
+  const unitPrice = resolveCustomerPrice(selectedVariant, customer?.priceTier);
   const compareAtPrice = parsePrice(selectedVariant?.compare_at_price);
-  const hasDiscount = compareAtPrice > price && price > 0;
+  const hasDiscount = compareAtPrice > unitPrice && unitPrice > 0;
   const discountPercent = hasDiscount
-    ? Math.round(((compareAtPrice - price) / compareAtPrice) * 100)
+    ? Math.round(((compareAtPrice - unitPrice) / compareAtPrice) * 100)
     : 0;
 
-  const inquiryHref = `/contact-us?product=${encodeURIComponent(
-    product.title || "Product"
-  )}&variant=${encodeURIComponent(buildVariantLabel(selectedVariant || ({} as VariantItem)))}`;
+  const available = isVariantAvailable(selectedVariant);
+
+  function increaseQty() {
+    setQuantity((prev) => prev + quantityStep);
+  }
+
+  function decreaseQty() {
+    setQuantity((prev) => Math.max(minOrderQuantity, prev - quantityStep));
+  }
+
+  function handleManualQty(value: string) {
+    const next = Number(value || minOrderQuantity);
+
+    if (!Number.isFinite(next) || next <= 0) {
+      setQuantity(minOrderQuantity);
+      return;
+    }
+
+    setQuantity(Math.max(minOrderQuantity, Math.floor(next)));
+  }
+
+  function handleAddToDraft() {
+    if (!customer) {
+      return;
+    }
+
+    if (!selectedVariant) {
+      setFeedbackMessage("Please select a valid variant.");
+      return;
+    }
+
+    if (!available) {
+      setFeedbackMessage("This variant is currently unavailable.");
+      return;
+    }
+
+    addToDraftOrder({
+      productSlug: String(product.slug || ""),
+      productTitle: String(product.title || "Product"),
+      variantId: String(selectedVariant.id || ""),
+      variantLabel: buildVariantLabel(selectedVariant),
+      sku: String(selectedVariant.sku || ""),
+      image: String(
+        selectedVariant.variant_image || selectedVariant.image_id || product.image || ""
+      ),
+      unitPrice,
+      quantity,
+      minOrderQuantity,
+      quantityStep,
+      lineTotal: unitPrice * quantity,
+    });
+
+    setFeedbackMessage("Added to draft order.");
+  }
 
   if (!activeVariants.length) {
     return (
-      <div
-        style={{
-          padding: 24,
-          borderRadius: 28,
-          border: "1px solid #e5ddd2",
-          background: "#fff",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 28,
-            lineHeight: 1.2,
-            fontWeight: 800,
-            marginBottom: 12,
-          }}
-        >
-          Request Quote
+      <div style={panelStyle}>
+        <div style={headlineStyle}>Wholesale access required</div>
+        <div style={descriptionStyle}>
+          This product is available through our approved B2B customer portal.
+          Please apply for an account or contact our sales team.
         </div>
 
-        <div
-          style={{
-            color: "#6f6559",
-            lineHeight: 1.75,
-            marginBottom: 18,
-          }}
-        >
-          This product is currently presented as part of the catalog structure.
-          Contact our team for pricing, quantities, and project-based inquiries.
+        <div style={actionGridStyle}>
+          <a href="/apply-for-account" style={primaryLinkStyle}>
+            Apply for Account
+          </a>
+          <a href="/portal-login" style={secondaryLinkStyle}>
+            Customer Login
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (customerLoading) {
+    return <div style={panelStyle}>Loading customer pricing...</div>;
+  }
+
+  if (!customer) {
+    return (
+      <div style={panelStyle}>
+        <div style={headlineStyle}>Approved customers can view pricing</div>
+
+        <div style={descriptionStyle}>
+          This product is available for approved B2B customers. Log in to view
+          your account pricing and create an order. If you do not yet have an
+          account, you can submit an application for review.
         </div>
 
-        <a href="/contact-us" style={primaryLinkStyle}>
-          Contact Sales
-        </a>
+        <div style={actionGridStyle}>
+          <a href="/portal-login" style={primaryLinkStyle}>
+            Customer Login
+          </a>
+          <a href="/apply-for-account" style={secondaryLinkStyle}>
+            Apply for Account
+          </a>
+        </div>
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        padding: 24,
-        borderRadius: 28,
-        border: "1px solid #e5ddd2",
-        background: "#fff",
-      }}
-    >
+    <div style={panelStyle}>
       <div
         style={{
           display: "flex",
@@ -361,7 +517,7 @@ export default function ProductPurchasePanel({
             fontWeight: 800,
           }}
         >
-          {price > 0 ? formatMoney(price) : "Request Quote"}
+          {unitPrice > 0 ? formatMoney(unitPrice, customer.currency) : "Contact Sales"}
         </div>
 
         {hasDiscount ? (
@@ -374,7 +530,7 @@ export default function ProductPurchasePanel({
                 fontWeight: 700,
               }}
             >
-              {formatMoney(compareAtPrice)}
+              {formatMoney(compareAtPrice, customer.currency)}
             </div>
 
             <div
@@ -422,6 +578,33 @@ export default function ProductPurchasePanel({
         />
       ) : null}
 
+      <div style={{ marginTop: 18 }}>
+        <div style={metaLabelStyle}>Quantity</div>
+
+        <div style={qtyWrapStyle}>
+          <button type="button" onClick={decreaseQty} style={qtyButtonStyle}>
+            −
+          </button>
+
+          <input
+            type="number"
+            min={minOrderQuantity}
+            step={quantityStep}
+            value={quantity}
+            onChange={(e) => handleManualQty(e.target.value)}
+            style={qtyInputStyle}
+          />
+
+          <button type="button" onClick={increaseQty} style={qtyButtonStyle}>
+            +
+          </button>
+        </div>
+
+        <div style={smallTextStyle}>
+          Min order: {minOrderQuantity} • Step: {quantityStep}
+        </div>
+      </div>
+
       <div
         style={{
           display: "grid",
@@ -429,12 +612,17 @@ export default function ProductPurchasePanel({
           marginTop: 24,
         }}
       >
-        <a href={inquiryHref} style={primaryLinkStyle}>
-          Request Quote
-        </a>
+        <button
+          type="button"
+          onClick={handleAddToDraft}
+          disabled={!available}
+          style={primaryButtonStyle}
+        >
+          {available ? "Add to Draft Order" : "Unavailable"}
+        </button>
 
-        <a href="/contact-us" style={secondaryLinkStyle}>
-          Contact Sales
+        <a href="/account" style={secondaryLinkStyle}>
+          View Draft Order
         </a>
       </div>
 
@@ -454,7 +642,15 @@ export default function ProductPurchasePanel({
           label="Box Quantity"
           value={String(selectedVariant?.box_quantity || "-")}
         />
+        <InfoRow
+          label="Availability"
+          value={available ? "Available" : "Unavailable"}
+        />
       </div>
+
+      {feedbackMessage ? (
+        <div style={feedbackBoxStyle}>{feedbackMessage}</div>
+      ) : null}
     </div>
   );
 }
@@ -474,18 +670,7 @@ function VariantSelectBlock({
 
   return (
     <div style={{ marginTop: 14 }}>
-      <div
-        style={{
-          fontSize: 13,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: "#7b7367",
-          fontWeight: 700,
-          marginBottom: 10,
-        }}
-      >
-        {label}
-      </div>
+      <div style={metaLabelStyle}>{label}</div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         {values.map((item) => {
@@ -533,6 +718,92 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+const panelStyle: React.CSSProperties = {
+  padding: 24,
+  borderRadius: 28,
+  border: "1px solid #e5ddd2",
+  background: "#fff",
+};
+
+const headlineStyle: React.CSSProperties = {
+  fontSize: 28,
+  lineHeight: 1.2,
+  fontWeight: 800,
+  marginBottom: 12,
+};
+
+const descriptionStyle: React.CSSProperties = {
+  color: "#6f6559",
+  lineHeight: 1.75,
+  marginBottom: 18,
+};
+
+const metaLabelStyle: React.CSSProperties = {
+  fontSize: 13,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "#7b7367",
+  fontWeight: 700,
+  marginBottom: 10,
+};
+
+const actionGridStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 12,
+};
+
+const qtyWrapStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+};
+
+const qtyButtonStyle: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  borderRadius: 999,
+  border: "1px solid #d8cebf",
+  background: "#fff",
+  color: "#171717",
+  fontWeight: 800,
+  fontSize: 20,
+  cursor: "pointer",
+};
+
+const qtyInputStyle: React.CSSProperties = {
+  width: 110,
+  minHeight: 44,
+  borderRadius: 999,
+  border: "1px solid #d8cebf",
+  background: "#fff",
+  color: "#171717",
+  fontWeight: 700,
+  fontSize: 15,
+  textAlign: "center",
+};
+
+const smallTextStyle: React.CSSProperties = {
+  marginTop: 8,
+  color: "#7b7367",
+  fontSize: 13,
+  lineHeight: 1.6,
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 52,
+  borderRadius: 999,
+  border: "1px solid #171717",
+  background: "#171717",
+  color: "#fff",
+  fontWeight: 800,
+  cursor: "pointer",
+  fontSize: 15,
+  textDecoration: "none",
+};
+
 const primaryLinkStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -561,4 +832,14 @@ const secondaryLinkStyle: React.CSSProperties = {
   cursor: "pointer",
   fontSize: 15,
   textDecoration: "none",
+};
+
+const feedbackBoxStyle: React.CSSProperties = {
+  marginTop: 16,
+  padding: 14,
+  borderRadius: 16,
+  background: "#f8f5ef",
+  border: "1px solid #e5ddd2",
+  color: "#171717",
+  fontWeight: 700,
 };

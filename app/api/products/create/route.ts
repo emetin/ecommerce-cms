@@ -8,9 +8,6 @@ type ProductRecord = {
   description?: string;
   short_description?: string;
   image?: string;
-  image_file_id?: string;
-  image_alt?: string;
-  image_uploaded_at?: string;
   gallery?: string;
   collection_slug?: string;
   status?: string;
@@ -66,9 +63,6 @@ export async function POST(req: Request) {
     const description = normalizeText(body?.description);
     const shortDescription = normalizeText(body?.short_description);
     const image = normalizeText(body?.image);
-    const imageFileId = normalizeText(body?.image_file_id);
-    const imageAlt = normalizeText(body?.image_alt);
-    const imageUploadedAt = normalizeText(body?.image_uploaded_at);
     const gallery = normalizeText(body?.gallery);
     const collectionSlug = normalizeText(body?.collection_slug);
     const status = normalizeStatus(body?.status);
@@ -156,9 +150,6 @@ export async function POST(req: Request) {
       description,
       shortDescription,
       image,
-      imageFileId,
-      imageAlt,
-      imageUploadedAt,
       gallery,
       collectionSlug,
       status,
@@ -184,9 +175,6 @@ export async function POST(req: Request) {
           description,
           short_description: shortDescription,
           image,
-          image_file_id: imageFileId,
-          image_alt: imageAlt,
-          image_uploaded_at: imageUploadedAt,
           gallery,
           collection_slug: collectionSlug,
           status,

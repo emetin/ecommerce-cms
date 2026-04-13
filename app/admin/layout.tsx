@@ -68,7 +68,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 color: "#6f6559",
               }}
             >
-              Internal content management panel
+              B2B Management Panel
             </div>
           </div>
 
@@ -109,14 +109,31 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <AdminNavLink href="/admin" currentPath={pathname}>
               Dashboard
             </AdminNavLink>
+
             <AdminNavLink href="/admin/products" currentPath={pathname}>
               Products
             </AdminNavLink>
+
             <AdminNavLink href="/admin/collections" currentPath={pathname}>
               Collections
             </AdminNavLink>
+
             <AdminNavLink href="/admin/blog" currentPath={pathname}>
               Blog
+            </AdminNavLink>
+
+            {/* 🔥 NEW B2B MODULES */}
+
+            <AdminNavLink href="/admin/customer-applications" currentPath={pathname}>
+              Applications
+            </AdminNavLink>
+
+            <AdminNavLink href="/admin/customers" currentPath={pathname}>
+              Customers
+            </AdminNavLink>
+
+            <AdminNavLink href="/admin/orders" currentPath={pathname}>
+              Orders
             </AdminNavLink>
           </nav>
         </div>

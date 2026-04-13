@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
-import ImportPanel from "../../../../components/admin/ImportPanel";
+import { useMemo, useState } from "react";
 
 function makeSlug(text: string) {
-  return text
+  return String(text || "")
     .toLowerCase()
     .trim()
     .replace(/ğ/g, "g")
@@ -20,111 +19,39 @@ function makeSlug(text: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-export default function NewProductPage() {
+export default function AdminNewProductPage() {
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [shortDescription, setShortDescription] = useState("");
   const [image, setImage] = useState("");
-  const [imageFileId, setImageFileId] = useState("");
-  const [imageAlt, setImageAlt] = useState("");
-  const [imageUploadedAt, setImageUploadedAt] = useState("");
   const [gallery, setGallery] = useState("");
   const [collectionSlug, setCollectionSlug] = useState("");
-  const [status, setStatus] = useState("draft");
+  const [statusValue, setStatusValue] = useState("draft");
   const [featured, setFeatured] = useState("false");
   const [seoTitle, setSeoTitle] = useState("");
   const [seoDescription, setSeoDescription] = useState("");
   const [vendor, setVendor] = useState("");
   const [productCategory, setProductCategory] = useState("");
-  const [type, setType] = useState("");
+  const [typeValue, setTypeValue] = useState("");
   const [tags, setTags] = useState("");
 
-  const [loading, setLoading] = useState(false);
-  const [resultMessage, setResultMessage] = useState("");
-  const [resultError, setResultError] = useState("");
-  const [createdSlug, setCreatedSlug] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [saveError, setSaveError] = useState("");
 
-  const [imageUploading, setImageUploading] = useState(false);
-  const [imageUploadError, setImageUploadError] = useState("");
-
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const suggestedSlug = useMemo(() => makeSlug(title), [title]);
-
-  async function handleImageUpload(
-    e: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setImageUploadError("");
-    setImageUploading(true);
-
-    try {
-      if (!file.type.startsWith("image/")) {
-        throw new Error("Please select a valid image file.");
-      }
-
-      const maxSizeMb = 8;
-      if (file.size > maxSizeMb * 1024 * 1024) {
-        throw new Error(`Image must be smaller than ${maxSizeMb}MB.`);
-      }
-
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("entityType", "product");
-      formData.append("alt", title || file.name || "Product image");
-
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.ok || !data.url) {
-        throw new Error(data?.error || "Image upload failed.");
-      }
-
-      setImage(data.url || "");
-      setImageFileId(data.file_id || "");
-      setImageAlt(data.alt || title || file.name || "");
-      setImageUploadedAt(data.uploaded_at || "");
-    } catch (error) {
-      setImageUploadError(
-        error instanceof Error ? error.message : "Image upload failed."
-      );
-    } finally {
-      setImageUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
-  }
-
-  function clearImage() {
-    setImage("");
-    setImageFileId("");
-    setImageAlt("");
-    setImageUploadedAt("");
-    setImageUploadError("");
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  }
+  const suggestedSlug = useMemo(() => {
+    return makeSlug(slug || title);
+  }, [slug, title]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    setLoading(true);
-    setResultMessage("");
-    setResultError("");
-    setCreatedSlug("");
+    setSaving(true);
+    setSaveMessage("");
+    setSaveError("");
 
     try {
-      const finalSlug = slug || suggestedSlug;
-
       const response = await fetch("/api/products/create", {
         method: "POST",
         headers: {
@@ -132,22 +59,19 @@ export default function NewProductPage() {
         },
         body: JSON.stringify({
           title,
-          slug: finalSlug,
+          slug,
           description,
           short_description: shortDescription,
           image,
-          image_file_id: imageFileId,
-          image_alt: imageAlt,
-          image_uploaded_at: imageUploadedAt,
           gallery,
           collection_slug: collectionSlug,
-          status,
+          status: statusValue,
           featured,
           seo_title: seoTitle,
           seo_description: seoDescription,
           vendor,
           product_category: productCategory,
-          type,
+          type: typeValue,
           tags,
         }),
       });
@@ -155,41 +79,32 @@ export default function NewProductPage() {
       const data = await response.json();
 
       if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to create the product.");
+        throw new Error(data?.error || "Failed to create product.");
       }
 
-      const finalCreatedSlug = String(data?.item?.slug || finalSlug || "").trim();
-
-      setResultMessage(
-        "Product created successfully. You can now add variants from the product management screen."
-      );
-      setCreatedSlug(finalCreatedSlug);
+      setSaveMessage("Product created successfully.");
 
       setTitle("");
       setSlug("");
       setDescription("");
       setShortDescription("");
       setImage("");
-      setImageFileId("");
-      setImageAlt("");
-      setImageUploadedAt("");
       setGallery("");
       setCollectionSlug("");
-      setStatus("draft");
+      setStatusValue("draft");
       setFeatured("false");
       setSeoTitle("");
       setSeoDescription("");
       setVendor("");
       setProductCategory("");
-      setType("");
+      setTypeValue("");
       setTags("");
-      setImageUploadError("");
     } catch (error) {
-      setResultError(
+      setSaveError(
         error instanceof Error ? error.message : "An unknown error occurred."
       );
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   }
 
@@ -200,336 +115,209 @@ export default function NewProductPage() {
           <Link href="/admin/products" style={backLinkStyle}>
             ← Back to Products
           </Link>
-          <h1 style={titleStyle}>New Product</h1>
+          <h1 style={titleStyle}>Create New Product</h1>
           <p style={subtitleStyle}>
-            Create the base product first. After saving, add size, color, pack,
-            and pricing combinations from the product’s variant management page.
+            Add a new product to the products sheet. Gallery images can be managed
+            later from the Image Manager after the product is created.
+          </p>
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} style={cardStyle}>
+        <div style={sectionTitleWrapStyle}>
+          <h2 style={sectionTitleStyle}>Product Information</h2>
+          <p style={sectionTextStyle}>
+            Fill out the main product details below. Keep the primary image simple
+            here, then organize the rest of the gallery after creation.
           </p>
         </div>
 
-        <div style={headerActionsStyle}>
-          <a href="/api/products/export?format=csv" style={secondaryButtonStyle}>
-            Export CSV
-          </a>
-          <a href="/api/products/export?format=json" style={secondaryButtonStyle}>
-            Export JSON
-          </a>
-          <a href="/api/products/export?format=xml" style={secondaryButtonStyle}>
-            Export XML
-          </a>
+        <div style={formGridStyle}>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>Title</label>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Luxury Bath Towel"
+              style={inputStyle}
+              required
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Custom Slug</label>
+            <input
+              value={slug}
+              onChange={(e) => setSlug(e.target.value)}
+              placeholder="luxury-bath-towel"
+              style={inputStyle}
+            />
+            <div style={helperTextStyle}>
+              Leave blank to auto-generate from the title.
+            </div>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Final Slug Preview</label>
+            <input value={suggestedSlug} style={inputStyle} disabled />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Collection Slug</label>
+            <input
+              value={collectionSlug}
+              onChange={(e) => setCollectionSlug(e.target.value)}
+              placeholder="towels"
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Status</label>
+            <select
+              value={statusValue}
+              onChange={(e) => setStatusValue(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="draft">draft</option>
+              <option value="published">published</option>
+              <option value="archived">archived</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Featured</label>
+            <select
+              value={featured}
+              onChange={(e) => setFeatured(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="false">false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Vendor</label>
+            <input
+              value={vendor}
+              onChange={(e) => setVendor(e.target.value)}
+              placeholder="Patak Textile"
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Product Category</label>
+            <input
+              value={productCategory}
+              onChange={(e) => setProductCategory(e.target.value)}
+              placeholder="Bath"
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Type</label>
+            <input
+              value={typeValue}
+              onChange={(e) => setTypeValue(e.target.value)}
+              placeholder="Towel"
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Tags</label>
+            <input
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+              placeholder="hotel, luxury, bath"
+              style={inputStyle}
+            />
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>Primary Image URL</label>
+            <input
+              value={image}
+              onChange={(e) => setImage(e.target.value)}
+              placeholder="https://example.com/product-image.jpg"
+              style={inputStyle}
+            />
+            <div style={helperTextStyle}>
+              This is the legacy main image field saved directly in the product row.
+            </div>
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>Legacy Gallery Field</label>
+            <textarea
+              value={gallery}
+              onChange={(e) => setGallery(e.target.value)}
+              placeholder="Comma-separated image URLs"
+              style={{ ...inputStyle, minHeight: 110, resize: "vertical" }}
+            />
+            <div style={helperTextStyle}>
+              This is optional. Gallery images can be managed later from the
+              dedicated Image Manager.
+            </div>
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>Short Description</label>
+            <textarea
+              value={shortDescription}
+              onChange={(e) => setShortDescription(e.target.value)}
+              placeholder="Short summary"
+              style={{ ...inputStyle, minHeight: 110, resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>Description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Full product description"
+              style={{ ...inputStyle, minHeight: 220, resize: "vertical" }}
+            />
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>SEO Title</label>
+            <input
+              value={seoTitle}
+              onChange={(e) => setSeoTitle(e.target.value)}
+              placeholder="SEO title"
+              style={inputStyle}
+            />
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={labelStyle}>SEO Description</label>
+            <textarea
+              value={seoDescription}
+              onChange={(e) => setSeoDescription(e.target.value)}
+              placeholder="SEO description"
+              style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
+            />
+          </div>
         </div>
-      </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1.2fr 0.9fr",
-          gap: 24,
-          alignItems: "start",
-        }}
-      >
-        <form onSubmit={handleSubmit} style={cardStyle}>
-          <div style={sectionTitleWrapStyle}>
-            <h2 style={sectionTitleStyle}>Create Product Manually</h2>
-            <p style={sectionTextStyle}>
-              This step creates the main product record only. Variant combinations
-              such as Queen, King, White, Ivory, or Set of 12 are added after the
-              product is created.
-            </p>
-          </div>
+        <div style={buttonRowStyle}>
+          <button type="submit" style={primaryButtonStyle} disabled={saving}>
+            {saving ? "Saving..." : "Create Product"}
+          </button>
 
-          <div style={noticeBoxStyle}>
-            <div style={noticeTitleStyle}>How variants work</div>
-            <div style={noticeTextStyle}>
-              First create the product here. Then open the product from the admin
-              products list and add multiple variants from its dedicated variant
-              management page.
-            </div>
-          </div>
+          <Link href="/admin/products" style={secondaryButtonStyle}>
+            Cancel
+          </Link>
+        </div>
 
-          <div style={formGridStyle}>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Title</label>
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Luxury Hotel Towel Set"
-                style={inputStyle}
-                required
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Slug</label>
-              <input
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder="luxury-hotel-towel-set"
-                style={inputStyle}
-              />
-              <div style={helperTextStyle}>
-                Suggested slug: <strong>{suggestedSlug || "-"}</strong>
-              </div>
-            </div>
-
-            <div>
-              <label style={labelStyle}>Collection Slug</label>
-              <input
-                value={collectionSlug}
-                onChange={(e) => setCollectionSlug(e.target.value)}
-                placeholder="towels"
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Status</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="draft">draft</option>
-                <option value="published">published</option>
-                <option value="archived">archived</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={labelStyle}>Featured</label>
-              <select
-                value={featured}
-                onChange={(e) => setFeatured(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="false">false</option>
-                <option value="true">true</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={labelStyle}>Vendor</label>
-              <input
-                value={vendor}
-                onChange={(e) => setVendor(e.target.value)}
-                placeholder="Patak Textile"
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Product Category</label>
-              <input
-                value={productCategory}
-                onChange={(e) => setProductCategory(e.target.value)}
-                placeholder="Bath"
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Type</label>
-              <input
-                value={type}
-                onChange={(e) => setType(e.target.value)}
-                placeholder="Towel"
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Tags</label>
-              <input
-                value={tags}
-                onChange={(e) => setTags(e.target.value)}
-                placeholder="hotel, luxury, bath"
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Primary Product Image</label>
-
-              <div style={imageToolsWrapStyle}>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  style={fileInputStyle}
-                />
-
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  style={secondaryButtonStyle}
-                  disabled={imageUploading}
-                >
-                  {imageUploading ? "Uploading..." : "Upload Image"}
-                </button>
-
-                {image ? (
-                  <button
-                    type="button"
-                    onClick={clearImage}
-                    style={dangerSmallButtonStyle}
-                  >
-                    Remove Image
-                  </button>
-                ) : null}
-              </div>
-
-              {imageUploadError ? (
-                <div style={errorInlineStyle}>{imageUploadError}</div>
-              ) : null}
-
-              {image ? (
-                <div style={imagePreviewCardStyle}>
-                  <img
-                    src={image}
-                    alt={imageAlt || title || "Product image"}
-                    style={imagePreviewStyle}
-                  />
-                </div>
-              ) : (
-                <div style={emptyImageBoxStyle}>No image selected.</div>
-              )}
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Image URL</label>
-              <input
-                value={image}
-                onChange={(e) => setImage(e.target.value)}
-                placeholder="https://..."
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Image File ID</label>
-              <input
-                value={imageFileId}
-                onChange={(e) => setImageFileId(e.target.value)}
-                placeholder="Google Drive file id"
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Image Alt</label>
-              <input
-                value={imageAlt}
-                onChange={(e) => setImageAlt(e.target.value)}
-                placeholder="Product image alt text"
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Image Uploaded At</label>
-              <input
-                value={imageUploadedAt}
-                onChange={(e) => setImageUploadedAt(e.target.value)}
-                placeholder="ISO date"
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Gallery</label>
-              <textarea
-                value={gallery}
-                onChange={(e) => setGallery(e.target.value)}
-                placeholder="Comma-separated image URLs"
-                style={{ ...inputStyle, minHeight: 110, resize: "vertical" }}
-              />
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Short Description</label>
-              <textarea
-                value={shortDescription}
-                onChange={(e) => setShortDescription(e.target.value)}
-                placeholder="Short product summary"
-                style={{ ...inputStyle, minHeight: 110, resize: "vertical" }}
-              />
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>Description</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Full product description"
-                style={{ ...inputStyle, minHeight: 220, resize: "vertical" }}
-              />
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>SEO Title</label>
-              <input
-                value={seoTitle}
-                onChange={(e) => setSeoTitle(e.target.value)}
-                placeholder="SEO title"
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={labelStyle}>SEO Description</label>
-              <textarea
-                value={seoDescription}
-                onChange={(e) => setSeoDescription(e.target.value)}
-                placeholder="SEO description"
-                style={{ ...inputStyle, minHeight: 110, resize: "vertical" }}
-              />
-            </div>
-          </div>
-
-          <div style={buttonRowStyle}>
-            <button type="submit" style={primaryButtonStyle} disabled={loading}>
-              {loading ? "Saving..." : "Create Product"}
-            </button>
-
-            <Link href="/admin/products" style={secondaryButtonStyle}>
-              Back to Products
-            </Link>
-          </div>
-
-          {resultMessage ? (
-            <div style={successBoxStyle}>
-              <div>{resultMessage}</div>
-
-              {createdSlug ? (
-                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <Link
-                    href={`/admin/products/${createdSlug}`}
-                    style={primarySmallButtonStyle}
-                  >
-                    Manage Variants
-                  </Link>
-
-                  <Link
-                    href={`/products/${createdSlug}`}
-                    style={secondarySmallButtonStyle}
-                  >
-                    View Product
-                  </Link>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {resultError ? <div style={errorBoxStyle}>{resultError}</div> : null}
-        </form>
-
-        <ImportPanel
-          endpoint="/api/shopify/import"
-          description="Upload a CSV or JSON file, or paste content manually. This is suitable for Shopify, Zoho, or your own prepared files after adapting headers to the Patak structure."
-          csvHeader="id,title,slug,description,short_description,image,image_file_id,image_alt,image_uploaded_at,gallery,collection_slug,status,featured,seo_title,seo_description,created_at,updated_at,vendor,product_category,type,tags"
-        />
-      </div>
+        {saveMessage ? <div style={successBoxStyle}>{saveMessage}</div> : null}
+        {saveError ? <div style={errorBoxStyle}>{saveError}</div> : null}
+      </form>
     </div>
   );
 }
@@ -543,7 +331,7 @@ const pageHeaderStyle: React.CSSProperties = {
 };
 
 const titleStyle: React.CSSProperties = {
-  fontSize: 42,
+  fontSize: 40,
   lineHeight: 1.1,
   margin: "10px 0 10px",
   fontWeight: 800,
@@ -562,12 +350,6 @@ const backLinkStyle: React.CSSProperties = {
   color: "#5e5448",
   fontWeight: 700,
   marginBottom: 4,
-};
-
-const headerActionsStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 10,
-  flexWrap: "wrap",
 };
 
 const cardStyle: React.CSSProperties = {
@@ -595,26 +377,6 @@ const sectionTextStyle: React.CSSProperties = {
   lineHeight: 1.7,
 };
 
-const noticeBoxStyle: React.CSSProperties = {
-  marginBottom: 20,
-  padding: 16,
-  borderRadius: 18,
-  background: "#f8f5ef",
-  border: "1px solid #e3dbcf",
-};
-
-const noticeTitleStyle: React.CSSProperties = {
-  fontWeight: 800,
-  fontSize: 15,
-  marginBottom: 8,
-};
-
-const noticeTextStyle: React.CSSProperties = {
-  color: "#6f6559",
-  fontSize: 14,
-  lineHeight: 1.7,
-};
-
 const formGridStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr 1fr",
@@ -632,6 +394,7 @@ const helperTextStyle: React.CSSProperties = {
   marginTop: 8,
   fontSize: 13,
   color: "#7d7266",
+  lineHeight: 1.6,
 };
 
 const inputStyle: React.CSSProperties = {
@@ -643,61 +406,6 @@ const inputStyle: React.CSSProperties = {
   background: "#fcfbf8",
   outline: "none",
   fontSize: 15,
-};
-
-const imageToolsWrapStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 10,
-  flexWrap: "wrap",
-  alignItems: "center",
-  marginBottom: 14,
-};
-
-const fileInputStyle: React.CSSProperties = {
-  display: "none",
-};
-
-const imagePreviewCardStyle: React.CSSProperties = {
-  width: "100%",
-  maxWidth: 320,
-  borderRadius: 20,
-  overflow: "hidden",
-  border: "1px solid #e5ddd2",
-  background: "#faf8f4",
-  marginTop: 6,
-};
-
-const imagePreviewStyle: React.CSSProperties = {
-  width: "100%",
-  aspectRatio: "1 / 1",
-  objectFit: "cover",
-  display: "block",
-};
-
-const emptyImageBoxStyle: React.CSSProperties = {
-  width: "100%",
-  maxWidth: 320,
-  minHeight: 180,
-  borderRadius: 20,
-  border: "1px dashed #d9cfbf",
-  background: "#faf8f4",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: "#7b7367",
-  fontWeight: 700,
-  marginTop: 6,
-  padding: 16,
-  textAlign: "center",
-};
-
-const errorInlineStyle: React.CSSProperties = {
-  marginBottom: 12,
-  padding: 12,
-  borderRadius: 12,
-  background: "#fff1f1",
-  border: "1px solid #efc9c9",
-  color: "#7a2222",
 };
 
 const buttonRowStyle: React.CSSProperties = {
@@ -737,52 +445,6 @@ const secondaryButtonStyle: React.CSSProperties = {
   textDecoration: "none",
 };
 
-const primarySmallButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 40,
-  padding: "0 14px",
-  borderRadius: 12,
-  border: "1px solid #2f7d62",
-  background: "#2f7d62",
-  color: "#fff",
-  fontWeight: 800,
-  cursor: "pointer",
-  textDecoration: "none",
-  fontSize: 14,
-};
-
-const secondarySmallButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 40,
-  padding: "0 14px",
-  borderRadius: 12,
-  border: "1px solid #d9cfbf",
-  background: "#fff",
-  color: "#171717",
-  fontWeight: 800,
-  cursor: "pointer",
-  textDecoration: "none",
-  fontSize: 14,
-};
-
-const dangerSmallButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 42,
-  padding: "0 14px",
-  borderRadius: 12,
-  border: "1px solid #e5c9c9",
-  background: "#fff5f5",
-  color: "#8f2d2d",
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
 const successBoxStyle: React.CSSProperties = {
   marginTop: 18,
   padding: 14,
@@ -798,7 +460,7 @@ const errorBoxStyle: React.CSSProperties = {
   padding: 14,
   borderRadius: 16,
   background: "#fff1f1",
-  border: "1px solid #efc9c9",
-  color: "#7a2222",
+  border: "1px solid #f0c9c9",
+  color: "#8d2f2f",
   fontWeight: 700,
 };

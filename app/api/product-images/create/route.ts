@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { appendSheetRow } from "../../../../lib/sheets";
+import { appendSheetRow, getSheetData } from "../../../../lib/sheets";
+import { generateProductImageAltText } from "../../../../lib/alt-text";
+
+type ProductRecord = Record<string, string>;
+type ProductImageRecord = Record<string, string>;
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -23,6 +27,11 @@ function extractFileNameFromUrl(url: string) {
   return parts[parts.length - 1] || "";
 }
 
+function toSafeOrder(value: unknown, fallback = 0) {
+  const num = Number(normalizeText(value));
+  return Number.isFinite(num) ? num : fallback;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -33,7 +42,7 @@ export async function POST(req: Request) {
     const imageUploadedAt =
       normalizeText(body?.image_uploaded_at) || new Date().toISOString();
     const sortOrder = normalizeText(body?.sort_order);
-    const altText = normalizeText(body?.alt_text);
+    const altTextInput = normalizeText(body?.alt_text);
     const isMain = normalizeBooleanString(body?.is_main, "false");
 
     if (!productSlug) {
@@ -50,7 +59,38 @@ export async function POST(req: Request) {
       );
     }
 
+    const [products, existingImages] = await Promise.all([
+      getSheetData("products") as Promise<ProductRecord[]>,
+      getSheetData("product_images") as Promise<ProductImageRecord[]>,
+    ]);
+
+    const product =
+      products.find(
+        (item) => normalizeText(item.slug).toLowerCase() === productSlug
+      ) || null;
+
+    const relatedImages = existingImages.filter(
+      (item) => normalizeText(item.product_slug).toLowerCase() === productSlug
+    );
+
     const imageFileId = rawImageFileId || extractFileNameFromUrl(imageUrl);
+
+    const computedOrder =
+      sortOrder ||
+      String(
+        relatedImages.length > 0
+          ? Math.max(...relatedImages.map((item) => toSafeOrder(item.sort_order, 0))) + 1
+          : 1
+      );
+
+    const finalAltText =
+      altTextInput ||
+      generateProductImageAltText({
+        productTitle: product?.title || "",
+        productSlug,
+        imageType: isMain === "true" ? "product" : "gallery",
+        order: isMain === "true" ? "" : computedOrder,
+      });
 
     const now = new Date().toISOString();
     const id = `pimg_${Date.now()}`;
@@ -61,8 +101,8 @@ export async function POST(req: Request) {
       image_url: imageUrl,
       image_file_id: imageFileId,
       image_uploaded_at: imageUploadedAt,
-      sort_order: sortOrder,
-      alt_text: altText,
+      sort_order: computedOrder,
+      alt_text: finalAltText,
       is_main: isMain,
       created_at: now,
       updated_at: now,

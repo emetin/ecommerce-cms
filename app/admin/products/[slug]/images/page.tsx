@@ -21,9 +21,18 @@ type ProductItem = {
   title?: string;
   slug?: string;
   image?: string;
-  image_file_id?: string;
-  image_alt?: string;
-  image_uploaded_at?: string;
+  gallery?: string;
+  collection_slug?: string;
+  status?: string;
+  featured?: string;
+  seo_title?: string;
+  seo_description?: string;
+  description?: string;
+  short_description?: string;
+  vendor?: string;
+  product_category?: string;
+  type?: string;
+  tags?: string;
 };
 
 function isTrue(value?: string) {
@@ -46,6 +55,22 @@ function sortImages(items: ProductImageItem[]) {
 
     return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
   });
+}
+
+function normalizeStatus(value?: string) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (
+    normalized === "published" ||
+    normalized === "draft" ||
+    normalized === "archived"
+  ) {
+    return normalized;
+  }
+  return "draft";
+}
+
+function normalizeFeatured(value?: string) {
+  return String(value || "").trim().toLowerCase() === "true" ? "true" : "false";
 }
 
 export default function AdminProductImagesPage({
@@ -73,6 +98,7 @@ export default function AdminProductImagesPage({
   const [replacingId, setReplacingId] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [savingId, setSavingId] = useState("");
+  const [fixingAltTexts, setFixingAltTexts] = useState(false);
 
   const createInputRef = useRef<HTMLInputElement | null>(null);
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
@@ -88,9 +114,12 @@ export default function AdminProductImagesPage({
         fetch(`/api/products/get?slug=${encodeURIComponent(slug)}`, {
           cache: "no-store",
         }),
-        fetch(`/api/product-images/list?product_slug=${encodeURIComponent(slug)}`, {
-          cache: "no-store",
-        }),
+        fetch(
+          `/api/product-images/list?product_slug=${encodeURIComponent(slug)}`,
+          {
+            cache: "no-store",
+          }
+        ),
       ]);
 
       const productData = await productResponse.json();
@@ -132,10 +161,20 @@ export default function AdminProductImagesPage({
       },
       body: JSON.stringify({
         slug,
+        title: product?.title || "",
+        description: product?.description || "",
+        short_description: product?.short_description || "",
         image: mainItem?.image_url || "",
-        image_file_id: mainItem?.image_file_id || "",
-        image_alt: mainItem?.alt_text || "",
-        image_uploaded_at: mainItem?.image_uploaded_at || "",
+        gallery: product?.gallery || "",
+        collection_slug: product?.collection_slug || "",
+        status: normalizeStatus(product?.status),
+        featured: normalizeFeatured(product?.featured),
+        seo_title: product?.seo_title || "",
+        seo_description: product?.seo_description || "",
+        vendor: product?.vendor || "",
+        product_category: product?.product_category || "",
+        type: product?.type || "",
+        tags: product?.tags || "",
       }),
     });
 
@@ -148,17 +187,70 @@ export default function AdminProductImagesPage({
     setProduct((prev) => ({
       ...(prev || {}),
       image: mainItem?.image_url || "",
-      image_file_id: mainItem?.image_file_id || "",
-      image_alt: mainItem?.alt_text || "",
-      image_uploaded_at: mainItem?.image_uploaded_at || "",
+      status: normalizeStatus(prev?.status),
+      featured: normalizeFeatured(prev?.featured),
     }));
+  }
+
+  async function uploadSingleImage(file: File, index: number, totalFiles: number) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("entityType", "product");
+
+    if (newAltText.trim()) {
+      formData.append("alt", newAltText.trim());
+    }
+
+    const uploadResponse = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const uploadData = await uploadResponse.json();
+
+    if (!uploadResponse.ok || !uploadData.ok || !uploadData.url) {
+      throw new Error(uploadData?.error || "Failed to upload image.");
+    }
+
+    const baseSort = Number(newSortOrder || "0");
+    const computedSortOrder =
+      Number.isFinite(baseSort) && baseSort > 0
+        ? String(baseSort + index)
+        : String(items.length + index + 1);
+
+    const computedIsMain =
+      newIsMain === "true" && index === 0 ? "true" : "false";
+
+    const createResponse = await fetch("/api/product-images/create", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        product_slug: slug,
+        image_url: uploadData.url,
+        image_file_id: uploadData.file_id || uploadData.file_name || "",
+        image_uploaded_at: uploadData.uploaded_at || new Date().toISOString(),
+        sort_order: computedSortOrder,
+        alt_text: newAltText.trim(),
+        is_main: computedIsMain,
+      }),
+    });
+
+    const createData = await createResponse.json();
+
+    if (!createResponse.ok || !createData.ok) {
+      throw new Error(createData?.error || "Failed to save gallery image.");
+    }
+
+    return createData.item as ProductImageItem;
   }
 
   async function handleCreateImage(
     e: React.ChangeEvent<HTMLInputElement>
   ) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
 
     setUploadError("");
     setResultMessage("");
@@ -166,49 +258,23 @@ export default function AdminProductImagesPage({
     setUploading(true);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("entityType", "product");
-      formData.append("alt", newAltText || file.name || "Product gallery image");
+      const createdItems: ProductImageItem[] = [];
 
-      const uploadResponse = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const uploadData = await uploadResponse.json();
-
-      if (!uploadResponse.ok || !uploadData.ok || !uploadData.url) {
-        throw new Error(uploadData?.error || "Failed to upload image.");
+      for (let i = 0; i < files.length; i += 1) {
+        const created = await uploadSingleImage(files[i], i, files.length);
+        createdItems.push(created);
       }
 
-      const createResponse = await fetch("/api/product-images/create", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          product_slug: slug,
-          image_url: uploadData.url,
-          image_file_id: uploadData.file_id || uploadData.file_name || "",
-          image_uploaded_at: uploadData.uploaded_at || new Date().toISOString(),
-          sort_order: newSortOrder,
-          alt_text: newAltText || uploadData.alt || "",
-          is_main: newIsMain,
-        }),
-      });
-
-      const createData = await createResponse.json();
-
-      if (!createResponse.ok || !createData.ok) {
-        throw new Error(createData?.error || "Failed to save gallery image.");
-      }
-
-      const nextItems = [...items, createData.item];
+      const nextItems = [...items, ...createdItems];
       setItems(nextItems);
 
-      if (String(newIsMain) === "true") {
-        await handleSetMain(createData.item.id, nextItems);
+      if (newIsMain === "true") {
+        const firstCreatedMainId = createdItems[0]?.id;
+        if (firstCreatedMainId) {
+          await handleSetMain(firstCreatedMainId, nextItems);
+        } else {
+          await syncProductMainImage(nextItems);
+        }
       } else {
         await syncProductMainImage(nextItems);
       }
@@ -216,7 +282,12 @@ export default function AdminProductImagesPage({
       setNewAltText("");
       setNewSortOrder("");
       setNewIsMain("false");
-      setResultMessage("Gallery image added successfully.");
+
+      setResultMessage(
+        files.length === 1
+          ? "Gallery image added successfully."
+          : `${files.length} gallery images added successfully.`
+      );
     } catch (error) {
       setUploadError(
         error instanceof Error ? error.message : "Failed to add gallery image."
@@ -250,10 +321,11 @@ export default function AdminProductImagesPage({
       const formData = new FormData();
       formData.append("file", file);
       formData.append("entityType", "product");
-      formData.append(
-        "alt",
-        current.alt_text || file.name || "Product gallery image"
-      );
+
+      if (String(current.alt_text || "").trim()) {
+        formData.append("alt", String(current.alt_text || "").trim());
+      }
+
       formData.append("deleteOldFile", "true");
       formData.append("oldImageUrl", current.image_url || "");
       formData.append("oldImageFileId", current.image_file_id || "");
@@ -399,7 +471,10 @@ export default function AdminProductImagesPage({
     }
   }
 
-  async function handleSetMain(targetId?: string, sourceItems?: ProductImageItem[]) {
+  async function handleSetMain(
+    targetId?: string,
+    sourceItems?: ProductImageItem[]
+  ) {
     if (!targetId) return;
 
     try {
@@ -455,6 +530,39 @@ export default function AdminProductImagesPage({
     }
   }
 
+  async function handleFixMissingAltTexts() {
+    try {
+      setFixingAltTexts(true);
+      setResultMessage("");
+      setResultError("");
+
+      const response = await fetch("/api/product-images/fix-missing-alt-texts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mode: "overwrite_weak",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || "Failed to fix image alt texts.");
+      }
+
+      await loadPage();
+      setResultMessage(data?.message || "Image alt texts fixed successfully.");
+    } catch (error) {
+      setResultError(
+        error instanceof Error ? error.message : "Failed to fix image alt texts."
+      );
+    } finally {
+      setFixingAltTexts(false);
+    }
+  }
+
   if (loading) {
     return <div style={cardStyle}>Loading...</div>;
   }
@@ -480,6 +588,15 @@ export default function AdminProductImagesPage({
           <Link href={`/products/${slug}`} style={secondaryButtonStyle}>
             View Product
           </Link>
+
+          <button
+            type="button"
+            style={secondaryButtonStyle}
+            onClick={handleFixMissingAltTexts}
+            disabled={fixingAltTexts}
+          >
+            {fixingAltTexts ? "Fixing Alt Texts..." : "Fix Missing Alt Texts"}
+          </button>
         </div>
       </div>
 
@@ -493,7 +610,7 @@ export default function AdminProductImagesPage({
               value={newAltText}
               onChange={(e) => setNewAltText(e.target.value)}
               style={inputStyle}
-              placeholder="Gallery image alt text"
+              placeholder="Leave empty for auto-generated alt text"
             />
           </div>
 
@@ -526,6 +643,7 @@ export default function AdminProductImagesPage({
                 ref={createInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 onChange={handleCreateImage}
                 style={{ display: "none" }}
               />
@@ -536,7 +654,7 @@ export default function AdminProductImagesPage({
                 onClick={() => createInputRef.current?.click()}
                 disabled={uploading}
               >
-                {uploading ? "Uploading..." : "Upload New Image"}
+                {uploading ? "Uploading..." : "Upload Image(s)"}
               </button>
             </div>
           </div>

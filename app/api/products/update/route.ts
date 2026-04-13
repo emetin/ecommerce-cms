@@ -78,18 +78,6 @@ export async function POST(req: Request) {
       ? normalizeText(body?.image)
       : normalizeText(current.image);
 
-    const nextImageFileId = hasOwn(body, "image_file_id")
-      ? normalizeText(body?.image_file_id)
-      : normalizeText(current.image_file_id);
-
-    const nextImageAlt = hasOwn(body, "image_alt")
-      ? normalizeText(body?.image_alt)
-      : normalizeText(current.image_alt);
-
-    const nextImageUploadedAt = hasOwn(body, "image_uploaded_at")
-      ? normalizeText(body?.image_uploaded_at)
-      : normalizeText(current.image_uploaded_at);
-
     const nextGallery = hasOwn(body, "gallery")
       ? normalizeText(body?.gallery)
       : normalizeText(current.gallery);
@@ -154,9 +142,6 @@ export async function POST(req: Request) {
       description: nextDescription,
       short_description: nextShortDescription,
       image: nextImage,
-      image_file_id: nextImageFileId,
-      image_alt: nextImageAlt,
-      image_uploaded_at: nextImageUploadedAt,
       gallery: nextGallery,
       collection_slug: nextCollectionSlug,
       status: nextStatus,

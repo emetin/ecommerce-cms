@@ -11,9 +11,6 @@ type ProductItem = {
   description?: string;
   short_description?: string;
   image?: string;
-  image_file_id?: string;
-  image_alt?: string;
-  image_uploaded_at?: string;
   gallery?: string;
   collection_slug?: string;
   status?: string;
@@ -60,12 +57,17 @@ type ProductImageItem = {
   id?: string;
   product_slug?: string;
   image_url?: string;
-  image_file_id?: string;
   sort_order?: string;
   alt_text?: string;
   is_main?: string;
   created_at?: string;
   updated_at?: string;
+};
+
+type AdminProductDetailPayload = {
+  product: ProductItem;
+  variants: VariantItem[];
+  product_images: ProductImageItem[];
 };
 
 function parsePrice(value?: string) {
@@ -123,17 +125,12 @@ export default function AdminProductDetailPage({
   const [productImages, setProductImages] = useState<ProductImageItem[]>([]);
 
   const [loading, setLoading] = useState(true);
-  const [variantsLoading, setVariantsLoading] = useState(false);
-  const [imagesLoading, setImagesLoading] = useState(false);
   const [pageError, setPageError] = useState("");
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [shortDescription, setShortDescription] = useState("");
   const [image, setImage] = useState("");
-  const [imageFileId, setImageFileId] = useState("");
-  const [imageAlt, setImageAlt] = useState("");
-  const [imageUploadedAt, setImageUploadedAt] = useState("");
   const [gallery, setGallery] = useState("");
   const [collectionSlug, setCollectionSlug] = useState("");
   const [statusValue, setStatusValue] = useState("draft");
@@ -149,9 +146,6 @@ export default function AdminProductDetailPage({
   const [productSaveMessage, setProductSaveMessage] = useState("");
   const [productSaveError, setProductSaveError] = useState("");
   const [productDeleteLoading, setProductDeleteLoading] = useState(false);
-
-  const [imageUploading, setImageUploading] = useState(false);
-  const [imageUploadError, setImageUploadError] = useState("");
 
   const [option1Name, setOption1Name] = useState("Size");
   const [option1Value, setOption1Value] = useState("");
@@ -178,41 +172,43 @@ export default function AdminProductDetailPage({
   const [saveError, setSaveError] = useState("");
   const [deleteLoadingId, setDeleteLoadingId] = useState("");
 
-  const productLoadedSlugRef = useRef("");
-  const variantsLoadedSlugRef = useRef("");
-  const imagesLoadedSlugRef = useRef("");
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const loadedSlugRef = useRef("");
 
-  const loadProduct = useCallback(async () => {
+  const loadProductDetail = useCallback(async () => {
     try {
       setLoading(true);
       setPageError("");
 
-      const productResponse = await fetch(
-        `/api/products/get?slug=${encodeURIComponent(slug)}`,
+      const response = await fetch(
+        `/api/admin/products/detail?slug=${encodeURIComponent(slug)}`,
         { cache: "no-store" }
       );
 
-      const productData = await productResponse.json();
+      const data = await response.json();
 
-      if (!productResponse.ok || !productData.ok) {
-        throw new Error(productData?.error || "Failed to load product.");
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || "Failed to load product detail.");
       }
 
-      const foundProduct = productData.item || null;
+      const payload = (data.item || {}) as AdminProductDetailPayload;
+      const foundProduct = payload.product || null;
+      const foundVariants = Array.isArray(payload.variants) ? payload.variants : [];
+      const foundImages = Array.isArray(payload.product_images)
+        ? payload.product_images
+        : [];
 
       if (!foundProduct) {
         throw new Error("Product not found.");
       }
 
       setProduct(foundProduct);
+      setVariants(foundVariants);
+      setProductImages(foundImages);
+
       setTitle(foundProduct.title || "");
       setDescription(foundProduct.description || "");
       setShortDescription(foundProduct.short_description || "");
       setImage(foundProduct.image || "");
-      setImageFileId(foundProduct.image_file_id || "");
-      setImageAlt(foundProduct.image_alt || "");
-      setImageUploadedAt(foundProduct.image_uploaded_at || "");
       setGallery(foundProduct.gallery || "");
       setCollectionSlug(foundProduct.collection_slug || "");
       setStatusValue(foundProduct.status || "draft");
@@ -232,77 +228,13 @@ export default function AdminProductDetailPage({
     }
   }, [slug]);
 
-  const loadVariants = useCallback(async () => {
-    try {
-      setVariantsLoading(true);
-
-      const response = await fetch(
-        `/api/variants/list?product_slug=${encodeURIComponent(slug)}`,
-        { cache: "no-store" }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to load variants.");
-      }
-
-      setVariants(Array.isArray(data.items) ? data.items : []);
-    } catch (error) {
-      console.error("Failed to load variants:", error);
-      setVariants([]);
-    } finally {
-      setVariantsLoading(false);
-    }
-  }, [slug]);
-
-  const loadImages = useCallback(async () => {
-    try {
-      setImagesLoading(true);
-
-      const response = await fetch(
-        `/api/product-images/list?product_slug=${encodeURIComponent(slug)}`,
-        { cache: "no-store" }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to load product images.");
-      }
-
-      setProductImages(Array.isArray(data.items) ? data.items : []);
-    } catch (error) {
-      console.error("Failed to load product images:", error);
-      setProductImages([]);
-    } finally {
-      setImagesLoading(false);
-    }
-  }, [slug]);
-
   useEffect(() => {
     if (!slug) return;
-    if (productLoadedSlugRef.current === slug) return;
+    if (loadedSlugRef.current === slug) return;
 
-    productLoadedSlugRef.current = slug;
-    loadProduct();
-  }, [slug, loadProduct]);
-
-  useEffect(() => {
-    if (!slug) return;
-    if (variantsLoadedSlugRef.current === slug) return;
-
-    variantsLoadedSlugRef.current = slug;
-    loadVariants();
-  }, [slug, loadVariants]);
-
-  useEffect(() => {
-    if (!slug) return;
-    if (imagesLoadedSlugRef.current === slug) return;
-
-    imagesLoadedSlugRef.current = slug;
-    loadImages();
-  }, [slug, loadImages]);
+    loadedSlugRef.current = slug;
+    loadProductDetail();
+  }, [slug, loadProductDetail]);
 
   const optionPreview = useMemo(() => {
     const values = [option1Value, option2Value, option3Value]
@@ -349,79 +281,6 @@ export default function AdminProductDetailPage({
     };
   }, [sortedImages]);
 
-  async function handlePrimaryImageReplace(
-    e: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setImageUploadError("");
-    setImageUploading(true);
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("entityType", "product");
-      formData.append("alt", title || file.name || "Product image");
-      formData.append("oldImageUrl", image || "");
-      formData.append("oldFileId", imageFileId || "");
-
-      const response = await fetch("/api/media/replace", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.ok || !data.url) {
-        throw new Error(data?.error || "Image replace failed.");
-      }
-
-      setImage(data.url || "");
-      setImageFileId(data.file_id || "");
-      setImageAlt(data.alt || "");
-      setImageUploadedAt(data.uploaded_at || "");
-    } catch (error) {
-      setImageUploadError(
-        error instanceof Error ? error.message : "Image replace failed."
-      );
-    } finally {
-      setImageUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
-  }
-
-  async function handlePrimaryImageRemove() {
-    try {
-      if (image || imageFileId) {
-        await fetch("/api/media/delete", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            file_id: imageFileId,
-            image_url: image,
-          }),
-        });
-      }
-    } catch (error) {
-      console.error("Failed to delete primary image local file:", error);
-    }
-
-    setImage("");
-    setImageFileId("");
-    setImageAlt("");
-    setImageUploadedAt("");
-    setImageUploadError("");
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  }
-
   async function handleProductSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
@@ -441,9 +300,6 @@ export default function AdminProductDetailPage({
           description,
           short_description: shortDescription,
           image,
-          image_file_id: imageFileId,
-          image_alt: imageAlt,
-          image_uploaded_at: imageUploadedAt,
           gallery,
           collection_slug: collectionSlug,
           status: statusValue,
@@ -464,7 +320,7 @@ export default function AdminProductDetailPage({
       }
 
       setProductSaveMessage("Product updated successfully.");
-      await Promise.all([loadProduct(), loadImages()]);
+      await loadProductDetail();
     } catch (error) {
       setProductSaveError(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -574,7 +430,7 @@ export default function AdminProductDetailPage({
       setWeightUnit("kg");
       setVariantStatus("published");
 
-      await loadVariants();
+      await loadProductDetail();
     } catch (error) {
       setSaveError(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -696,9 +552,7 @@ export default function AdminProductDetailPage({
 
         <div style={summaryCardStyle}>
           <div style={summaryLabelStyle}>Variants</div>
-          <div style={summaryValueStyle}>
-            {variantsLoading ? "..." : variants.length}
-          </div>
+          <div style={summaryValueStyle}>{variants.length}</div>
         </div>
       </div>
 
@@ -772,13 +626,11 @@ export default function AdminProductDetailPage({
             </p>
           </div>
 
-          {imagesLoading ? (
-            <div style={emptyStateStyle}>Loading gallery preview...</div>
-          ) : currentPrimaryImageUrl ? (
+          {currentPrimaryImageUrl ? (
             <div style={mainPreviewWrapStyle}>
               <img
                 src={currentPrimaryImageUrl}
-                alt={imageAlt || product.title || "Product image"}
+                alt={product.title || "Product image"}
                 style={mainPreviewImageStyle}
               />
               <div style={mainPreviewMetaStyle}>
@@ -906,89 +758,16 @@ export default function AdminProductDetailPage({
           </div>
 
           <div style={{ gridColumn: "1 / -1" }}>
-            <label style={labelStyle}>Primary Image Field</label>
-
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                flexWrap: "wrap",
-                marginBottom: 12,
-              }}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handlePrimaryImageReplace}
-                style={{ display: "none" }}
-              />
-
-              <button
-                type="button"
-                style={secondaryButtonStyle}
-                onClick={() => fileInputRef.current?.click()}
-                disabled={imageUploading}
-              >
-                {imageUploading ? "Uploading..." : "Replace Primary Image"}
-              </button>
-
-              {image ? (
-                <button
-                  type="button"
-                  style={dangerSmallButtonStyle}
-                  onClick={handlePrimaryImageRemove}
-                >
-                  Remove Primary Image
-                </button>
-              ) : null}
-            </div>
-
-            {imageUploadError ? (
-              <div style={errorBoxStyle}>{imageUploadError}</div>
-            ) : null}
-
+            <label style={labelStyle}>Primary Image URL</label>
             <input
               value={image}
               onChange={(e) => setImage(e.target.value)}
               placeholder="Main product image URL"
               style={inputStyle}
             />
-
             <div style={helperTextStyle}>
-              This field is usually synced from Image Manager, but can also be
-              stored with metadata for media traceability.
+              This is the legacy main image field stored directly on the product row.
             </div>
-          </div>
-
-          <div>
-            <label style={labelStyle}>Image File ID</label>
-            <input
-              value={imageFileId}
-              onChange={(e) => setImageFileId(e.target.value)}
-              placeholder="Local file name"
-              style={inputStyle}
-            />
-          </div>
-
-          <div>
-            <label style={labelStyle}>Image Alt</label>
-            <input
-              value={imageAlt}
-              onChange={(e) => setImageAlt(e.target.value)}
-              placeholder="Product image alt text"
-              style={inputStyle}
-            />
-          </div>
-
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label style={labelStyle}>Image Uploaded At</label>
-            <input
-              value={imageUploadedAt}
-              onChange={(e) => setImageUploadedAt(e.target.value)}
-              placeholder="ISO date"
-              style={inputStyle}
-            />
           </div>
 
           <div style={{ gridColumn: "1 / -1" }}>
@@ -1312,9 +1091,7 @@ export default function AdminProductDetailPage({
             </p>
           </div>
 
-          {variantsLoading ? (
-            <div style={emptyStateStyle}>Loading variants...</div>
-          ) : variants.length === 0 ? (
+          {variants.length === 0 ? (
             <div style={emptyStateStyle}>
               No variants have been created for this product yet.
             </div>

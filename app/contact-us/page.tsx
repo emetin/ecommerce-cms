@@ -13,6 +13,11 @@ export default function ContactUsPage() {
     email: "",
     phone: "",
     company: "",
+    company_type: "",
+    project_type: "",
+    estimated_quantity: "",
+    target_market: "",
+    requested_categories: "",
     message: "",
   });
 
@@ -45,13 +50,18 @@ export default function ContactUsPage() {
         throw new Error(data?.error || "Failed to submit form.");
       }
 
-      setResultMessage("Your message has been sent successfully.");
+      setResultMessage("Your inquiry has been sent successfully.");
       setForm({
         first_name: "",
         last_name: "",
         email: "",
         phone: "",
         company: "",
+        company_type: "",
+        project_type: "",
+        estimated_quantity: "",
+        target_market: "",
+        requested_categories: "",
         message: "",
       });
     } catch (error) {
@@ -74,7 +84,7 @@ export default function ContactUsPage() {
         }}
       >
         <Container>
-          <div style={{ maxWidth: 860 }}>
+          <div style={{ maxWidth: 900 }}>
             <div
               style={{
                 display: "inline-flex",
@@ -91,7 +101,7 @@ export default function ContactUsPage() {
                 marginBottom: 18,
               }}
             >
-              Contact Us
+              B2B Inquiry
             </div>
 
             <h1
@@ -104,7 +114,7 @@ export default function ContactUsPage() {
                 color: "#171717",
               }}
             >
-              Start a conversation with a more structured and confident textile brand
+              Start a hospitality sourcing conversation with a clearer project brief
             </h1>
 
             <p
@@ -116,7 +126,7 @@ export default function ContactUsPage() {
                 lineHeight: 1.9,
               }}
             >
-              Reach out to discuss textile categories, collections and future project requirements.
+              Share your company details, project type, target market, and requested categories so your inquiry reaches the right direction from the beginning.
             </p>
           </div>
         </Container>
@@ -135,9 +145,9 @@ export default function ContactUsPage() {
               }}
             >
               <SectionHeading
-                kicker="Contact Form"
-                title="A contact-first approach fits this structure best"
-                text="This form saves submissions to a separate Google Sheet so the project stays lightweight and organized."
+                kicker="Project Inquiry Form"
+                title="Share the essentials of your sourcing request"
+                text="This form is structured to collect more useful B2B lead data for hospitality, residence, and project-based textile discussions."
               />
 
               <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
@@ -193,16 +203,110 @@ export default function ContactUsPage() {
                   </div>
                 </div>
 
-                <div>
-                  <label style={labelStyle}>Company</label>
-                  <input
-                    type="text"
-                    style={inputStyle}
-                    value={form.company}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, company: e.target.value }))
-                    }
-                  />
+                <div className="form-grid-2">
+                  <div>
+                    <label style={labelStyle}>Company</label>
+                    <input
+                      type="text"
+                      style={inputStyle}
+                      value={form.company}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, company: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  <div>
+                    <label style={labelStyle}>Company Type</label>
+                    <select
+                      style={inputStyle}
+                      value={form.company_type}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, company_type: e.target.value }))
+                      }
+                    >
+                      <option value="">Select</option>
+                      <option value="Hotel">Hotel</option>
+                      <option value="Resort">Resort</option>
+                      <option value="Residence">Residence</option>
+                      <option value="Property Management">Property Management</option>
+                      <option value="Procurement Company">Procurement Company</option>
+                      <option value="Designer / Architect">Designer / Architect</option>
+                      <option value="Distributor">Distributor</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-grid-2">
+                  <div>
+                    <label style={labelStyle}>Project Type</label>
+                    <select
+                      style={inputStyle}
+                      value={form.project_type}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, project_type: e.target.value }))
+                      }
+                    >
+                      <option value="">Select</option>
+                      <option value="New Opening">New Opening</option>
+                      <option value="Renovation">Renovation</option>
+                      <option value="Seasonal Replenishment">Seasonal Replenishment</option>
+                      <option value="Sample Request">Sample Request</option>
+                      <option value="Long-Term Supply">Long-Term Supply</option>
+                      <option value="Custom Program">Custom Program</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={labelStyle}>Estimated Quantity</label>
+                    <input
+                      type="text"
+                      style={inputStyle}
+                      placeholder="Ex: 500 bath towels / 120 bedding sets"
+                      value={form.estimated_quantity}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          estimated_quantity: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="form-grid-2">
+                  <div>
+                    <label style={labelStyle}>Target Market / Delivery Country</label>
+                    <input
+                      type="text"
+                      style={inputStyle}
+                      placeholder="Ex: USA, Miami / Bahamas / Maldives"
+                      value={form.target_market}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          target_market: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  <div>
+                    <label style={labelStyle}>Requested Categories</label>
+                    <input
+                      type="text"
+                      style={inputStyle}
+                      placeholder="Ex: Towels, Bedding, Robes, Pool Towels"
+                      value={form.requested_categories}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          requested_categories: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
                 </div>
 
                 <div>
@@ -213,12 +317,13 @@ export default function ContactUsPage() {
                     onChange={(e) =>
                       setForm((prev) => ({ ...prev, message: e.target.value }))
                     }
+                    placeholder="Share the scope, timeline, product priorities, or any important details."
                   />
                 </div>
 
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                   <button type="submit" style={primaryButtonStyle} disabled={loading}>
-                    {loading ? "Sending..." : "Send Message"}
+                    {loading ? "Sending..." : "Send Inquiry"}
                   </button>
                   <ButtonLink href="/collections" variant="secondary">
                     Explore Collections
@@ -242,26 +347,26 @@ export default function ContactUsPage() {
               }}
             >
               <div style={infoCardStyle}>
-                <div style={infoKickerStyle}>General Contact</div>
-                <div style={infoTitleStyle}>Corporate communication</div>
+                <div style={infoKickerStyle}>Lead Quality</div>
+                <div style={infoTitleStyle}>More useful first contact</div>
                 <div style={infoTextStyle}>
-                  Use this area for general inquiries, category discussions and brand communication.
+                  Collecting project type, quantity, and target market helps the conversation start with more relevant context.
+                </div>
+              </div>
+
+              <div style={infoCardStyle}>
+                <div style={infoKickerStyle}>Hospitality Focus</div>
+                <div style={infoTitleStyle}>Better fit for B2B buyers</div>
+                <div style={infoTextStyle}>
+                  The form is designed for hotels, resorts, residences, procurement teams, and long-term project-based inquiries.
                 </div>
               </div>
 
               <div style={infoCardStyle}>
                 <div style={infoKickerStyle}>Collections</div>
-                <div style={infoTitleStyle}>Product and category discussions</div>
+                <div style={infoTitleStyle}>Category-driven discussion</div>
                 <div style={infoTextStyle}>
-                  Direct visitors toward collections and product-family conversations rather than retail behavior.
-                </div>
-              </div>
-
-              <div style={infoCardStyle}>
-                <div style={infoKickerStyle}>Partnership</div>
-                <div style={infoTitleStyle}>Long-term textile perspective</div>
-                <div style={infoTextStyle}>
-                  This website structure is strongest when it supports trust, clarity and future project dialogue.
+                  Buyers can align their inquiry with categories such as bedding, towels, robes, and other hospitality textile groups.
                 </div>
               </div>
             </div>

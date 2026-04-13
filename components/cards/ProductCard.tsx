@@ -7,6 +7,8 @@ type ProductCardProps = {
   image: string;
   href: string;
   collectionLabel?: string;
+  vendor?: string;
+  productCategory?: string;
 };
 
 const FALLBACK_IMAGE =
@@ -17,8 +19,12 @@ export default function ProductCard({
   description,
   image,
   href,
+  collectionLabel,
+  vendor,
+  productCategory,
 }: ProductCardProps) {
-  const finalImage = normalizeImageUrl(String(image || "").trim()) || FALLBACK_IMAGE;
+  const finalImage =
+    normalizeImageUrl(String(image || "").trim()) || FALLBACK_IMAGE;
 
   return (
     <Link
@@ -66,9 +72,31 @@ export default function ProductCard({
             padding: 18,
             display: "grid",
             gap: 10,
-            minHeight: 170,
+            minHeight: 210,
           }}
         >
+          {collectionLabel || vendor || productCategory ? (
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              {collectionLabel ? (
+                <span style={badgeStyle}>{collectionLabel}</span>
+              ) : null}
+
+              {vendor ? (
+                <span style={badgeStyleAlt}>{vendor}</span>
+              ) : null}
+
+              {productCategory ? (
+                <span style={badgeStyleAlt}>{productCategory}</span>
+              ) : null}
+            </div>
+          ) : null}
+
           <h3
             style={{
               margin: 0,
@@ -89,7 +117,7 @@ export default function ProductCard({
                 lineHeight: 1.7,
                 fontSize: 14,
                 display: "-webkit-box",
-                WebkitLineClamp: 2,
+                WebkitLineClamp: 3,
                 WebkitBoxOrient: "vertical",
                 overflow: "hidden",
               }}
@@ -118,7 +146,7 @@ export default function ProductCard({
                 letterSpacing: "0.06em",
               }}
             >
-              Product Detail
+              B2B Product Detail
             </div>
 
             <span
@@ -135,7 +163,7 @@ export default function ProductCard({
                 color: "#171717",
               }}
             >
-              Explore →
+              Review →
             </span>
           </div>
         </div>
@@ -143,3 +171,31 @@ export default function ProductCard({
     </Link>
   );
 }
+
+const badgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 28,
+  padding: "0 10px",
+  borderRadius: 999,
+  background: "#f3ede3",
+  color: "#2f7d62",
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+};
+
+const badgeStyleAlt: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 28,
+  padding: "0 10px",
+  borderRadius: 999,
+  background: "#faf7f1",
+  color: "#6a6155",
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+};

@@ -19,6 +19,9 @@ type ProductItem = {
   collection_slug?: string;
   status?: string;
   featured?: string;
+  vendor?: string;
+  product_category?: string;
+  type?: string;
 };
 
 type CollectionItem = {
@@ -38,10 +41,14 @@ type BlogItem = {
   status?: string;
 };
 
+function normalizeText(value?: string) {
+  return String(value || "").trim();
+}
+
 export const metadata: Metadata = buildPageMetadata({
-  title: "Global CMS",
+  title: "Wholesale Hospitality Textile Collections",
   description:
-    "Global CMS presents a structured catalog experience powered by Google Sheets, internal admin workflows, and scalable content architecture.",
+    "Explore structured B2B hospitality textile collections, product categories, and project-ready sourcing solutions built for hotels, resorts, residences, and contract supply needs.",
   path: "/",
 });
 
@@ -64,7 +71,7 @@ export default async function HomePage() {
     (item) => String(item.status || "").trim().toLowerCase() === "published"
   );
 
-  const featuredProducts = products.slice(0, 3);
+  const featuredProducts = products.slice(0, 6);
   const featuredCollections = collections.slice(0, 4);
   const blogPosts = blog.slice(0, 3);
 
@@ -73,7 +80,7 @@ export default async function HomePage() {
       <section className="home-hero">
         <img
           src="https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1800&q=80"
-          alt="Global CMS"
+          alt="Hospitality textile collections"
           className="home-hero__image"
         />
 
@@ -81,16 +88,15 @@ export default async function HomePage() {
 
         <Container>
           <div className="home-hero__inner">
-            <div className="home-hero__badge">Structured Content Management</div>
+            <div className="home-hero__badge">B2B Hospitality Textile Platform</div>
 
             <div className="home-hero__copy">
               <h1 className="home-hero__title">
-                Scalable Catalog Management for Products, Collections and Editorial Content
+                Structured wholesale textile presentation for hotels, resorts, residences, and project-based sourcing
               </h1>
 
               <p className="home-hero__text">
-                Global CMS brings together structured content, flexible data management,
-                and a cleaner digital presentation for modern catalog-based websites.
+                Present collections, categories, and product families through a cleaner B2B experience designed for hospitality decision-makers and long-term procurement conversations.
               </p>
             </div>
 
@@ -103,26 +109,26 @@ export default async function HomePage() {
 
             <div className="home-hero__features">
               <div className="home-hero__feature">
-                <div className="home-hero__feature-kicker">Architecture</div>
-                <div className="home-hero__feature-title">Structured</div>
+                <div className="home-hero__feature-kicker">Collections</div>
+                <div className="home-hero__feature-title">Category-led</div>
                 <div className="home-hero__feature-text">
-                  Built around modular content, clear hierarchy and long-term maintainability.
+                  Guide buyers through curated product groups instead of disconnected listings.
                 </div>
               </div>
 
               <div className="home-hero__feature">
-                <div className="home-hero__feature-kicker">Content</div>
-                <div className="home-hero__feature-title">Flexible</div>
+                <div className="home-hero__feature-kicker">Presentation</div>
+                <div className="home-hero__feature-title">Project-ready</div>
                 <div className="home-hero__feature-text">
-                  A lightweight system for managing products, collections and editorial content.
+                  Support hotel, resort, residence, and contract procurement discussions with clearer structure.
                 </div>
               </div>
 
               <div className="home-hero__feature">
                 <div className="home-hero__feature-kicker">Workflow</div>
-                <div className="home-hero__feature-title">Reliable</div>
+                <div className="home-hero__feature-title">Scalable</div>
                 <div className="home-hero__feature-text">
-                  A practical admin structure powered by Google Sheets and internal tools.
+                  Manage products, media, and collection relations through a lean content architecture.
                 </div>
               </div>
             </div>
@@ -132,12 +138,12 @@ export default async function HomePage() {
 
       <ScrollPromo
         items={[
+          "Hospitality Textile Collections",
+          "Wholesale Product Presentation",
+          "Project-Based Procurement Support",
+          "Collection-Driven Catalog Structure",
+          "B2B Lead Generation Flow",
           "Google Sheets Powered CMS",
-          "Structured Product Management",
-          "Collection-Driven Architecture",
-          "Editorial Content Support",
-          "Scalable Internal Admin Panel",
-          "Flexible Catalog Workflow",
         ]}
       />
 
@@ -145,34 +151,34 @@ export default async function HomePage() {
         <Container>
           <div className="home-feature-grid">
             <article className="home-feature-card">
-              <div style={featureKickerStyle}>01 / Identity</div>
-              <h3 style={featureTitleStyle}>A cleaner product foundation</h3>
+              <div style={featureKickerStyle}>01 / Positioning</div>
+              <h3 style={featureTitleStyle}>Built for B2B presentation</h3>
               <p style={featureTextStyle}>
-                The system is built to feel reliable, clear and scalable from the beginning.
+                The experience is shaped to feel more suitable for wholesale buyers, project teams, and procurement conversations.
               </p>
             </article>
 
             <article className="home-feature-card">
-              <div style={featureKickerStyle}>02 / Clarity</div>
-              <h3 style={featureTitleStyle}>Collections lead the structure</h3>
+              <div style={featureKickerStyle}>02 / Structure</div>
+              <h3 style={featureTitleStyle}>Collections guide the journey</h3>
               <p style={featureTextStyle}>
-                Category hierarchy and collection flow make the browsing experience more intentional.
+                A collection-first structure helps visitors understand categories, product families, and sourcing direction faster.
               </p>
             </article>
 
             <article className="home-feature-card">
-              <div style={featureKickerStyle}>03 / Presentation</div>
-              <h3 style={featureTitleStyle}>Editorial, not overloaded</h3>
+              <div style={featureKickerStyle}>03 / Clarity</div>
+              <h3 style={featureTitleStyle}>Products feel more intentional</h3>
               <p style={featureTextStyle}>
-                The interface stays focused on clarity, spacing and strong content presentation.
+                Vendor, product category, and type data make each product page more useful in B2B context.
               </p>
             </article>
 
             <article className="home-feature-card">
-              <div style={featureKickerStyle}>04 / Future</div>
-              <h3 style={featureTitleStyle}>Ready for expansion</h3>
+              <div style={featureKickerStyle}>04 / Conversion</div>
+              <h3 style={featureTitleStyle}>Designed for inquiry, not retail noise</h3>
               <p style={featureTextStyle}>
-                The structure supports future growth without forcing unnecessary ecommerce complexity today.
+                Contact flow, request mindset, and category presentation are aligned with sales-qualified lead generation.
               </p>
             </article>
           </div>
@@ -184,40 +190,37 @@ export default async function HomePage() {
           <div className="home-split">
             <div className="home-split__panel">
               <SectionHeading
-                kicker="About Global CMS"
-                title="A calmer, stronger and more structured content experience"
-                text="This homepage is positioned to feel more like a scalable content platform than a temporary catalog layout."
+                kicker="Hospitality Focus"
+                title="A cleaner textile presentation for project-based B2B buyers"
+                text="This structure is stronger for hospitality procurement than a generic catalog or retail-first storefront."
               />
 
               <p>
-                The structure supports better rhythm, stronger category hierarchy and
-                a cleaner product presentation. Instead of pushing users into a heavy
-                ecommerce experience, it gives them space to understand the system,
-                the collections and the overall content architecture.
+                Buyers evaluating hospitality textile partners usually want clarity, category confidence, and a smoother path to inquiry.
+                This experience is built to support that behavior through better hierarchy and more structured product presentation.
               </p>
 
               <p>
-                That clarity creates confidence. It feels more intentional,
-                better organized and more suitable for teams that want
-                maintainable content operations.
+                Instead of overwhelming visitors with retail-style friction, the site creates room for collections, product families,
+                and long-term sourcing conversations.
               </p>
             </div>
 
             <div className="home-split__media">
               <img
                 src="https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1400&q=80"
-                alt="Content architecture"
+                alt="Hospitality sourcing structure"
               />
               <div className="home-split__media-overlay" />
               <div className="home-split__media-card">
                 <div className="home-split__media-card-kicker">
-                  Scalable Content Foundation
+                  B2B Textile Presentation
                 </div>
                 <div className="home-split__media-card-title">
-                  Better structure creates better long-term control
+                  Better hierarchy creates stronger procurement confidence
                 </div>
                 <div className="home-split__media-card-text">
-                  A few careful architectural decisions can create much more value than visual complexity.
+                  Strong collection structure and clear product detail create a more useful experience for wholesale buyers.
                 </div>
               </div>
             </div>
@@ -229,8 +232,8 @@ export default async function HomePage() {
         <Container>
           <SectionHeading
             kicker="Collections"
-            title="A more elegant collection-first structure"
-            text="Collections are the primary exploration layer, helping the project feel more structured and category-led."
+            title="Explore category-led hospitality collections"
+            text="Collections act as the primary browsing layer for buyers reviewing textile categories and sourcing directions."
           />
 
           {featuredCollections.length > 0 ? (
@@ -241,7 +244,7 @@ export default async function HomePage() {
                   title={item.title || "Collection"}
                   description={
                     item.description ||
-                    "Explore this collection inside the Global CMS structure."
+                    "Explore this collection inside the hospitality textile structure."
                   }
                   image={item.image || ""}
                   href={`/collections/${item.slug || ""}`}
@@ -258,8 +261,8 @@ export default async function HomePage() {
         <Container>
           <SectionHeading
             kicker="Product Showcase"
-            title="Products presented with more clarity and consistency"
-            text="The cards stay simple, while spacing and hierarchy support a stronger catalog experience."
+            title="Products presented for wholesale and project inquiry"
+            text="Each card is designed to support B2B review with cleaner structure, better category context, and stronger inquiry direction."
           />
 
           {featuredProducts.length > 0 ? (
@@ -271,11 +274,13 @@ export default async function HomePage() {
                   description={
                     item.short_description ||
                     item.description ||
-                    "Explore this product inside the Global CMS structure."
+                    "Explore this product inside the hospitality textile structure."
                   }
                   image={item.image || ""}
                   href={`/products/${item.slug || ""}`}
                   collectionLabel={item.collection_slug || "Product"}
+                  vendor={item.vendor || ""}
+                  productCategory={item.product_category || item.type || ""}
                 />
               ))}
             </div>
@@ -289,8 +294,8 @@ export default async function HomePage() {
         <Container>
           <SectionHeading
             kicker="Editorial"
-            title="Content that supports the full platform"
-            text="Editorial cards help the project feel more complete, organized and presentation-ready."
+            title="Content that supports procurement and category understanding"
+            text="Editorial content helps strengthen trust, explain product groups, and support long-term hospitality conversations."
           />
 
           {blogPosts.length > 0 ? (
@@ -322,21 +327,20 @@ export default async function HomePage() {
             <div className="cta-panel-strong__circle--two" />
 
             <div className="cta-panel-strong__inner">
-              <div className="cta-panel-strong__kicker">Continue exploring</div>
+              <div className="cta-panel-strong__kicker">Start a conversation</div>
 
               <h2 className="cta-panel-strong__title">
-                Explore Global CMS through a cleaner, more structured and scalable architecture
+                Share your hospitality project, product category needs, or sourcing goals
               </h2>
 
               <p className="cta-panel-strong__text">
-                The right amount of quality does not need noise. It needs stronger hierarchy,
-                better rhythm and a more intentional content experience.
+                Move buyers from browsing into a clearer inquiry flow with product families, collection visibility, and structured contact capture.
               </p>
 
               <div className="cta-panel-strong__actions">
-                <ButtonLink href="/collections">View Collections</ButtonLink>
-                <ButtonLink href="/contact-us" variant="secondary">
-                  Contact Us
+                <ButtonLink href="/contact-us">Request Information</ButtonLink>
+                <ButtonLink href="/collections" variant="secondary">
+                  View Collections
                 </ButtonLink>
               </div>
             </div>

@@ -7,6 +7,7 @@ import ProductCard from "../../../components/cards/ProductCard";
 import ButtonLink from "../../../components/ui/ButtonLink";
 import DetailHero from "../../../components/sections/DetailHero";
 import { buildPageMetadata } from "../../../lib/seo";
+import { normalizeImageUrl } from "../../../lib/image-url";
 
 type CollectionItem = {
   id?: string;
@@ -36,7 +37,101 @@ type ProductItem = {
   updated_at?: string;
   seo_title?: string;
   seo_description?: string;
+  vendor?: string;
+  product_category?: string;
+  type?: string;
+  tags?: string;
 };
+
+type CollectionProductItem = {
+  id?: string;
+  collection_slug?: string;
+  product_slug?: string;
+  sort_order?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+function normalizeText(value?: string) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value?: string) {
+  return normalizeText(value).toLowerCase();
+}
+
+function toSafeOrder(value?: string) {
+  const num = Number(normalizeText(value));
+  return Number.isFinite(num) ? num : 999999;
+}
+
+function formatLabel(value?: string, fallback = "Product") {
+  const raw = normalizeText(value);
+  if (!raw) return fallback;
+
+  return raw
+    .split(/[-,_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+async function getCollectionPageData(slug: string) {
+  const [collectionItems, productItems, collectionProductItems] = await Promise.all([
+    getSheetData("collections"),
+    getSheetData("products"),
+    getSheetData("collection_products"),
+  ]);
+
+  const collections = collectionItems as CollectionItem[];
+  const allProducts = productItems as ProductItem[];
+  const collectionProducts = collectionProductItems as CollectionProductItem[];
+
+  const collection =
+    collections.find(
+      (item) =>
+        normalizeLower(item.slug) === slug &&
+        normalizeLower(item.status) === "published"
+    ) || null;
+
+  if (!collection) {
+    return {
+      collection: null,
+      products: [] as ProductItem[],
+    };
+  }
+
+  const publishedProducts = allProducts.filter(
+    (item) => normalizeLower(item.status) === "published" && normalizeText(item.slug)
+  );
+
+  const relatedCollectionProducts = collectionProducts
+    .filter((item) => normalizeLower(item.collection_slug) === slug)
+    .sort((a, b) => toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order));
+
+  let products: ProductItem[] = [];
+
+  if (relatedCollectionProducts.length > 0) {
+    const productMap = new Map<string, ProductItem>();
+
+    for (const item of publishedProducts) {
+      productMap.set(normalizeLower(item.slug), item);
+    }
+
+    products = relatedCollectionProducts
+      .map((relation) => productMap.get(normalizeLower(relation.product_slug)))
+      .filter(Boolean) as ProductItem[];
+  } else {
+    products = publishedProducts.filter(
+      (item) => normalizeLower(item.collection_slug) === slug
+    );
+  }
+
+  return {
+    collection,
+    products,
+  };
+}
 
 export async function generateMetadata({
   params,
@@ -47,14 +142,7 @@ export async function generateMetadata({
   const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
 
   try {
-    const items = (await getSheetData("collections")) as CollectionItem[];
-
-    const collection =
-      items.find(
-        (item) =>
-          String(item.slug || "").trim().toLowerCase() === decodedSlug &&
-          String(item.status || "").trim().toLowerCase() === "published"
-      ) || null;
+    const { collection } = await getCollectionPageData(decodedSlug);
 
     if (!collection) {
       return buildPageMetadata({
@@ -70,7 +158,7 @@ export async function generateMetadata({
         collection.seo_description ||
         collection.description ||
         "Explore this hospitality textile collection.",
-      image: collection.image || "",
+      image: normalizeImageUrl(collection.image || ""),
       path: `/collections/${decodedSlug}`,
     });
   } catch {
@@ -90,36 +178,14 @@ export default async function CollectionDetailPage({
   const { slug } = await params;
   const decodedSlug = decodeURIComponent(slug).trim().toLowerCase();
 
+  let errorMessage = "";
   let collection: CollectionItem | null = null;
   let products: ProductItem[] = [];
-  let errorMessage = "";
 
   try {
-    const [collectionItems, productItems] = await Promise.all([
-      getSheetData("collections"),
-      getSheetData("products"),
-    ]);
-
-    const collections = collectionItems as CollectionItem[];
-    const allProducts = productItems as ProductItem[];
-
-    collection =
-      collections.find(
-        (item) =>
-          String(item.slug || "").trim().toLowerCase() === decodedSlug &&
-          String(item.status || "").trim().toLowerCase() === "published"
-      ) || null;
-
-    if (collection) {
-      products = allProducts.filter((item) => {
-        const itemStatus = String(item.status || "").trim().toLowerCase();
-        const itemCollectionSlug = String(item.collection_slug || "")
-          .trim()
-          .toLowerCase();
-
-        return itemStatus === "published" && itemCollectionSlug === decodedSlug;
-      });
-    }
+    const data = await getCollectionPageData(decodedSlug);
+    collection = data.collection;
+    products = data.products;
   } catch (error) {
     errorMessage =
       error instanceof Error ? error.message : "Unknown error occurred.";
@@ -150,12 +216,12 @@ export default async function CollectionDetailPage({
   }
 
   const heroImage =
-    collection.image?.trim() ||
-    "https://images.unsplash.com/photo-1524758631624-e2822e304c36";
+    normalizeImageUrl(collection.image || "") ||
+    "https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=1400&q=80";
 
-  const collectionTitle = collection.title?.trim() || "Collection";
+  const collectionTitle = normalizeText(collection.title) || "Collection";
   const collectionDescription =
-    collection.description?.trim() ||
+    normalizeText(collection.description) ||
     "Explore this collection of hospitality textiles.";
 
   return (
@@ -170,9 +236,7 @@ export default async function CollectionDetailPage({
             <ButtonLink href="/collections" variant="secondary">
               ← Back to Collections
             </ButtonLink>
-            <ButtonLink href="/contact-us">
-              Request Information
-            </ButtonLink>
+            <ButtonLink href="/contact-us">Request Information</ButtonLink>
           </>
         }
       />
@@ -182,7 +246,7 @@ export default async function CollectionDetailPage({
           <SectionHeading
             kicker="Collection Products"
             title="Products in this collection"
-            text="Browse all products in this category."
+            text="This selection is managed directly through the CMS relation structure for cleaner B2B presentation and ordering."
           />
 
           {products.length > 0 ? (
@@ -199,6 +263,8 @@ export default async function CollectionDetailPage({
                   image={item.image || ""}
                   href={`/products/${item.slug || ""}`}
                   collectionLabel={collectionTitle}
+                  vendor={item.vendor || ""}
+                  productCategory={item.product_category || ""}
                 />
               ))}
             </div>

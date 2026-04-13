@@ -18,6 +18,11 @@ export async function POST(req: Request) {
     const email = normalizeText(body?.email).toLowerCase();
     const phone = normalizeText(body?.phone);
     const company = normalizeText(body?.company);
+    const companyType = normalizeText(body?.company_type);
+    const projectType = normalizeText(body?.project_type);
+    const estimatedQuantity = normalizeText(body?.estimated_quantity);
+    const targetMarket = normalizeText(body?.target_market);
+    const requestedCategories = normalizeText(body?.requested_categories);
     const message = normalizeText(body?.message);
     const pageUrl = normalizeText(body?.page_url);
 
@@ -42,6 +47,13 @@ export async function POST(req: Request) {
       );
     }
 
+    if (!company) {
+      return NextResponse.json(
+        { ok: false, error: "Company is required." },
+        { status: 400 }
+      );
+    }
+
     if (!message) {
       return NextResponse.json(
         { ok: false, error: "Message is required." },
@@ -59,6 +71,11 @@ export async function POST(req: Request) {
       email,
       phone,
       company,
+      companyType,
+      projectType,
+      estimatedQuantity,
+      targetMarket,
+      requestedCategories,
       message,
       pageUrl,
       "new",

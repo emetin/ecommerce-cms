@@ -30,9 +30,6 @@ type ProductItem = {
   product_category?: string;
   type?: string;
   tags?: string;
-  image_file_id?: string;
-  image_alt?: string;
-  image_uploaded_at?: string;
 };
 
 type ProductImageItem = {
@@ -132,19 +129,21 @@ const getProductPageData = cache(async (slug: string) => {
     };
   }
 
-  const [variantsData, productImages, allProducts] = await Promise.all([
-    findSheetItemsByField<VariantItem>(
-      "product_variants",
-      "product_slug",
-      normalizedSlug
-    ),
-    findSheetItemsByField<ProductImageItem>(
-      "product_images",
-      "product_slug",
-      normalizedSlug
-    ),
-    getSheetData("products"),
-  ]);
+  const [variantsData, currentProductImages, allProducts, everyProductImage] =
+    await Promise.all([
+      findSheetItemsByField<VariantItem>(
+        "product_variants",
+        "product_slug",
+        normalizedSlug
+      ),
+      findSheetItemsByField<ProductImageItem>(
+        "product_images",
+        "product_slug",
+        normalizedSlug
+      ),
+      getSheetData("products"),
+      getSheetData("product_images"),
+    ]);
 
   const filteredVariants = variantsData.filter((variant) => {
     const variantStatus = normalizeLower(variant.status);
@@ -173,8 +172,8 @@ const getProductPageData = cache(async (slug: string) => {
     product,
     relatedProducts,
     variants: filteredVariants,
-    productImages,
-    allProductImages: productImages,
+    productImages: currentProductImages,
+    allProductImages: everyProductImage as ProductImageItem[],
   };
 });
 
@@ -212,7 +211,7 @@ export async function generateMetadata({
   } catch {
     return buildPageMetadata({
       title: "Products",
-      description: "Explore hospitality textile products by Patak Textile.",
+      description: "Explore hospitality textile products.",
       path: `/products/${decodedSlug}`,
     });
   }

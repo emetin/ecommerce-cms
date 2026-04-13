@@ -68,6 +68,13 @@ function formatCollectionLabel(value?: string) {
     .join(" ");
 }
 
+function formatTags(value?: string) {
+  return normalizeText(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function toSafeOrder(value?: string) {
   const num = Number(normalizeText(value));
   return Number.isFinite(num) ? num : 999999;
@@ -205,6 +212,7 @@ export default function ProductDetailClient({
   }, [primaryImage, selectedImage, selectedVariantImage]);
 
   const collectionLabel = formatCollectionLabel(product.collection_slug);
+  const productTags = formatTags(product.tags);
 
   const relatedPrimaryImageMap = useMemo(() => {
     const imagesBySlug = new Map<string, ProductImageItem[]>();
@@ -287,21 +295,24 @@ export default function ProductDetailClient({
               >
                 <div
                   style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    minHeight: 32,
-                    width: "fit-content",
-                    padding: "0 12px",
-                    borderRadius: 999,
-                    background: "#f3ede3",
-                    color: "#2f7d62",
-                    fontSize: 11,
-                    fontWeight: 800,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
+                    display: "flex",
+                    gap: 10,
+                    flexWrap: "wrap",
                   }}
                 >
-                  {collectionLabel}
+                  <div style={mainBadgeStyle}>{collectionLabel}</div>
+
+                  {product.vendor ? (
+                    <div style={secondaryBadgeStyle}>{product.vendor}</div>
+                  ) : null}
+
+                  {product.product_category ? (
+                    <div style={secondaryBadgeStyle}>{product.product_category}</div>
+                  ) : null}
+
+                  {product.type ? (
+                    <div style={secondaryBadgeStyle}>{product.type}</div>
+                  ) : null}
                 </div>
 
                 <h1
@@ -320,4 +331,210 @@ export default function ProductDetailClient({
                 <p
                   style={{
                     margin: 0,
-                    color: "#
+                    color: "#5d554a",
+                    fontSize: 16,
+                    lineHeight: 1.9,
+                    maxWidth: 760,
+                  }}
+                >
+                  {product.short_description ||
+                    product.description ||
+                    "Explore this product for hospitality and project-based sourcing."}
+                </p>
+
+                {(product.vendor ||
+                  product.product_category ||
+                  product.type ||
+                  productTags.length > 0) ? (
+                  <div style={metaPanelStyle}>
+                    <MetaRow label="Vendor" value={product.vendor || "-"} />
+                    <MetaRow
+                      label="Product Category"
+                      value={product.product_category || "-"}
+                    />
+                    <MetaRow label="Type" value={product.type || "-"} />
+                    <MetaRow
+                      label="Tags"
+                      value={productTags.length ? productTags.join(", ") : "-"}
+                    />
+                  </div>
+                ) : null}
+              </div>
+
+              <ProductPurchasePanel
+                product={{
+                  title: product.title,
+                  slug: product.slug,
+                  image: primaryImage || product.image,
+                }}
+                variants={variants}
+                onVariantChange={setSelectedVariant}
+              />
+            </div>
+          </div>
+        </Container>
+      </Section>
+
+      <Section tone="soft">
+        <Container>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1.1fr 0.9fr",
+              gap: 24,
+              alignItems: "start",
+            }}
+          >
+            <div
+              style={{
+                background: "#fff",
+                border: "1px solid #e5ddd2",
+                borderRadius: 24,
+                padding: 24,
+              }}
+            >
+              <SectionHeading
+                kicker="Product Overview"
+                title="Designed for wholesale review and project discussion"
+                text="This product page supports B2B evaluation through category context, variant structure, and a more organized media presentation."
+              />
+
+              <div
+                style={{
+                  color: "#5d554a",
+                  lineHeight: 1.9,
+                  fontSize: 15,
+                }}
+              >
+                {product.description || product.short_description || "No detailed product description has been added yet."}
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "#fff",
+                border: "1px solid #e5ddd2",
+                borderRadius: 24,
+                padding: 24,
+              }}
+            >
+              <SectionHeading
+                kicker="Need Project Support?"
+                title="Share your category or quantity requirements"
+                text="If you are reviewing this product for a hotel, resort, residence, or contract project, send a detailed inquiry for faster direction."
+              />
+
+              <div
+                style={{
+                  display: "grid",
+                  gap: 12,
+                }}
+              >
+                <ButtonLink href="/contact-us">Request Information</ButtonLink>
+                <ButtonLink href="/collections" variant="secondary">
+                  Explore More Collections
+                </ButtonLink>
+              </div>
+            </div>
+          </div>
+        </Container>
+      </Section>
+
+      {relatedProducts.length > 0 ? (
+        <Section>
+          <Container>
+            <SectionHeading
+              kicker="Related Products"
+              title="Continue reviewing related products"
+              text="Explore more products within the same collection structure."
+            />
+
+            <div className="cards-grid cards-grid--3">
+              {relatedProducts.map((item, index) => {
+                const relatedImage =
+                  relatedPrimaryImageMap.get(normalizeLower(item.slug)) ||
+                  item.image ||
+                  "";
+
+                return (
+                  <ProductCard
+                    key={item.slug || `${item.title}-${index}`}
+                    title={item.title || "Product"}
+                    description={
+                      item.short_description ||
+                      item.description ||
+                      "Explore this product."
+                    }
+                    image={relatedImage}
+                    href={`/products/${item.slug || ""}`}
+                    collectionLabel={formatCollectionLabel(item.collection_slug)}
+                    vendor={item.vendor || ""}
+                    productCategory={item.product_category || item.type || ""}
+                  />
+                );
+              })}
+            </div>
+          </Container>
+        </Section>
+      ) : null}
+    </>
+  );
+}
+
+function MetaRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 12,
+        paddingBottom: 10,
+        borderBottom: "1px solid #eee5d9",
+      }}
+    >
+      <span style={{ color: "#7b7367", fontWeight: 700 }}>{label}</span>
+      <span style={{ fontWeight: 800, textAlign: "right", color: "#171717" }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+const mainBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 32,
+  width: "fit-content",
+  padding: "0 12px",
+  borderRadius: 999,
+  background: "#f3ede3",
+  color: "#2f7d62",
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
+const secondaryBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 32,
+  width: "fit-content",
+  padding: "0 12px",
+  borderRadius: 999,
+  background: "#faf7f1",
+  color: "#6b6256",
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+};
+
+const metaPanelStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 12,
+  padding: 18,
+  borderRadius: 20,
+  border: "1px solid #e8dfd2",
+  background: "#fffaf4",
+};

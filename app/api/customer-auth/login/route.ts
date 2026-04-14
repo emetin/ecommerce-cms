@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import {
+  createCustomerSessionToken,
+  CUSTOMER_COOKIE_NAME,
+  getCustomerCookieOptions,
+  verifyCustomerCredentials,
+} from "../../../../lib/customer-auth";
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -25,14 +31,45 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "Customer login route is not fully configured yet. Add your authentication logic here.",
+    const customer = await verifyCustomerCredentials(email, password);
+
+    if (!customer) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid email, password, or inactive customer account.",
+        },
+        { status: 401 }
+      );
+    }
+
+    const token = await createCustomerSessionToken({
+      customerId: customer.id,
+      email: customer.email,
+      companyName: customer.companyName,
+      priceTier: customer.priceTier,
+      currency: customer.currency,
+    });
+
+    const response = NextResponse.json({
+      ok: true,
+      message: "Login successful.",
+      customer: {
+        customerId: customer.id,
+        email: customer.email,
+        companyName: customer.companyName,
+        priceTier: customer.priceTier,
+        currency: customer.currency,
       },
-      { status: 501 }
-    );
+    });
+
+    response.cookies.set({
+      name: CUSTOMER_COOKIE_NAME,
+      value: token,
+      ...getCustomerCookieOptions(),
+    });
+
+    return response;
   } catch (error) {
     return NextResponse.json(
       {

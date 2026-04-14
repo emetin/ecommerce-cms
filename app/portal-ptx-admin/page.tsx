@@ -30,7 +30,7 @@ export default function PortalAdminLoginPage() {
         };
 
         if (!response.ok || !data?.ok || !data?.csrfToken) {
-          throw new Error("CSRF alınamadı.");
+          throw new Error("CSRF token could not be loaded.");
         }
 
         if (isMounted) {
@@ -38,7 +38,7 @@ export default function PortalAdminLoginPage() {
         }
       } catch {
         if (isMounted) {
-          setError("Güvenlik doğrulaması alınamadı. Sayfayı yenileyin.");
+          setError("Security validation could not be loaded. Please refresh the page.");
         }
       } finally {
         if (isMounted) {
@@ -58,7 +58,7 @@ export default function PortalAdminLoginPage() {
     event.preventDefault();
 
     if (!csrfToken) {
-      setError("Güvenlik doğrulaması hazır değil.");
+      setError("Security validation is not ready yet.");
       return;
     }
 
@@ -85,14 +85,14 @@ export default function PortalAdminLoginPage() {
       };
 
       if (!response.ok || !data?.ok) {
-        setError(data?.error || "Giriş başarısız.");
+        setError(data?.error || "Login failed.");
         return;
       }
 
-      router.replace("/admin/products");
+      router.replace("/admin");
       router.refresh();
     } catch {
-      setError("Bağlantı sırasında bir hata oluştu.");
+      setError("A connection error occurred during login.");
     } finally {
       setIsSubmitting(false);
     }
@@ -106,42 +106,44 @@ export default function PortalAdminLoginPage() {
         placeItems: "center",
         padding: "32px 16px",
         background:
-          "linear-gradient(180deg, #0f172a 0%, #111827 50%, #0b1220 100%)",
+          "linear-gradient(180deg, #f7f4ee 0%, #f2ede4 45%, #ece5d8 100%)",
       }}
     >
       <div
         style={{
           width: "100%",
-          maxWidth: 460,
+          maxWidth: 480,
           background: "rgba(255,255,255,0.96)",
-          borderRadius: 20,
+          borderRadius: 24,
           padding: 32,
-          boxShadow: "0 24px 80px rgba(0,0,0,0.28)",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.10)",
+          border: "1px solid #e6ddd0",
         }}
       >
         <div style={{ marginBottom: 24 }}>
           <div
             style={{
               fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: "0.12em",
+              fontWeight: 800,
+              letterSpacing: "0.14em",
               textTransform: "uppercase",
-              color: "#6b7280",
+              color: "#8a7f72",
               marginBottom: 10,
             }}
           >
-            Admin Access
+            Globaltex Fine Linens
           </div>
 
           <h1
             style={{
-              fontSize: 30,
-              lineHeight: 1.15,
+              fontSize: 32,
+              lineHeight: 1.12,
               margin: 0,
-              color: "#111827",
+              color: "#171717",
+              fontWeight: 800,
             }}
           >
-            Patak Textile Admin Login
+            Globaltex Admin Login
           </h1>
 
           <p
@@ -149,11 +151,12 @@ export default function PortalAdminLoginPage() {
               marginTop: 12,
               marginBottom: 0,
               fontSize: 15,
-              lineHeight: 1.7,
-              color: "#4b5563",
+              lineHeight: 1.75,
+              color: "#5f564c",
             }}
           >
-            Ürün, koleksiyon ve blog yönetimi için güvenli giriş yapın.
+            Access the internal management panel for hospitality collections,
+            customer applications, B2B orders, and account operations.
           </p>
         </div>
 
@@ -163,12 +166,12 @@ export default function PortalAdminLoginPage() {
             style={{
               display: "block",
               fontSize: 14,
-              fontWeight: 600,
-              color: "#111827",
+              fontWeight: 700,
+              color: "#171717",
               marginBottom: 8,
             }}
           >
-            Kullanıcı Adı
+            Username
           </label>
 
           <input
@@ -181,13 +184,14 @@ export default function PortalAdminLoginPage() {
             placeholder="admin"
             style={{
               width: "100%",
-              height: 48,
-              borderRadius: 12,
-              border: "1px solid #d1d5db",
+              height: 50,
+              borderRadius: 14,
+              border: "1px solid #d9cfbf",
               padding: "0 14px",
               fontSize: 15,
               marginBottom: 16,
               outline: "none",
+              background: "#fcfbf8",
             }}
           />
 
@@ -196,12 +200,12 @@ export default function PortalAdminLoginPage() {
             style={{
               display: "block",
               fontSize: 14,
-              fontWeight: 600,
-              color: "#111827",
+              fontWeight: 700,
+              color: "#171717",
               marginBottom: 8,
             }}
           >
-            Şifre
+            Password
           </label>
 
           <input
@@ -214,13 +218,14 @@ export default function PortalAdminLoginPage() {
             placeholder="••••••••"
             style={{
               width: "100%",
-              height: 48,
-              borderRadius: 12,
-              border: "1px solid #d1d5db",
+              height: 50,
+              borderRadius: 14,
+              border: "1px solid #d9cfbf",
               padding: "0 14px",
               fontSize: 15,
               marginBottom: 16,
               outline: "none",
+              background: "#fcfbf8",
             }}
           />
 
@@ -228,13 +233,13 @@ export default function PortalAdminLoginPage() {
             <div
               style={{
                 marginBottom: 16,
-                borderRadius: 12,
+                borderRadius: 14,
                 padding: "12px 14px",
-                background: "#fef2f2",
-                color: "#b91c1c",
+                background: "#fff1f1",
+                color: "#b42318",
                 fontSize: 14,
-                lineHeight: 1.6,
-                border: "1px solid #fecaca",
+                lineHeight: 1.7,
+                border: "1px solid #f0c9c9",
               }}
             >
               {error}
@@ -246,23 +251,23 @@ export default function PortalAdminLoginPage() {
             disabled={isSubmitting || isLoadingCsrf}
             style={{
               width: "100%",
-              height: 50,
+              height: 52,
               border: "none",
-              borderRadius: 12,
-              background: "#111827",
+              borderRadius: 14,
+              background: "#171717",
               color: "#ffffff",
               fontSize: 15,
-              fontWeight: 700,
+              fontWeight: 800,
               cursor:
                 isSubmitting || isLoadingCsrf ? "not-allowed" : "pointer",
               opacity: isSubmitting || isLoadingCsrf ? 0.7 : 1,
             }}
           >
             {isLoadingCsrf
-              ? "Güvenlik hazırlanıyor..."
+              ? "Preparing security..."
               : isSubmitting
-              ? "Giriş yapılıyor..."
-              : "Giriş Yap"}
+              ? "Signing in..."
+              : "Sign In"}
           </button>
         </form>
       </div>

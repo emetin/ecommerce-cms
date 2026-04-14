@@ -2,7 +2,9 @@ import "./globals.css";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Assistant } from "next/font/google";
+import { cookies } from "next/headers";
 import FooterNewsletterForm from "../components/layout/FooterNewsletterForm";
+import { readCustomerFromSessionToken } from "../lib/customer-auth";
 
 const assistant = Assistant({
   subsets: ["latin"],
@@ -12,59 +14,200 @@ const assistant = Assistant({
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
-  "https://www.pataktextile.com";
+  "https://www.globaltexusa.com";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Patak Textile",
-    template: "%s | Patak Textile",
+    default: "Globaltex Fine Linens",
+    template: "%s | Globaltex Fine Linens",
   },
   description:
-    "Patak Textile presents premium textile collections for hospitality, residences and refined project-based environments through a stronger corporate catalog structure.",
+    "Globaltex Fine Linens supplies premium hospitality textiles for hotels, resorts, residences, and large-scale B2B projects through a trusted wholesale platform.",
   keywords: [
-    "Patak Textile",
+    "Globaltex Fine Linens",
+    "hotel linens wholesale supplier",
     "hospitality textiles",
-    "hotel bedding",
-    "hotel towels",
-    "bathrobes",
-    "textile collections",
-    "hotel linen supplier",
-    "corporate textile catalog",
+    "hotel bedding supplier",
+    "hotel towels wholesale",
+    "bathrobes wholesale",
+    "resort textiles",
+    "wholesale hotel linens",
+    "B2B hospitality supplier",
+    "custom embroidery linens",
   ],
   alternates: {
     canonical: "/",
   },
   openGraph: {
-    title: "Patak Textile",
+    title: "Globaltex Fine Linens",
     description:
-      "Patak Textile presents premium textile collections for hospitality, residences and refined project-based environments through a stronger corporate catalog structure.",
+      "Premium hospitality textiles for hotels, resorts, residences, and project-based B2B supply.",
     url: SITE_URL,
-    siteName: "Patak Textile",
+    siteName: "Globaltex Fine Linens",
     type: "website",
     images: [
       {
         url: "/og-default.jpg",
         width: 1200,
         height: 630,
-        alt: "Patak Textile",
+        alt: "Globaltex Fine Linens",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Patak Textile",
+    title: "Globaltex Fine Linens",
     description:
-      "Patak Textile presents premium textile collections for hospitality, residences and refined project-based environments through a stronger corporate catalog structure.",
+      "Premium hospitality textiles for hotels, resorts, residences, and project-based B2B supply.",
     images: ["/og-default.jpg"],
   },
 };
 
-export default function RootLayout({
+async function HeaderAccountActions() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("ptx_customer_auth")?.value || null;
+  const customer = await readCustomerFromSessionToken(token);
+
+  if (customer) {
+    return (
+      <div
+        className="site-header__actions"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+          justifyContent: "flex-end",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: "#6f6559",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {customer.companyName}
+        </div>
+
+        <Link
+          href="/account"
+          className="button-link"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: 46,
+            padding: "0 18px",
+            borderRadius: 999,
+            border: "1px solid #d8cebf",
+            background: "#fff",
+            color: "#171717",
+            fontWeight: 800,
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          My Account
+        </Link>
+
+        <form action="/api/customer-auth/logout" method="POST" style={{ margin: 0 }}>
+          <button
+            type="submit"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: 46,
+              padding: "0 18px",
+              borderRadius: 999,
+              border: "1px solid #171717",
+              background: "#171717",
+              color: "#fff",
+              fontWeight: 800,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+              cursor: "pointer",
+            }}
+          >
+            Logout
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="site-header__actions"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        flexWrap: "wrap",
+        justifyContent: "flex-end",
+      }}
+    >
+      <Link
+        href="/portal-login"
+        className="button-link"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: 46,
+          padding: "0 18px",
+          borderRadius: 999,
+          border: "1px solid #d8cebf",
+          background: "#fff",
+          color: "#171717",
+          fontWeight: 800,
+          textDecoration: "none",
+          whiteSpace: "nowrap",
+        }}
+      >
+        Customer Portal
+      </Link>
+
+      <Link
+        href="/apply-for-account"
+        className="button-link"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: 46,
+          padding: "0 18px",
+          borderRadius: 999,
+          border: "1px solid #d8cebf",
+          background: "#fff",
+          color: "#171717",
+          fontWeight: 800,
+          textDecoration: "none",
+          whiteSpace: "nowrap",
+        }}
+      >
+        Apply for Account
+      </Link>
+
+      <Link href="/collections" className="button-link btn-primary">
+        Explore Collections
+      </Link>
+    </div>
+  );
+}
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("ptx_customer_auth")?.value || null;
+  const customer = await readCustomerFromSessionToken(token);
+
   return (
     <html lang="en">
       <body className={assistant.variable}>
@@ -73,22 +216,26 @@ export default function RootLayout({
             <div className="container site-topbar__inner">
               <div className="site-topbar__left">
                 <span>customerservice@globaltexusa.com</span>
-                <span>+90 (258) 408 47 57</span>
+                <span>+1 (305) 751 2343</span>
               </div>
 
               <div className="site-topbar__right">
-                <span>Premium Turkish Cotton Hotel Textiles</span>
+                <span>Premium Hospitality Textiles for Hotels & Resorts</span>
               </div>
             </div>
           </div>
 
           <header className="site-header">
             <div className="container site-header__inner">
-              <Link href="/" className="site-logo" aria-label="Patak Textile Home">
+              <Link
+                href="/"
+                className="site-logo"
+                aria-label="Globaltex Fine Linens Home"
+              >
                 <span className="site-logo__eyebrow">
-                  Trusted by Hotels & Residences
+                  Trusted by Hotels, Resorts & Residences
                 </span>
-                <span className="site-logo__title">Patak Textile</span>
+                <span className="site-logo__title">Globaltex Fine Linens</span>
               </Link>
 
               <nav className="site-nav" aria-label="Main navigation">
@@ -98,13 +245,12 @@ export default function RootLayout({
                 <Link href="/products">Products</Link>
                 <Link href="/contact-us">Contact Us</Link>
                 <Link href="/faq">FAQ</Link>
+                <Link href={customer ? "/account" : "/portal-login"}>
+                  {customer ? "My Account" : "Customer Portal"}
+                </Link>
               </nav>
 
-              <div className="site-header__actions">
-                <Link href="/collections" className="button-link btn-primary">
-                  Explore Collections
-                </Link>
-              </div>
+              <HeaderAccountActions />
             </div>
           </header>
 
@@ -130,7 +276,7 @@ export default function RootLayout({
                         fontWeight: 800,
                       }}
                     >
-                      Corporate Textile Presentation
+                      Luxury Hospitality Textile Supply
                     </span>
                     <span
                       style={{
@@ -141,22 +287,21 @@ export default function RootLayout({
                         color: "#ffffff",
                       }}
                     >
-                      Patak Textile
+                      Globaltex Fine Linens
                     </span>
                   </div>
 
                   <p>
-                    Premium hospitality textile solutions presented through a
-                    cleaner and more trusted corporate catalog structure for hotels,
-                    residences and refined project-based environments.
+                    Globaltex Fine Linens supplies premium hospitality textiles for
+                    hotels, resorts, property groups, residences, and large-scale
+                    B2B projects with a focus on consistency, service, and
+                    long-term performance.
                   </p>
 
                   <div className="site-footer__meta">
-                    <span>Phone: +90 (258) 408 47 57</span>
-                    <span>
-                      Address: Selçukbey Mah. Evora Houses, C1 Block 9/A Floor:17
-                      No:156, Merkezefendi / Denizli / Türkiye
-                    </span>
+                    <span>Email: customerservice@globaltexusa.com</span>
+                    <span>Phone: +1 (305) 751 2343</span>
+                    <span>Miami, Houston, Orlando & Denizli</span>
                   </div>
                 </div>
 
@@ -174,17 +319,23 @@ export default function RootLayout({
                   <h4>Explore</h4>
                   <div className="site-footer__links">
                     <Link href="/collections">Collection Directory</Link>
-                    <Link href="/products">Product Showcase</Link>
+                    <Link href="/products">Product Catalog</Link>
                     <Link href="/blog">Editorial</Link>
                     <Link href="/faq">FAQ</Link>
+                    <Link href={customer ? "/account" : "/portal-login"}>
+                      {customer ? "My Account" : "Customer Portal"}
+                    </Link>
+                    {!customer ? (
+                      <Link href="/apply-for-account">Apply for Account</Link>
+                    ) : null}
                   </div>
                 </div>
 
                 <div className="site-footer__newsletter">
                   <h4>Stay Updated</h4>
                   <p>
-                    Receive selected updates about collections, product categories
-                    and future brand developments.
+                    Receive selected updates about hospitality collections,
+                    wholesale opportunities, and project-based textile solutions.
                   </p>
 
                   <FooterNewsletterForm />
@@ -224,7 +375,7 @@ export default function RootLayout({
                   flexWrap: "wrap",
                 }}
               >
-                <span>© 2026 Patak Textile. All rights reserved.</span>
+                <span>© 2026 Globaltex Fine Linens. All rights reserved.</span>
 
                 <div
                   style={{

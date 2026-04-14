@@ -201,6 +201,17 @@ function resolveCustomerPrice(variant: VariantItem | null, priceTier?: string) {
   return parsePrice(variant.price_standard) || parsePrice(variant.price);
 }
 
+function resolveListPrice(variant: VariantItem | null) {
+  if (!variant) return 0;
+
+  return (
+    parsePrice(variant.compare_at_price) ||
+    parsePrice(variant.price_standard) ||
+    parsePrice(variant.price) ||
+    0
+  );
+}
+
 function isVariantAvailable(variant: VariantItem | null) {
   if (!variant) return false;
 
@@ -208,7 +219,23 @@ function isVariantAvailable(variant: VariantItem | null) {
 
   if (!availability) return true;
 
-  return ["true", "yes", "available", "active", "in-stock"].includes(availability);
+  return ["true", "yes", "available", "active", "in-stock"].includes(
+    availability
+  );
+}
+
+function resolveAvailabilityLabel(available: boolean) {
+  return available ? "Available for order" : "Currently unavailable";
+}
+
+function resolvePriceTierLabel(priceTier?: string) {
+  const tier = normalizeLower(priceTier || "standard");
+
+  if (tier === "vip") return "VIP Pricing";
+  if (tier === "distributor") return "Distributor Pricing";
+  if (tier === "wholesale") return "Wholesale Pricing";
+
+  return "Standard Account Pricing";
 }
 
 export default function ProductPurchasePanel({
@@ -390,13 +417,15 @@ export default function ProductPurchasePanel({
   }, [minOrderQuantity, selectedVariant?.id]);
 
   const unitPrice = resolveCustomerPrice(selectedVariant, customer?.priceTier);
-  const compareAtPrice = parsePrice(selectedVariant?.compare_at_price);
-  const hasDiscount = compareAtPrice > unitPrice && unitPrice > 0;
+  const listPrice = resolveListPrice(selectedVariant);
+  const hasDiscount = listPrice > unitPrice && unitPrice > 0;
   const discountPercent = hasDiscount
-    ? Math.round(((compareAtPrice - unitPrice) / compareAtPrice) * 100)
+    ? Math.round(((listPrice - unitPrice) / listPrice) * 100)
     : 0;
 
   const available = isVariantAvailable(selectedVariant);
+  const lineTotal = unitPrice * quantity;
+  const tierLabel = resolvePriceTierLabel(customer?.priceTier);
 
   function increaseQty() {
     setQuantity((prev) => prev + quantityStep);
@@ -454,10 +483,17 @@ export default function ProductPurchasePanel({
   if (!activeVariants.length) {
     return (
       <div style={panelStyle}>
+        <div style={eyebrowStyle}>B2B Access</div>
         <div style={headlineStyle}>Wholesale access required</div>
         <div style={descriptionStyle}>
           This product is available through our approved B2B customer portal.
-          Please apply for an account or contact our sales team.
+          Apply for an account to start a purchasing relationship or contact our
+          team for project-based support.
+        </div>
+
+        <div style={infoNoticeStyle}>
+          Account approval gives your company access to structured product review,
+          account-based pricing, and draft order submission.
         </div>
 
         <div style={actionGridStyle}>
@@ -473,18 +509,50 @@ export default function ProductPurchasePanel({
   }
 
   if (customerLoading) {
-    return <div style={panelStyle}>Loading customer pricing...</div>;
+    return (
+      <div style={panelStyle}>
+        <div style={eyebrowStyle}>Pricing Access</div>
+        <div style={headlineStyle}>Loading customer pricing...</div>
+        <div style={descriptionStyle}>
+          We are preparing your account-based pricing and order access.
+        </div>
+      </div>
+    );
   }
 
   if (!customer) {
     return (
       <div style={panelStyle}>
+        <div style={eyebrowStyle}>Account-Based Pricing</div>
         <div style={headlineStyle}>Approved customers can view pricing</div>
 
         <div style={descriptionStyle}>
           This product is available for approved B2B customers. Log in to view
-          your account pricing and create an order. If you do not yet have an
-          account, you can submit an application for review.
+          your account pricing, minimum order terms, and draft order access. If
+          your company is not yet approved, you can submit an application for review.
+        </div>
+
+        <div style={guestFeatureGridStyle}>
+          <div style={guestFeatureCardStyle}>
+            <div style={guestFeatureTitleStyle}>Tier Pricing</div>
+            <div style={guestFeatureTextStyle}>
+              Access account-based pricing after approval.
+            </div>
+          </div>
+
+          <div style={guestFeatureCardStyle}>
+            <div style={guestFeatureTitleStyle}>Draft Orders</div>
+            <div style={guestFeatureTextStyle}>
+              Build and review order requests before submission.
+            </div>
+          </div>
+
+          <div style={guestFeatureCardStyle}>
+            <div style={guestFeatureTitleStyle}>B2B Workflow</div>
+            <div style={guestFeatureTextStyle}>
+              Suitable for hospitality, project, and wholesale purchasing.
+            </div>
+          </div>
         </div>
 
         <div style={actionGridStyle}>
@@ -501,55 +569,43 @@ export default function ProductPurchasePanel({
 
   return (
     <div style={panelStyle}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          gap: 12,
-          flexWrap: "wrap",
-          marginBottom: 18,
-        }}
-      >
+      <div style={topMetaWrapStyle}>
+        <div>
+          <div style={eyebrowStyle}>{tierLabel}</div>
+          <div style={headlineStyleSmall}>
+            Purchasing for {customer.companyName || "your account"}
+          </div>
+        </div>
+
         <div
           style={{
-            fontSize: 34,
-            lineHeight: 1,
-            fontWeight: 800,
+            ...availabilityBadgeStyle,
+            background: available ? "#eef8f0" : "#fff3f2",
+            color: available ? "#2f7d62" : "#a54a3f",
+            borderColor: available ? "rgba(47,125,98,0.18)" : "rgba(165,74,63,0.18)",
           }}
         >
+          {resolveAvailabilityLabel(available)}
+        </div>
+      </div>
+
+      <div style={priceWrapStyle}>
+        <div style={priceMainStyle}>
           {unitPrice > 0 ? formatMoney(unitPrice, customer.currency) : "Contact Sales"}
         </div>
 
         {hasDiscount ? (
           <>
-            <div
-              style={{
-                fontSize: 20,
-                color: "#877d6f",
-                textDecoration: "line-through",
-                fontWeight: 700,
-              }}
-            >
-              {formatMoney(compareAtPrice, customer.currency)}
+            <div style={priceCompareStyle}>
+              {formatMoney(listPrice, customer.currency)}
             </div>
 
-            <div
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: "6px 10px",
-                borderRadius: 999,
-                background: "#eef8f0",
-                color: "#2f7d62",
-                fontWeight: 800,
-                fontSize: 13,
-              }}
-            >
-              Save {discountPercent}%
-            </div>
+            <div style={discountBadgeStyle}>Save {discountPercent}%</div>
           </>
         ) : null}
       </div>
+
+      <div style={subLabelStyle}>Per unit, based on your approved account tier.</div>
 
       {option1.optionName ? (
         <VariantSelectBlock
@@ -578,7 +634,16 @@ export default function ProductPurchasePanel({
         />
       ) : null}
 
-      <div style={{ marginTop: 18 }}>
+      <div style={termsGridStyle}>
+        <InfoStat label="Minimum Order" value={String(minOrderQuantity)} />
+        <InfoStat label="Order Step" value={String(quantityStep)} />
+        <InfoStat
+          label="Box Quantity"
+          value={String(selectedVariant?.box_quantity || "-")}
+        />
+      </div>
+
+      <div style={{ marginTop: 20 }}>
         <div style={metaLabelStyle}>Quantity</div>
 
         <div style={qtyWrapStyle}>
@@ -601,7 +666,31 @@ export default function ProductPurchasePanel({
         </div>
 
         <div style={smallTextStyle}>
-          Min order: {minOrderQuantity} • Step: {quantityStep}
+          Orders begin at {minOrderQuantity} and increase in steps of {quantityStep}.
+        </div>
+      </div>
+
+      <div style={summaryCardStyle}>
+        <div style={summaryRowStyle}>
+          <span>Selected Variant</span>
+          <strong>{buildVariantLabel(selectedVariant || ({} as VariantItem))}</strong>
+        </div>
+
+        <div style={summaryRowStyle}>
+          <span>SKU</span>
+          <strong>{String(selectedVariant?.sku || "-")}</strong>
+        </div>
+
+        <div style={summaryRowStyle}>
+          <span>Quantity</span>
+          <strong>{quantity}</strong>
+        </div>
+
+        <div style={summaryRowStyle}>
+          <span>Estimated Line Total</span>
+          <strong>
+            {unitPrice > 0 ? formatMoney(lineTotal, customer.currency) : "Contact Sales"}
+          </strong>
         </div>
       </div>
 
@@ -616,7 +705,11 @@ export default function ProductPurchasePanel({
           type="button"
           onClick={handleAddToDraft}
           disabled={!available}
-          style={primaryButtonStyle}
+          style={{
+            ...primaryButtonStyle,
+            opacity: available ? 1 : 0.65,
+            cursor: available ? "pointer" : "not-allowed",
+          }}
         >
           {available ? "Add to Draft Order" : "Unavailable"}
         </button>
@@ -624,28 +717,6 @@ export default function ProductPurchasePanel({
         <a href="/account" style={secondaryLinkStyle}>
           View Draft Order
         </a>
-      </div>
-
-      <div
-        style={{
-          marginTop: 18,
-          display: "grid",
-          gap: 10,
-        }}
-      >
-        <InfoRow
-          label="Variant"
-          value={buildVariantLabel(selectedVariant || ({} as VariantItem))}
-        />
-        <InfoRow label="SKU" value={String(selectedVariant?.sku || "-")} />
-        <InfoRow
-          label="Box Quantity"
-          value={String(selectedVariant?.box_quantity || "-")}
-        />
-        <InfoRow
-          label="Availability"
-          value={available ? "Available" : "Unavailable"}
-        />
       </div>
 
       {feedbackMessage ? (
@@ -669,7 +740,7 @@ function VariantSelectBlock({
   if (!values.length) return null;
 
   return (
-    <div style={{ marginTop: 14 }}>
+    <div style={{ marginTop: 16 }}>
       <div style={metaLabelStyle}>{label}</div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -701,19 +772,11 @@ function VariantSelectBlock({
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoStat({ label, value }: { label: string; value: string }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 12,
-        paddingBottom: 10,
-        borderBottom: "1px solid #eee5d9",
-      }}
-    >
-      <span style={{ color: "#7b7367", fontWeight: 700 }}>{label}</span>
-      <span style={{ fontWeight: 800, textAlign: "right" }}>{value}</span>
+    <div style={infoStatCardStyle}>
+      <div style={infoStatLabelStyle}>{label}</div>
+      <div style={infoStatValueStyle}>{value}</div>
     </div>
   );
 }
@@ -723,6 +786,25 @@ const panelStyle: React.CSSProperties = {
   borderRadius: 28,
   border: "1px solid #e5ddd2",
   background: "#fff",
+  boxShadow: "0 12px 32px rgba(23,23,23,0.04)",
+};
+
+const topMetaWrapStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 16,
+  flexWrap: "wrap",
+  marginBottom: 14,
+};
+
+const eyebrowStyle: React.CSSProperties = {
+  fontSize: 12,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "#7b7367",
+  fontWeight: 800,
+  marginBottom: 8,
 };
 
 const headlineStyle: React.CSSProperties = {
@@ -730,12 +812,110 @@ const headlineStyle: React.CSSProperties = {
   lineHeight: 1.2,
   fontWeight: 800,
   marginBottom: 12,
+  color: "#171717",
+};
+
+const headlineStyleSmall: React.CSSProperties = {
+  fontSize: 24,
+  lineHeight: 1.2,
+  fontWeight: 800,
+  color: "#171717",
 };
 
 const descriptionStyle: React.CSSProperties = {
   color: "#6f6559",
+  lineHeight: 1.8,
+  marginBottom: 18,
+  fontSize: 15,
+};
+
+const infoNoticeStyle: React.CSSProperties = {
+  padding: 14,
+  borderRadius: 16,
+  background: "#f8f5ef",
+  border: "1px solid #e5ddd2",
+  color: "#5f564c",
   lineHeight: 1.75,
   marginBottom: 18,
+  fontSize: 14,
+};
+
+const guestFeatureGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 12,
+  marginBottom: 18,
+};
+
+const guestFeatureCardStyle: React.CSSProperties = {
+  borderRadius: 18,
+  border: "1px solid #ebe2d5",
+  background: "#fcfbf8",
+  padding: 14,
+};
+
+const guestFeatureTitleStyle: React.CSSProperties = {
+  fontWeight: 800,
+  color: "#171717",
+  marginBottom: 6,
+  fontSize: 14,
+};
+
+const guestFeatureTextStyle: React.CSSProperties = {
+  color: "#6f6559",
+  lineHeight: 1.65,
+  fontSize: 13,
+};
+
+const availabilityBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 34,
+  padding: "0 12px",
+  borderRadius: 999,
+  border: "1px solid transparent",
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+const priceWrapStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  gap: 12,
+  flexWrap: "wrap",
+  marginBottom: 8,
+};
+
+const priceMainStyle: React.CSSProperties = {
+  fontSize: 38,
+  lineHeight: 1,
+  fontWeight: 800,
+  color: "#171717",
+};
+
+const priceCompareStyle: React.CSSProperties = {
+  fontSize: 20,
+  color: "#877d6f",
+  textDecoration: "line-through",
+  fontWeight: 700,
+};
+
+const discountBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "6px 10px",
+  borderRadius: 999,
+  background: "#eef8f0",
+  color: "#2f7d62",
+  fontWeight: 800,
+  fontSize: 13,
+};
+
+const subLabelStyle: React.CSSProperties = {
+  color: "#7b7367",
+  fontSize: 13,
+  lineHeight: 1.7,
+  marginBottom: 12,
 };
 
 const metaLabelStyle: React.CSSProperties = {
@@ -750,6 +930,36 @@ const metaLabelStyle: React.CSSProperties = {
 const actionGridStyle: React.CSSProperties = {
   display: "grid",
   gap: 12,
+};
+
+const termsGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 12,
+  marginTop: 18,
+};
+
+const infoStatCardStyle: React.CSSProperties = {
+  padding: 14,
+  borderRadius: 18,
+  border: "1px solid #ebe2d5",
+  background: "#fcfbf8",
+};
+
+const infoStatLabelStyle: React.CSSProperties = {
+  fontSize: 12,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "#7b7367",
+  fontWeight: 700,
+  marginBottom: 6,
+};
+
+const infoStatValueStyle: React.CSSProperties = {
+  fontSize: 18,
+  lineHeight: 1.2,
+  fontWeight: 800,
+  color: "#171717",
 };
 
 const qtyWrapStyle: React.CSSProperties = {
@@ -786,6 +996,26 @@ const smallTextStyle: React.CSSProperties = {
   marginTop: 8,
   color: "#7b7367",
   fontSize: 13,
+  lineHeight: 1.6,
+};
+
+const summaryCardStyle: React.CSSProperties = {
+  marginTop: 20,
+  padding: 16,
+  borderRadius: 20,
+  border: "1px solid #ebe2d5",
+  background: "#faf8f4",
+  display: "grid",
+  gap: 10,
+};
+
+const summaryRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "flex-start",
+  color: "#171717",
+  fontSize: 14,
   lineHeight: 1.6,
 };
 

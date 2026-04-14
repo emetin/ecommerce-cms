@@ -48,7 +48,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 fontWeight: 700,
               }}
             >
-              Patak Textile
+              Globaltex Fine Linens
             </div>
 
             <div
@@ -58,7 +58,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 lineHeight: 1,
               }}
             >
-              Patak Admin
+              Globaltex Admin
             </div>
 
             <div
@@ -68,7 +68,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 color: "#6f6559",
               }}
             >
-              B2B Management Panel
+              Hospitality B2B Management Panel
             </div>
           </div>
 
@@ -121,8 +121,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <AdminNavLink href="/admin/blog" currentPath={pathname}>
               Blog
             </AdminNavLink>
-
-            {/* 🔥 NEW B2B MODULES */}
 
             <AdminNavLink href="/admin/customer-applications" currentPath={pathname}>
               Applications

@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { appendSheetRow, appendSheetRows } from "../../../../lib/sheets";
-import {
-  CUSTOMER_COOKIE_NAME,
-  readCustomerFromSessionToken,
-} from "../../../../lib/customer-auth";
+import { readCustomerFromSessionToken } from "../../../../lib/customer-auth";
 
 type OrderItemInput = {
   productSlug?: string;
@@ -46,7 +43,7 @@ export async function POST(req: Request) {
 
     if (!customer) {
       return NextResponse.json(
-        { ok: false, error: "Müşteri oturumu bulunamadı." },
+        { ok: false, error: "Customer session not found." },
         { status: 401 }
       );
     }
@@ -57,7 +54,7 @@ export async function POST(req: Request) {
 
     if (!items.length) {
       return NextResponse.json(
-        { ok: false, error: "Sipariş için en az bir ürün gereklidir." },
+        { ok: false, error: "At least one item is required." },
         { status: 400 }
       );
     }
@@ -83,7 +80,7 @@ export async function POST(req: Request) {
 
     if (!normalizedItems.length) {
       return NextResponse.json(
-        { ok: false, error: "Geçerli sipariş kalemi bulunamadı." },
+        { ok: false, error: "No valid order items found." },
         { status: 400 }
       );
     }
@@ -98,7 +95,6 @@ export async function POST(req: Request) {
       orderNumber,
       customer.customerId,
       customer.companyName,
-      customer.email,
       "pending",
       String(subtotal),
       customer.currency || "USD",
@@ -112,7 +108,6 @@ export async function POST(req: Request) {
       normalizedItems.map((item) => [
         crypto.randomUUID(),
         orderId,
-        orderNumber,
         item.productSlug,
         item.variantId,
         item.sku,
@@ -121,13 +116,12 @@ export async function POST(req: Request) {
         String(item.quantity),
         String(item.unitPrice),
         String(item.lineTotal),
-        now,
       ])
     );
 
     return NextResponse.json({
       ok: true,
-      message: "Siparişiniz başarıyla oluşturuldu.",
+      message: "Order submitted successfully.",
       orderId,
       orderNumber,
     });
@@ -138,7 +132,7 @@ export async function POST(req: Request) {
         error:
           error instanceof Error
             ? error.message
-            : "Sipariş oluşturulurken bilinmeyen bir hata oluştu.",
+            : "Unknown error while creating order.",
       },
       { status: 500 }
     );

@@ -64,6 +64,84 @@ export const SHEET_CONFIG = {
     xmlRoot: "blogPosts",
     xmlItem: "post",
   },
+  customers: {
+    sheetName: "customers",
+    headers: [
+      "id",
+      "company_name",
+      "contact_name",
+      "email",
+      "password_hash",
+      "status",
+      "customer_code",
+      "price_tier",
+      "currency",
+      "shipping_terms",
+      "payment_terms",
+      "tax_exempt",
+      "approved_at",
+      "created_at",
+      "updated_at",
+    ],
+    xmlRoot: "customers",
+    xmlItem: "customer",
+  },
+  customer_applications: {
+    sheetName: "customer_applications",
+    headers: [
+      "id",
+      "company_name",
+      "contact_name",
+      "email",
+      "phone",
+      "country",
+      "business_type",
+      "tax_id",
+      "website",
+      "notes",
+      "status",
+      "created_at",
+      "approved_at",
+      "reviewed_by",
+    ],
+    xmlRoot: "customerApplications",
+    xmlItem: "application",
+  },
+  orders: {
+    sheetName: "orders",
+    headers: [
+      "id",
+      "order_number",
+      "customer_id",
+      "company_name",
+      "status",
+      "subtotal",
+      "currency",
+      "notes",
+      "created_at",
+      "updated_at",
+    ],
+    xmlRoot: "orders",
+    xmlItem: "order",
+  },
+  order_items: {
+    sheetName: "order_items",
+    headers: [
+      "id",
+      "order_id",
+      "product_slug",
+      "variant_id",
+      "sku",
+      "product_title",
+      "variant_label",
+      "quantity",
+      "unit_price",
+      "line_total",
+      "created_at",
+    ],
+    xmlRoot: "orderItems",
+    xmlItem: "item",
+  },
 } as const;
 
 export type ContentType = keyof typeof SHEET_CONFIG;
@@ -129,19 +207,21 @@ export function normalizeRecord(
           ? "prd"
           : type === "collections"
           ? "col"
-          : "blog"
+          : type === "blog"
+          ? "blog"
+          : type === "customers"
+          ? "cust"
+          : type === "customer_applications"
+          ? "app"
+          : type === "orders"
+          ? "ord"
+          : "row"
       );
   }
 
-  if (!record.slug && record.title) {
+  if ("slug" in record && !record.slug && record.title) {
     record.slug = makeSlug(record.title);
   }
-
-  if (!record.status) {
-    record.status = existingItem?.status || "draft";
-  }
-
-  record.status = normalizeStatus(record.status);
 
   if (type === "products" || type === "blog") {
     record.featured = normalizeBooleanString(
@@ -150,6 +230,12 @@ export function normalizeRecord(
   }
 
   if (type === "products") {
+    if (!record.status) {
+      record.status = existingItem?.status || "draft";
+    }
+
+    record.status = normalizeStatus(record.status);
+
     if (!record.seo_title) {
       record.seo_title = existingItem?.seo_title || record.title || "";
     }
@@ -163,11 +249,13 @@ export function normalizeRecord(
     }
   }
 
-  if (!record.created_at) {
+  if ("created_at" in record && !record.created_at) {
     record.created_at = existingItem?.created_at || now;
   }
 
-  record.updated_at = now;
+  if ("updated_at" in record) {
+    record.updated_at = now;
+  }
 
   return record;
 }
@@ -195,6 +283,11 @@ export async function importRecords(
 ) {
   const config = SHEET_CONFIG[type];
   const sheetName = config.sheetName;
+
+  if (!["products", "collections", "blog"].includes(type)) {
+    throw new Error(`Import is not enabled for "${type}".`);
+  }
+
   const existingItems = await getSheetData(sheetName, { forceFresh: true });
   const rowMap = await getSheetRowNumberMapByField(sheetName, "slug");
 

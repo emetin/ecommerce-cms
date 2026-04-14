@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type CustomerItem = {
   id: string;
@@ -26,6 +26,17 @@ type ResetResult = {
   temporaryPassword: string;
 };
 
+const STATUS_OPTIONS = ["active", "inactive"];
+const PRICE_TIER_OPTIONS = ["all", "standard", "wholesale", "distributor", "vip"];
+
+function normalizeText(value?: string) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value?: string) {
+  return normalizeText(value).toLowerCase();
+}
+
 function formatDate(value?: string) {
   if (!value) return "-";
 
@@ -40,7 +51,7 @@ function formatDate(value?: string) {
 }
 
 function getStatusStyle(value?: string): React.CSSProperties {
-  const raw = String(value || "").trim().toLowerCase();
+  const raw = normalizeLower(value);
 
   if (raw === "active") {
     return {
@@ -64,27 +75,21 @@ function generateEmailTemplate(
 ) {
   return `Dear ${contactName || "Partner"},
 
-We are pleased to inform you that your company has been successfully approved as a B2B partner of Globaltex Fine Linens.
-
-You may now access your dedicated customer portal using the credentials below:
+We are pleased to share your updated customer portal login credentials for Globaltex Fine Linens.
 
 Portal Access: https://www.globaltexusa.com/portal-login
 Email: ${email}
 Temporary Password: ${password}
 
-Through your account, you will be able to:
-- access your assigned wholesale pricing structure
-- explore our hospitality collections
-- create and submit order requests
-- manage your account details efficiently
+Through your account, you can:
+- access your assigned pricing structure
+- review available hospitality collections
+- prepare and submit order requests
+- manage your account workflow more efficiently
 
-As a trusted supplier to luxury hotels, resorts, and premium residences, Globaltex Fine Linens is committed to delivering exceptional quality, consistency, and service tailored to your operational needs.
+For security reasons, we recommend updating your password after your next login.
 
-For security reasons, we recommend updating your password upon your first login.
-
-If you require any assistance or would like to discuss custom products, embroidery, or bulk project requirements, our team will be delighted to support you.
-
-We look forward to building a long-term partnership with your organization.
+If you need support regarding orders, custom developments, or hospitality project requirements, our team will be pleased to assist you.
 
 Warm regards,
 Globaltex Fine Linens
@@ -96,9 +101,19 @@ export default function AdminCustomersPage() {
   const [items, setItems] = useState<CustomerItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+
+  const [searchInput, setSearchInput] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [priceTierFilter, setPriceTierFilter] = useState("all");
+
   const [resetLoadingId, setResetLoadingId] = useState("");
+  const [statusLoadingId, setStatusLoadingId] = useState("");
+  const [expandedCustomerId, setExpandedCustomerId] = useState("");
+
+  const [statusMap, setStatusMap] = useState<Record<string, string>>({});
   const [resetResult, setResetResult] = useState<ResetResult | null>(null);
   const [generatedEmail, setGeneratedEmail] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   async function loadCustomers() {
     try {
@@ -115,7 +130,14 @@ export default function AdminCustomersPage() {
         throw new Error(data?.error || "Failed to load customers.");
       }
 
-      setItems(Array.isArray(data.items) ? data.items : []);
+      const nextItems = Array.isArray(data.items) ? data.items : [];
+      setItems(nextItems);
+
+      const nextStatusMap: Record<string, string> = {};
+      nextItems.forEach((item: CustomerItem) => {
+        nextStatusMap[item.id] = normalizeLower(item.status || "inactive") || "inactive";
+      });
+      setStatusMap(nextStatusMap);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -129,11 +151,48 @@ export default function AdminCustomersPage() {
     loadCustomers();
   }, []);
 
+  const filteredItems = useMemo(() => {
+    const query = normalizeLower(searchInput);
+
+    return items.filter((item) => {
+      const itemStatus = normalizeLower(item.status);
+      const itemTier = normalizeLower(item.price_tier);
+
+      const matchesSearch =
+        !query ||
+        normalizeLower(item.company_name).includes(query) ||
+        normalizeLower(item.contact_name).includes(query) ||
+        normalizeLower(item.email).includes(query) ||
+        normalizeLower(item.customer_code).includes(query);
+
+      const matchesStatus =
+        statusFilter === "all" ? true : itemStatus === normalizeLower(statusFilter);
+
+      const matchesTier =
+        priceTierFilter === "all"
+          ? true
+          : itemTier === normalizeLower(priceTierFilter);
+
+      return matchesSearch && matchesStatus && matchesTier;
+    });
+  }, [items, searchInput, statusFilter, priceTierFilter]);
+
+  const activeCount = useMemo(
+    () => items.filter((item) => normalizeLower(item.status) === "active").length,
+    [items]
+  );
+
+  const inactiveCount = useMemo(
+    () => items.filter((item) => normalizeLower(item.status) !== "active").length,
+    [items]
+  );
+
   async function handleResetPassword(item: CustomerItem) {
     try {
       setResetLoadingId(item.id);
       setResetResult(null);
       setGeneratedEmail("");
+      setSuccessMessage("");
 
       const response = await fetch("/api/admin/customers/reset-password", {
         method: "POST",
@@ -162,18 +221,48 @@ export default function AdminCustomersPage() {
       });
 
       setGeneratedEmail(
-        generateEmailTemplate(
-          item.contact_name,
-          nextEmail,
-          nextPassword
-        )
+        generateEmailTemplate(item.contact_name, nextEmail, nextPassword)
       );
 
+      setSuccessMessage("Temporary password generated successfully.");
       await loadCustomers();
     } catch (error) {
       alert(error instanceof Error ? error.message : "An unknown error occurred.");
     } finally {
       setResetLoadingId("");
+    }
+  }
+
+  async function handleUpdateStatus(item: CustomerItem) {
+    try {
+      setStatusLoadingId(item.id);
+      setSuccessMessage("");
+
+      const response = await fetch("/api/admin/customers/update-status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customerId: item.id,
+          status: statusMap[item.id] || "inactive",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || "Failed to update customer status.");
+      }
+
+      setSuccessMessage(
+        `Customer ${item.company_name || item.email} updated successfully.`
+      );
+      await loadCustomers();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "An unknown error occurred.");
+    } finally {
+      setStatusLoadingId("");
     }
   }
 
@@ -186,16 +275,105 @@ export default function AdminCustomersPage() {
     }
   }
 
+  async function handleCopyText(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      alert("Copied successfully.");
+    } catch {
+      alert("Failed to copy.");
+    }
+  }
+
   return (
     <div style={{ display: "grid", gap: 24 }}>
-      <div>
-        <h1 style={titleStyle}>Customers</h1>
-        <p style={subtitleStyle}>
-          Review approved B2B customer accounts, pricing tiers, account terms,
-          and generate temporary passwords with a ready-to-send Globaltex Fine
-          Linens onboarding email.
-        </p>
+      <div style={pageHeaderStyle}>
+        <div>
+          <h1 style={titleStyle}>Customers</h1>
+          <p style={subtitleStyle}>
+            Review approved B2B customer accounts, filter by pricing tier and
+            account status, update portal access, and generate temporary passwords
+            with a ready-to-send onboarding email.
+          </p>
+        </div>
+
+        <div style={headerActionsStyle}>
+          <a href="/api/admin/customers/export?format=csv" style={secondaryButtonStyle}>
+            Export CSV
+          </a>
+          <a href="/api/admin/customers/export?format=json" style={secondaryButtonStyle}>
+            Export JSON
+          </a>
+          <a href="/api/admin/customers/export?format=xml" style={secondaryButtonStyle}>
+            Export XML
+          </a>
+        </div>
       </div>
+
+      <div style={filterCardStyle}>
+        <div style={statsRowStyle}>
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Total Customers</div>
+            <div style={statValueStyle}>{items.length}</div>
+          </div>
+
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Active</div>
+            <div style={statValueStyle}>{activeCount}</div>
+          </div>
+
+          <div style={warningStatBoxStyle}>
+            <div style={statLabelStyle}>Inactive</div>
+            <div style={warningStatValueStyle}>{inactiveCount}</div>
+          </div>
+
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Filtered Results</div>
+            <div style={statValueStyle}>{filteredItems.length}</div>
+          </div>
+        </div>
+
+        <div style={filterGridStyle}>
+          <div>
+            <label style={labelStyle}>Search</label>
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by company, contact, email, or customer code"
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="all">all</option>
+              <option value="active">active</option>
+              <option value="inactive">inactive</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Price Tier</label>
+            <select
+              value={priceTierFilter}
+              onChange={(e) => setPriceTierFilter(e.target.value)}
+              style={inputStyle}
+            >
+              {PRICE_TIER_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {successMessage ? <div style={successBoxStyle}>{successMessage}</div> : null}
 
       {resetResult ? (
         <div style={successBoxStyle}>
@@ -222,13 +400,25 @@ export default function AdminCustomersPage() {
             Ready Email
           </div>
 
-          <textarea
-            value={generatedEmail}
-            readOnly
-            style={emailTextareaStyle}
-          />
+          <textarea value={generatedEmail} readOnly style={emailTextareaStyle} />
 
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <div style={emailActionsStyle}>
+            <button
+              type="button"
+              onClick={() => handleCopyText(resetResult?.temporaryPassword || "")}
+              style={secondaryButtonStyle}
+            >
+              Copy Password
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleCopyText(resetResult?.email || "")}
+              style={secondaryButtonStyle}
+            >
+              Copy Email Address
+            </button>
+
             <button
               type="button"
               onClick={handleCopyEmail}
@@ -244,96 +434,168 @@ export default function AdminCustomersPage() {
         <div style={cardStyle}>Loading...</div>
       ) : errorMessage ? (
         <div style={errorBoxStyle}>{errorMessage}</div>
-      ) : items.length === 0 ? (
-        <div style={cardStyle}>No customers found.</div>
+      ) : filteredItems.length === 0 ? (
+        <div style={cardStyle}>No customers matched your current filters.</div>
       ) : (
         <div style={listGridStyle}>
-          {items.map((item) => (
-            <div key={item.id} style={cardStyle}>
-              <div style={cardTopStyle}>
-                <div>
-                  <div style={companyTitleStyle}>{item.company_name || "-"}</div>
-                  <div style={contactStyle}>
-                    {item.contact_name || "-"} • {item.email || "-"}
+          {filteredItems.map((item) => {
+            const isExpanded = expandedCustomerId === item.id;
+
+            return (
+              <div key={item.id} style={cardStyle}>
+                <div style={cardTopStyle}>
+                  <div>
+                    <div style={companyTitleStyle}>{item.company_name || "-"}</div>
+                    <div style={contactStyle}>
+                      {item.contact_name || "-"} • {item.email || "-"}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      ...statusPillStyle,
+                      ...getStatusStyle(item.status),
+                    }}
+                  >
+                    {item.status || "inactive"}
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    ...statusPillStyle,
-                    ...getStatusStyle(item.status),
-                  }}
-                >
-                  {item.status || "inactive"}
+                <div style={summaryGridStyle}>
+                  <div>
+                    <div style={metaLabelStyle}>Customer Code</div>
+                    <div style={metaValueStyle}>{item.customer_code || "-"}</div>
+                  </div>
+
+                  <div>
+                    <div style={metaLabelStyle}>Price Tier</div>
+                    <div style={metaValueStyle}>{item.price_tier || "-"}</div>
+                  </div>
+
+                  <div>
+                    <div style={metaLabelStyle}>Currency</div>
+                    <div style={metaValueStyle}>{item.currency || "-"}</div>
+                  </div>
+
+                  <div>
+                    <div style={metaLabelStyle}>Approved</div>
+                    <div style={metaValueStyle}>{formatDate(item.approved_at)}</div>
+                  </div>
                 </div>
+
+                <div style={actionsWrapStyle}>
+                  <div style={statusEditorWrapStyle}>
+                    <div style={{ minWidth: 180 }}>
+                      <div style={metaLabelStyle}>Update Status</div>
+                      <select
+                        value={statusMap[item.id] || normalizeLower(item.status) || "inactive"}
+                        onChange={(e) =>
+                          setStatusMap((prev) => ({
+                            ...prev,
+                            [item.id]: e.target.value,
+                          }))
+                        }
+                        style={selectStyle}
+                      >
+                        {STATUS_OPTIONS.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateStatus(item)}
+                      disabled={statusLoadingId === item.id}
+                      style={secondaryButtonStyle}
+                    >
+                      {statusLoadingId === item.id ? "Saving..." : "Save Status"}
+                    </button>
+                  </div>
+
+                  <div style={actionsRightStyle}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedCustomerId((prev) => (prev === item.id ? "" : item.id))
+                      }
+                      style={secondaryButtonStyle}
+                    >
+                      {isExpanded ? "Hide Details" : "View Details"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleResetPassword(item)}
+                      disabled={resetLoadingId === item.id}
+                      style={primaryButtonStyle}
+                    >
+                      {resetLoadingId === item.id
+                        ? "Generating..."
+                        : "Generate Temporary Password"}
+                    </button>
+                  </div>
+                </div>
+
+                {isExpanded ? (
+                  <div style={detailsPanelStyle}>
+                    <div style={detailsGridStyle}>
+                      <div>
+                        <div style={metaLabelStyle}>Shipping Terms</div>
+                        <div style={metaValueStyle}>{item.shipping_terms || "-"}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>Payment Terms</div>
+                        <div style={metaValueStyle}>{item.payment_terms || "-"}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>Tax Exempt</div>
+                        <div style={metaValueStyle}>{item.tax_exempt || "-"}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>Created</div>
+                        <div style={metaValueStyle}>{formatDate(item.created_at)}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>Updated</div>
+                        <div style={metaValueStyle}>{formatDate(item.updated_at)}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>Portal Email</div>
+                        <div style={metaValueStyle}>{item.email || "-"}</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
-
-              <div style={metaGridStyle}>
-                <div>
-                  <div style={metaLabelStyle}>Customer Code</div>
-                  <div style={metaValueStyle}>{item.customer_code || "-"}</div>
-                </div>
-
-                <div>
-                  <div style={metaLabelStyle}>Price Tier</div>
-                  <div style={metaValueStyle}>{item.price_tier || "-"}</div>
-                </div>
-
-                <div>
-                  <div style={metaLabelStyle}>Currency</div>
-                  <div style={metaValueStyle}>{item.currency || "-"}</div>
-                </div>
-
-                <div>
-                  <div style={metaLabelStyle}>Shipping Terms</div>
-                  <div style={metaValueStyle}>{item.shipping_terms || "-"}</div>
-                </div>
-
-                <div>
-                  <div style={metaLabelStyle}>Payment Terms</div>
-                  <div style={metaValueStyle}>{item.payment_terms || "-"}</div>
-                </div>
-
-                <div>
-                  <div style={metaLabelStyle}>Tax Exempt</div>
-                  <div style={metaValueStyle}>{item.tax_exempt || "-"}</div>
-                </div>
-
-                <div>
-                  <div style={metaLabelStyle}>Approved</div>
-                  <div style={metaValueStyle}>{formatDate(item.approved_at)}</div>
-                </div>
-
-                <div>
-                  <div style={metaLabelStyle}>Created</div>
-                  <div style={metaValueStyle}>{formatDate(item.created_at)}</div>
-                </div>
-
-                <div>
-                  <div style={metaLabelStyle}>Updated</div>
-                  <div style={metaValueStyle}>{formatDate(item.updated_at)}</div>
-                </div>
-              </div>
-
-              <div style={actionsWrapStyle}>
-                <button
-                  type="button"
-                  onClick={() => handleResetPassword(item)}
-                  disabled={resetLoadingId === item.id}
-                  style={primaryButtonStyle}
-                >
-                  {resetLoadingId === item.id
-                    ? "Generating..."
-                    : "Generate Temporary Password"}
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
+
+const pageHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 20,
+  flexWrap: "wrap",
+};
+
+const headerActionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+};
 
 const titleStyle: React.CSSProperties = {
   fontSize: 42,
@@ -348,6 +610,79 @@ const subtitleStyle: React.CSSProperties = {
   color: "#6f6559",
   fontSize: 16,
   maxWidth: 820,
+};
+
+const filterCardStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #ddd3c5",
+  borderRadius: 24,
+  padding: 24,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
+};
+
+const statsRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 14,
+  flexWrap: "wrap",
+  marginBottom: 20,
+};
+
+const statBoxStyle: React.CSSProperties = {
+  minWidth: 180,
+  background: "#f8f5ef",
+  border: "1px solid #e3dbcf",
+  borderRadius: 18,
+  padding: 16,
+};
+
+const warningStatBoxStyle: React.CSSProperties = {
+  minWidth: 180,
+  background: "#fff7e8",
+  border: "1px solid #ecd8ad",
+  borderRadius: 18,
+  padding: 16,
+};
+
+const statLabelStyle: React.CSSProperties = {
+  fontSize: 13,
+  color: "#7c7267",
+  marginBottom: 8,
+  fontWeight: 700,
+};
+
+const statValueStyle: React.CSSProperties = {
+  fontSize: 28,
+  fontWeight: 800,
+};
+
+const warningStatValueStyle: React.CSSProperties = {
+  fontSize: 28,
+  fontWeight: 800,
+  color: "#8a6418",
+};
+
+const filterGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "2fr 1fr 1fr",
+  gap: 16,
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  marginBottom: 8,
+  fontWeight: 800,
+  fontSize: 15,
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 52,
+  padding: "14px 16px",
+  borderRadius: 16,
+  border: "1px solid #d9cfbf",
+  background: "#fcfbf8",
+  outline: "none",
+  fontSize: 15,
 };
 
 const listGridStyle: React.CSSProperties = {
@@ -396,9 +731,9 @@ const statusPillStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-const metaGridStyle: React.CSSProperties = {
+const summaryGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 14,
 };
 
@@ -423,9 +758,46 @@ const actionsWrapStyle: React.CSSProperties = {
   paddingTop: 16,
   borderTop: "1px solid #eee5d9",
   display: "flex",
-  justifyContent: "flex-end",
+  justifyContent: "space-between",
+  gap: 14,
+  flexWrap: "wrap",
+};
+
+const statusEditorWrapStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-end",
   gap: 12,
   flexWrap: "wrap",
+};
+
+const actionsRightStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const selectStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 48,
+  padding: "0 14px",
+  borderRadius: 14,
+  border: "1px solid #d9cfbf",
+  background: "#fcfbf8",
+  outline: "none",
+  fontSize: 15,
+};
+
+const detailsPanelStyle: React.CSSProperties = {
+  marginTop: 18,
+  paddingTop: 18,
+  borderTop: "1px solid #eee5d9",
+};
+
+const detailsGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 14,
 };
 
 const primaryButtonStyle: React.CSSProperties = {
@@ -440,6 +812,22 @@ const primaryButtonStyle: React.CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   cursor: "pointer",
+  textDecoration: "none",
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 48,
+  padding: "0 18px",
+  borderRadius: 14,
+  border: "1px solid #d9cfbf",
+  background: "#fff",
+  color: "#171717",
+  fontWeight: 800,
+  cursor: "pointer",
+  textDecoration: "none",
 };
 
 const successBoxStyle: React.CSSProperties = {
@@ -470,6 +858,13 @@ const emailTextareaStyle: React.CSSProperties = {
   background: "#fff",
   resize: "vertical",
   outline: "none",
+};
+
+const emailActionsStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 12,
+  flexWrap: "wrap",
 };
 
 const errorBoxStyle: React.CSSProperties = {

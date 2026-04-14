@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { appendSheetRow } from "../../../../lib/sheets";
+import { appendSheetRow, getSheetData } from "../../../../lib/sheets";
 
 type ApplicationBody = {
   company_name?: string;
@@ -13,8 +13,35 @@ type ApplicationBody = {
   notes?: string;
 };
 
+type ExistingApplicationRow = {
+  id?: string;
+  email?: string;
+  status?: string;
+};
+
+type ExistingCustomerRow = {
+  id?: string;
+  email?: string;
+  status?: string;
+};
+
 function normalizeText(value: unknown) {
   return String(value || "").trim();
+}
+
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function normalizeWebsite(value: string) {
+  const clean = normalizeText(value);
+  if (!clean) return "";
+  if (/^https?:\/\//i.test(clean)) return clean;
+  return `https://${clean}`;
 }
 
 export async function POST(req: Request) {
@@ -23,19 +50,67 @@ export async function POST(req: Request) {
 
     const companyName = normalizeText(body?.company_name);
     const contactName = normalizeText(body?.contact_name);
-    const email = normalizeText(body?.email);
+    const email = normalizeLower(body?.email);
     const phone = normalizeText(body?.phone);
     const country = normalizeText(body?.country);
     const businessType = normalizeText(body?.business_type);
     const taxId = normalizeText(body?.tax_id);
-    const website = normalizeText(body?.website);
+    const website = normalizeWebsite(String(body?.website || ""));
     const notes = normalizeText(body?.notes);
 
     if (!companyName || !contactName || !email) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Company name, contact name ve email zorunludur.",
+          error: "Company name, contact name, and email are required.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidEmail(email)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Please enter a valid email address.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const [applications, customers] = await Promise.all([
+      getSheetData("customer_applications", { ttlSeconds: 30 }),
+      getSheetData("customers", { ttlSeconds: 30 }),
+    ]);
+
+    const existingApplication = (applications as ExistingApplicationRow[]).find(
+      (item) => normalizeLower(item.email) === email
+    );
+
+    if (existingApplication) {
+      const existingStatus = normalizeLower(existingApplication.status || "pending");
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            existingStatus === "approved"
+              ? "An approved application already exists for this email."
+              : "An application already exists for this email and is currently under review.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const existingCustomer = (customers as ExistingCustomerRow[]).find(
+      (item) => normalizeLower(item.email) === email
+    );
+
+    if (existingCustomer) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "A customer account already exists for this email.",
         },
         { status: 400 }
       );
@@ -63,7 +138,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      message: "Başvurunuz alındı. Onay sonrası sizinle iletişime geçilecektir.",
+      message:
+        "Your application has been received successfully. Our team will review your company information and contact you after approval.",
       id,
     });
   } catch (error) {
@@ -73,7 +149,7 @@ export async function POST(req: Request) {
         error:
           error instanceof Error
             ? error.message
-            : "Başvuru gönderilirken bilinmeyen bir hata oluştu.",
+            : "Unknown error while submitting application.",
       },
       { status: 500 }
     );

@@ -9,6 +9,7 @@ import {
 
 function isProtectedAdminApiRoute(pathname: string) {
   return (
+    pathname.startsWith("/api/admin/") ||
     pathname.startsWith("/api/products") ||
     pathname.startsWith("/api/blog") ||
     pathname.startsWith("/api/collections") ||
@@ -123,6 +124,7 @@ export const config = {
   matcher: [
     "/admin/:path*",
     "/portal-ptx-admin",
+    "/api/admin/:path*",
     "/api/admin-auth/:path*",
     "/api/products/:path*",
     "/api/blog/:path*",

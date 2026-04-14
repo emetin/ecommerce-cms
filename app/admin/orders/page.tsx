@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type OrderItem = {
   id: string;
@@ -37,6 +37,14 @@ const STATUS_OPTIONS = [
   "cancelled",
 ];
 
+function normalizeText(value?: string) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value?: string) {
+  return normalizeText(value).toLowerCase();
+}
+
 function formatMoney(value: number, currency = "USD") {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -58,7 +66,7 @@ function formatDate(value?: string) {
 }
 
 function getStatusStyle(value?: string): React.CSSProperties {
-  const raw = String(value || "").trim().toLowerCase();
+  const raw = normalizeLower(value);
 
   if (raw === "completed") {
     return {
@@ -102,6 +110,9 @@ export default function AdminOrdersPage() {
   const [orderItemsMap, setOrderItemsMap] = useState<Record<string, OrderLineItem[]>>({});
   const [itemsLoadingId, setItemsLoadingId] = useState("");
 
+  const [searchInput, setSearchInput] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+
   async function loadOrders() {
     try {
       setLoading(true);
@@ -138,6 +149,48 @@ export default function AdminOrdersPage() {
     loadOrders();
   }, []);
 
+  const filteredItems = useMemo(() => {
+    const query = normalizeLower(searchInput);
+
+    return items.filter((item) => {
+      const matchesSearch =
+        !query ||
+        normalizeLower(item.order_number).includes(query) ||
+        normalizeLower(item.company_name).includes(query) ||
+        normalizeLower(item.customer_id).includes(query);
+
+      const matchesStatus =
+        statusFilter === "all"
+          ? true
+          : normalizeLower(item.status) === normalizeLower(statusFilter);
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [items, searchInput, statusFilter]);
+
+  const stats = useMemo(() => {
+    const pending = items.filter((item) => normalizeLower(item.status) === "pending").length;
+    const approved = items.filter((item) => normalizeLower(item.status) === "approved").length;
+    const processing = items.filter(
+      (item) => normalizeLower(item.status) === "processing"
+    ).length;
+    const completed = items.filter(
+      (item) => normalizeLower(item.status) === "completed"
+    ).length;
+    const cancelled = items.filter(
+      (item) => normalizeLower(item.status) === "cancelled"
+    ).length;
+
+    return {
+      total: items.length,
+      pending,
+      approved,
+      processing,
+      completed,
+      cancelled,
+    };
+  }, [items]);
+
   async function handleUpdateStatus(orderId: string) {
     try {
       setSavingId(orderId);
@@ -160,7 +213,9 @@ export default function AdminOrdersPage() {
         throw new Error(data?.error || "Failed to update order status.");
       }
 
-      setSuccessMessage(`Order ${data?.order?.orderNumber || ""} updated successfully.`);
+      setSuccessMessage(
+        `Order ${data?.order?.orderNumber || ""} updated successfully.`
+      );
       await loadOrders();
     } catch (error) {
       alert(error instanceof Error ? error.message : "An unknown error occurred.");
@@ -210,12 +265,88 @@ export default function AdminOrdersPage() {
 
   return (
     <div style={{ display: "grid", gap: 24 }}>
-      <div>
-        <h1 style={titleStyle}>Orders</h1>
-        <p style={subtitleStyle}>
-          Review submitted B2B orders, update operational status, and inspect
-          ordered line items.
-        </p>
+      <div style={pageHeaderStyle}>
+        <div>
+          <h1 style={titleStyle}>Orders</h1>
+          <p style={subtitleStyle}>
+            Review submitted B2B orders, filter by order status, inspect line
+            items, and update operational progress directly from the admin panel.
+          </p>
+        </div>
+
+        <div style={headerActionsStyle}>
+          <a href="/api/admin/orders/export?format=csv" style={secondaryButtonStyle}>
+            Export CSV
+          </a>
+          <a href="/api/admin/orders/export?format=json" style={secondaryButtonStyle}>
+            Export JSON
+          </a>
+          <a href="/api/admin/orders/export?format=xml" style={secondaryButtonStyle}>
+            Export XML
+          </a>
+        </div>
+      </div>
+
+      <div style={filterCardStyle}>
+        <div style={statsRowStyle}>
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Total Orders</div>
+            <div style={statValueStyle}>{stats.total}</div>
+          </div>
+
+          <div style={warningStatBoxStyle}>
+            <div style={statLabelStyle}>Pending</div>
+            <div style={warningStatValueStyle}>{stats.pending}</div>
+          </div>
+
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Approved</div>
+            <div style={statValueStyle}>{stats.approved}</div>
+          </div>
+
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Processing</div>
+            <div style={statValueStyle}>{stats.processing}</div>
+          </div>
+
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Completed</div>
+            <div style={statValueStyle}>{stats.completed}</div>
+          </div>
+
+          <div style={warningStatBoxStyle}>
+            <div style={statLabelStyle}>Cancelled</div>
+            <div style={warningStatValueStyle}>{stats.cancelled}</div>
+          </div>
+        </div>
+
+        <div style={filterGridStyle}>
+          <div>
+            <label style={labelStyle}>Search</label>
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by order number, company, or customer ID"
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="all">all</option>
+              {STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       {successMessage ? <div style={successBoxStyle}>{successMessage}</div> : null}
@@ -224,11 +355,11 @@ export default function AdminOrdersPage() {
         <div style={cardStyle}>Loading...</div>
       ) : errorMessage ? (
         <div style={errorBoxStyle}>{errorMessage}</div>
-      ) : items.length === 0 ? (
-        <div style={cardStyle}>No orders found.</div>
+      ) : filteredItems.length === 0 ? (
+        <div style={cardStyle}>No orders matched your current filters.</div>
       ) : (
         <div style={listGridStyle}>
-          {items.map((item) => {
+          {filteredItems.map((item) => {
             const isExpanded = expandedOrderId === item.id;
             const orderLines = orderItemsMap[item.id] || [];
 
@@ -330,7 +461,9 @@ export default function AdminOrdersPage() {
                     {itemsLoadingId === item.id ? (
                       <div style={emptyItemsStyle}>Loading order items...</div>
                     ) : orderLines.length === 0 ? (
-                      <div style={emptyItemsStyle}>No line items found for this order.</div>
+                      <div style={emptyItemsStyle}>
+                        No line items found for this order.
+                      </div>
                     ) : (
                       <div style={{ display: "grid", gap: 12 }}>
                         {orderLines.map((line) => (
@@ -378,6 +511,20 @@ export default function AdminOrdersPage() {
   );
 }
 
+const pageHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 20,
+  flexWrap: "wrap",
+};
+
+const headerActionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
 const titleStyle: React.CSSProperties = {
   fontSize: 42,
   lineHeight: 1.1,
@@ -391,6 +538,79 @@ const subtitleStyle: React.CSSProperties = {
   color: "#6f6559",
   fontSize: 16,
   maxWidth: 760,
+};
+
+const filterCardStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #ddd3c5",
+  borderRadius: 24,
+  padding: 24,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
+};
+
+const statsRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 14,
+  flexWrap: "wrap",
+  marginBottom: 20,
+};
+
+const statBoxStyle: React.CSSProperties = {
+  minWidth: 180,
+  background: "#f8f5ef",
+  border: "1px solid #e3dbcf",
+  borderRadius: 18,
+  padding: 16,
+};
+
+const warningStatBoxStyle: React.CSSProperties = {
+  minWidth: 180,
+  background: "#fff7e8",
+  border: "1px solid #ecd8ad",
+  borderRadius: 18,
+  padding: 16,
+};
+
+const statLabelStyle: React.CSSProperties = {
+  fontSize: 13,
+  color: "#7c7267",
+  marginBottom: 8,
+  fontWeight: 700,
+};
+
+const statValueStyle: React.CSSProperties = {
+  fontSize: 28,
+  fontWeight: 800,
+};
+
+const warningStatValueStyle: React.CSSProperties = {
+  fontSize: 28,
+  fontWeight: 800,
+  color: "#8a6418",
+};
+
+const filterGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "2fr 1fr",
+  gap: 16,
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  marginBottom: 8,
+  fontWeight: 800,
+  fontSize: 15,
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 52,
+  padding: "14px 16px",
+  borderRadius: 16,
+  border: "1px solid #d9cfbf",
+  background: "#fcfbf8",
+  outline: "none",
+  fontSize: 15,
 };
 
 const listGridStyle: React.CSSProperties = {
@@ -513,6 +733,7 @@ const primaryButtonStyle: React.CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   cursor: "pointer",
+  textDecoration: "none",
 };
 
 const secondaryButtonStyle: React.CSSProperties = {
@@ -527,6 +748,7 @@ const secondaryButtonStyle: React.CSSProperties = {
   color: "#171717",
   fontWeight: 800,
   cursor: "pointer",
+  textDecoration: "none",
 };
 
 const itemsPanelStyle: React.CSSProperties = {

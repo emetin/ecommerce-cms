@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type ApplicationItem = {
   id: string;
@@ -25,6 +25,35 @@ type ApprovalResult = {
   temporaryPassword: string;
 };
 
+type ApprovalConfig = {
+  priceTier: string;
+  currency: string;
+  shippingTerms: string;
+  paymentTerms: string;
+  taxExempt: string;
+};
+
+const INITIAL_APPROVAL_CONFIG: ApprovalConfig = {
+  priceTier: "wholesale",
+  currency: "USD",
+  shippingTerms: "FOB",
+  paymentTerms: "Net 30",
+  taxExempt: "false",
+};
+
+const PRICE_TIER_OPTIONS = ["standard", "wholesale", "distributor", "vip"];
+const STATUS_FILTER_OPTIONS = ["all", "pending", "approved"];
+const CURRENCY_OPTIONS = ["USD", "EUR", "GBP"];
+const TAX_EXEMPT_OPTIONS = ["false", "true"];
+
+function normalizeText(value?: string) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value?: string) {
+  return normalizeText(value).toLowerCase();
+}
+
 function formatDate(value?: string) {
   if (!value) return "-";
 
@@ -39,14 +68,13 @@ function formatDate(value?: string) {
 }
 
 function normalizeStatusLabel(value?: string) {
-  const raw = String(value || "").trim().toLowerCase();
-
+  const raw = normalizeLower(value);
   if (!raw) return "Pending";
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
 function getStatusStyle(value?: string): React.CSSProperties {
-  const raw = String(value || "").trim().toLowerCase();
+  const raw = normalizeLower(value);
 
   if (raw === "approved") {
     return {
@@ -57,9 +85,9 @@ function getStatusStyle(value?: string): React.CSSProperties {
   }
 
   return {
-    background: "#f8f5ef",
-    color: "#6a6156",
-    border: "1px solid #e5ddd2",
+    background: "#fff7e8",
+    color: "#8a6418",
+    border: "1px solid #ecd8ad",
   };
 }
 
@@ -72,7 +100,7 @@ function generateEmailTemplate(
 
 We are pleased to inform you that your company has been successfully approved as a B2B partner of Globaltex Fine Linens.
 
-You may now access your dedicated customer portal using the credentials below:
+You may now access your customer portal using the credentials below:
 
 Portal Access: https://www.globaltexusa.com/portal-login
 Email: ${email}
@@ -80,17 +108,13 @@ Temporary Password: ${password}
 
 Through your account, you will be able to:
 - access your assigned wholesale pricing structure
-- explore our hospitality collections
+- review our hospitality collections
 - create and submit order requests
-- manage your account details efficiently
+- manage your account workflow more efficiently
 
-As a trusted supplier to luxury hotels, resorts, and premium residences, Globaltex Fine Linens is committed to delivering exceptional quality, consistency, and service tailored to your operational needs.
+For security reasons, we recommend updating your password after your first login.
 
-For security reasons, we recommend updating your password upon your first login.
-
-If you require any assistance or would like to discuss custom products, embroidery, or bulk project requirements, our team will be delighted to support you.
-
-We look forward to building a long-term partnership with your organization.
+If you require support for hospitality sourcing, custom developments, embroidery, or bulk project requirements, our team will be pleased to assist you.
 
 Warm regards,
 Globaltex Fine Linens
@@ -102,9 +126,19 @@ export default function AdminCustomerApplicationsPage() {
   const [items, setItems] = useState<ApplicationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+
   const [approveLoadingId, setApproveLoadingId] = useState("");
   const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null);
   const [generatedEmail, setGeneratedEmail] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+
+  const [searchInput, setSearchInput] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [expandedApplicationId, setExpandedApplicationId] = useState("");
+
+  const [approvalConfigMap, setApprovalConfigMap] = useState<
+    Record<string, ApprovalConfig>
+  >({});
 
   async function loadApplications() {
     try {
@@ -121,7 +155,16 @@ export default function AdminCustomerApplicationsPage() {
         throw new Error(data?.error || "Failed to load applications.");
       }
 
-      setItems(Array.isArray(data.items) ? data.items : []);
+      const nextItems = Array.isArray(data.items) ? data.items : [];
+      setItems(nextItems);
+
+      const nextConfigMap: Record<string, ApprovalConfig> = {};
+      nextItems.forEach((item: ApplicationItem) => {
+        nextConfigMap[item.id] = approvalConfigMap[item.id] || {
+          ...INITIAL_APPROVAL_CONFIG,
+        };
+      });
+      setApprovalConfigMap(nextConfigMap);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -135,11 +178,62 @@ export default function AdminCustomerApplicationsPage() {
     loadApplications();
   }, []);
 
+  const filteredItems = useMemo(() => {
+    const query = normalizeLower(searchInput);
+
+    return items.filter((item) => {
+      const matchesSearch =
+        !query ||
+        normalizeLower(item.company_name).includes(query) ||
+        normalizeLower(item.contact_name).includes(query) ||
+        normalizeLower(item.email).includes(query) ||
+        normalizeLower(item.country).includes(query) ||
+        normalizeLower(item.business_type).includes(query);
+
+      const matchesStatus =
+        statusFilter === "all"
+          ? true
+          : normalizeLower(item.status) === normalizeLower(statusFilter);
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [items, searchInput, statusFilter]);
+
+  const stats = useMemo(() => {
+    const pending = items.filter((item) => normalizeLower(item.status) === "pending").length;
+    const approved = items.filter((item) => normalizeLower(item.status) === "approved").length;
+
+    return {
+      total: items.length,
+      pending,
+      approved,
+      filtered: filteredItems.length,
+    };
+  }, [items, filteredItems.length]);
+
+  function updateApprovalConfig(
+    applicationId: string,
+    field: keyof ApprovalConfig,
+    value: string
+  ) {
+    setApprovalConfigMap((prev) => ({
+      ...prev,
+      [applicationId]: {
+        ...(prev[applicationId] || INITIAL_APPROVAL_CONFIG),
+        [field]: value,
+      },
+    }));
+  }
+
   async function handleApprove(item: ApplicationItem) {
     try {
       setApproveLoadingId(item.id);
       setApprovalResult(null);
       setGeneratedEmail("");
+      setSuccessMessage("");
+
+      const approvalConfig =
+        approvalConfigMap[item.id] || INITIAL_APPROVAL_CONFIG;
 
       const response = await fetch("/api/admin/customer-applications/approve", {
         method: "POST",
@@ -148,11 +242,11 @@ export default function AdminCustomerApplicationsPage() {
         },
         body: JSON.stringify({
           applicationId: item.id,
-          priceTier: "wholesale",
-          currency: "USD",
-          shippingTerms: "FOB",
-          paymentTerms: "Net 30",
-          taxExempt: "false",
+          priceTier: approvalConfig.priceTier,
+          currency: approvalConfig.currency,
+          shippingTerms: approvalConfig.shippingTerms,
+          paymentTerms: approvalConfig.paymentTerms,
+          taxExempt: approvalConfig.taxExempt,
         }),
       });
 
@@ -172,13 +266,10 @@ export default function AdminCustomerApplicationsPage() {
       });
 
       setGeneratedEmail(
-        generateEmailTemplate(
-          item.contact_name,
-          nextEmail,
-          nextPassword
-        )
+        generateEmailTemplate(item.contact_name, nextEmail, nextPassword)
       );
 
+      setSuccessMessage("Application approved and customer account created.");
       await loadApplications();
     } catch (error) {
       alert(error instanceof Error ? error.message : "An unknown error occurred.");
@@ -196,17 +287,101 @@ export default function AdminCustomerApplicationsPage() {
     }
   }
 
+  async function handleCopyText(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      alert("Copied successfully.");
+    } catch {
+      alert("Failed to copy.");
+    }
+  }
+
   return (
     <div style={{ display: "grid", gap: 24 }}>
       <div style={pageHeaderStyle}>
         <div>
           <h1 style={titleStyle}>Customer Applications</h1>
           <p style={subtitleStyle}>
-            Review incoming B2B applications and approve qualified companies into
-            active Globaltex Fine Linens portal customers.
+            Review incoming B2B applications, inspect company information, and
+            approve qualified companies into active Globaltex Fine Linens portal
+            customers with defined commercial terms.
           </p>
         </div>
+
+        <div style={headerActionsStyle}>
+          <a
+            href="/api/admin/customer-applications/export?format=csv"
+            style={secondaryButtonStyle}
+          >
+            Export CSV
+          </a>
+          <a
+            href="/api/admin/customer-applications/export?format=json"
+            style={secondaryButtonStyle}
+          >
+            Export JSON
+          </a>
+          <a
+            href="/api/admin/customer-applications/export?format=xml"
+            style={secondaryButtonStyle}
+          >
+            Export XML
+          </a>
+        </div>
       </div>
+
+      <div style={filterCardStyle}>
+        <div style={statsRowStyle}>
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Total Applications</div>
+            <div style={statValueStyle}>{stats.total}</div>
+          </div>
+
+          <div style={warningStatBoxStyle}>
+            <div style={statLabelStyle}>Pending</div>
+            <div style={warningStatValueStyle}>{stats.pending}</div>
+          </div>
+
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Approved</div>
+            <div style={statValueStyle}>{stats.approved}</div>
+          </div>
+
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Filtered Results</div>
+            <div style={statValueStyle}>{stats.filtered}</div>
+          </div>
+        </div>
+
+        <div style={filterGridStyle}>
+          <div>
+            <label style={labelStyle}>Search</label>
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by company, contact, email, country, or business type"
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={inputStyle}
+            >
+              {STATUS_FILTER_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {successMessage ? <div style={successBoxStyle}>{successMessage}</div> : null}
 
       {approvalResult ? (
         <div style={successBoxStyle}>
@@ -233,13 +408,25 @@ export default function AdminCustomerApplicationsPage() {
             Ready Email
           </div>
 
-          <textarea
-            value={generatedEmail}
-            readOnly
-            style={emailTextareaStyle}
-          />
+          <textarea value={generatedEmail} readOnly style={emailTextareaStyle} />
 
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <div style={emailActionsStyle}>
+            <button
+              type="button"
+              onClick={() => handleCopyText(approvalResult?.temporaryPassword || "")}
+              style={secondaryButtonStyle}
+            >
+              Copy Password
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleCopyText(approvalResult?.email || "")}
+              style={secondaryButtonStyle}
+            >
+              Copy Email Address
+            </button>
+
             <button
               type="button"
               onClick={handleCopyEmail}
@@ -258,12 +445,15 @@ export default function AdminCustomerApplicationsPage() {
           <strong>Error:</strong>
           <div style={{ marginTop: 8 }}>{errorMessage}</div>
         </div>
-      ) : items.length === 0 ? (
-        <div style={emptyStateStyle}>No customer applications found.</div>
+      ) : filteredItems.length === 0 ? (
+        <div style={emptyStateStyle}>No applications matched your filters.</div>
       ) : (
         <div style={listGridStyle}>
-          {items.map((item) => {
-            const pending = String(item.status || "").toLowerCase() === "pending";
+          {filteredItems.map((item) => {
+            const pending = normalizeLower(item.status) === "pending";
+            const isExpanded = expandedApplicationId === item.id;
+            const approvalConfig =
+              approvalConfigMap[item.id] || INITIAL_APPROVAL_CONFIG;
 
             return (
               <div key={item.id} style={cardStyle}>
@@ -285,12 +475,7 @@ export default function AdminCustomerApplicationsPage() {
                   </div>
                 </div>
 
-                <div style={metaGridStyle}>
-                  <div>
-                    <div style={metaLabelStyle}>Phone</div>
-                    <div style={metaValueStyle}>{item.phone || "-"}</div>
-                  </div>
-
+                <div style={summaryGridStyle}>
                   <div>
                     <div style={metaLabelStyle}>Country</div>
                     <div style={metaValueStyle}>{item.country || "-"}</div>
@@ -302,29 +487,30 @@ export default function AdminCustomerApplicationsPage() {
                   </div>
 
                   <div>
-                    <div style={metaLabelStyle}>Tax ID</div>
-                    <div style={metaValueStyle}>{item.tax_id || "-"}</div>
-                  </div>
-
-                  <div>
-                    <div style={metaLabelStyle}>Website</div>
-                    <div style={metaValueStyle}>{item.website || "-"}</div>
-                  </div>
-
-                  <div>
                     <div style={metaLabelStyle}>Submitted</div>
                     <div style={metaValueStyle}>{formatDate(item.created_at)}</div>
                   </div>
+
+                  <div>
+                    <div style={metaLabelStyle}>Phone</div>
+                    <div style={metaValueStyle}>{item.phone || "-"}</div>
+                  </div>
                 </div>
 
-                {item.notes ? (
-                  <div style={notesBoxStyle}>
-                    <strong>Notes:</strong> {item.notes}
-                  </div>
-                ) : null}
+                <div style={actionsWrapStyle}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedApplicationId((prev) =>
+                        prev === item.id ? "" : item.id
+                      )
+                    }
+                    style={secondaryButtonStyle}
+                  >
+                    {isExpanded ? "Hide Details" : "View Details"}
+                  </button>
 
-                {pending ? (
-                  <div style={{ marginTop: 18 }}>
+                  {pending ? (
                     <button
                       type="button"
                       onClick={() => handleApprove(item)}
@@ -335,13 +521,147 @@ export default function AdminCustomerApplicationsPage() {
                         ? "Approving..."
                         : "Approve & Create Customer"}
                     </button>
+                  ) : null}
+                </div>
+
+                {isExpanded ? (
+                  <div style={detailsPanelStyle}>
+                    <div style={detailsGridStyle}>
+                      <div>
+                        <div style={metaLabelStyle}>Website</div>
+                        <div style={metaValueStyle}>{item.website || "-"}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>Tax ID</div>
+                        <div style={metaValueStyle}>{item.tax_id || "-"}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>Reviewed By</div>
+                        <div style={metaValueStyle}>{item.reviewed_by || "-"}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>Approved At</div>
+                        <div style={metaValueStyle}>{formatDate(item.approved_at)}</div>
+                      </div>
+                    </div>
+
+                    {item.notes ? (
+                      <div style={notesBoxStyle}>
+                        <strong>Notes:</strong> {item.notes}
+                      </div>
+                    ) : null}
+
+                    {pending ? (
+                      <div style={approvalPanelStyle}>
+                        <div style={approvalPanelTitleStyle}>
+                          Approval Configuration
+                        </div>
+
+                        <div style={approvalGridStyle}>
+                          <div>
+                            <label style={labelStyle}>Price Tier</label>
+                            <select
+                              value={approvalConfig.priceTier}
+                              onChange={(e) =>
+                                updateApprovalConfig(
+                                  item.id,
+                                  "priceTier",
+                                  e.target.value
+                                )
+                              }
+                              style={inputStyle}
+                            >
+                              {PRICE_TIER_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label style={labelStyle}>Currency</label>
+                            <select
+                              value={approvalConfig.currency}
+                              onChange={(e) =>
+                                updateApprovalConfig(
+                                  item.id,
+                                  "currency",
+                                  e.target.value
+                                )
+                              }
+                              style={inputStyle}
+                            >
+                              {CURRENCY_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label style={labelStyle}>Shipping Terms</label>
+                            <input
+                              value={approvalConfig.shippingTerms}
+                              onChange={(e) =>
+                                updateApprovalConfig(
+                                  item.id,
+                                  "shippingTerms",
+                                  e.target.value
+                                )
+                              }
+                              style={inputStyle}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={labelStyle}>Payment Terms</label>
+                            <input
+                              value={approvalConfig.paymentTerms}
+                              onChange={(e) =>
+                                updateApprovalConfig(
+                                  item.id,
+                                  "paymentTerms",
+                                  e.target.value
+                                )
+                              }
+                              style={inputStyle}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={labelStyle}>Tax Exempt</label>
+                            <select
+                              value={approvalConfig.taxExempt}
+                              onChange={(e) =>
+                                updateApprovalConfig(
+                                  item.id,
+                                  "taxExempt",
+                                  e.target.value
+                                )
+                              }
+                              style={inputStyle}
+                            >
+                              {TAX_EXEMPT_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={approvedMetaStyle}>
+                        This application has already been approved.
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div style={approvedMetaStyle}>
-                    Approved: {formatDate(item.approved_at)} • Reviewed by:{" "}
-                    {item.reviewed_by || "-"}
-                  </div>
-                )}
+                ) : null}
               </div>
             );
           })}
@@ -359,6 +679,12 @@ const pageHeaderStyle: React.CSSProperties = {
   flexWrap: "wrap",
 };
 
+const headerActionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
 const titleStyle: React.CSSProperties = {
   fontSize: 42,
   lineHeight: 1.1,
@@ -372,6 +698,80 @@ const subtitleStyle: React.CSSProperties = {
   color: "#6f6559",
   fontSize: 16,
   maxWidth: 820,
+};
+
+const filterCardStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #ddd3c5",
+  borderRadius: 24,
+  padding: 24,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
+};
+
+const statsRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 14,
+  flexWrap: "wrap",
+  marginBottom: 20,
+};
+
+const statBoxStyle: React.CSSProperties = {
+  minWidth: 180,
+  background: "#f8f5ef",
+  border: "1px solid #e3dbcf",
+  borderRadius: 18,
+  padding: 16,
+};
+
+const warningStatBoxStyle: React.CSSProperties = {
+  minWidth: 180,
+  background: "#fff7e8",
+  border: "1px solid #ecd8ad",
+  borderRadius: 18,
+  padding: 16,
+};
+
+const statLabelStyle: React.CSSProperties = {
+  fontSize: 13,
+  color: "#7c7267",
+  marginBottom: 8,
+  fontWeight: 700,
+};
+
+const statValueStyle: React.CSSProperties = {
+  fontSize: 28,
+  fontWeight: 800,
+};
+
+const warningStatValueStyle: React.CSSProperties = {
+  fontSize: 28,
+  fontWeight: 800,
+  color: "#8a6418",
+};
+
+const filterGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "2fr 1fr",
+  gap: 16,
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  marginBottom: 8,
+  fontWeight: 800,
+  fontSize: 14,
+  color: "#171717",
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 52,
+  padding: "14px 16px",
+  borderRadius: 16,
+  border: "1px solid #d9cfbf",
+  background: "#fcfbf8",
+  outline: "none",
+  fontSize: 15,
 };
 
 const listGridStyle: React.CSSProperties = {
@@ -420,9 +820,9 @@ const statusPillStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-const metaGridStyle: React.CSSProperties = {
+const summaryGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 14,
 };
 
@@ -442,8 +842,31 @@ const metaValueStyle: React.CSSProperties = {
   fontSize: 14,
 };
 
-const notesBoxStyle: React.CSSProperties = {
+const actionsWrapStyle: React.CSSProperties = {
   marginTop: 18,
+  paddingTop: 16,
+  borderTop: "1px solid #eee5d9",
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const detailsPanelStyle: React.CSSProperties = {
+  marginTop: 18,
+  paddingTop: 18,
+  borderTop: "1px solid #eee5d9",
+  display: "grid",
+  gap: 16,
+};
+
+const detailsGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 14,
+};
+
+const notesBoxStyle: React.CSSProperties = {
   padding: 14,
   borderRadius: 16,
   background: "#faf8f4",
@@ -453,8 +876,29 @@ const notesBoxStyle: React.CSSProperties = {
   fontSize: 14,
 };
 
+const approvalPanelStyle: React.CSSProperties = {
+  borderRadius: 18,
+  border: "1px solid #e8dfd2",
+  background: "#fcfbf8",
+  padding: 18,
+  display: "grid",
+  gap: 14,
+};
+
+const approvalPanelTitleStyle: React.CSSProperties = {
+  fontSize: 18,
+  lineHeight: 1.2,
+  fontWeight: 800,
+  color: "#171717",
+};
+
+const approvalGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 14,
+};
+
 const approvedMetaStyle: React.CSSProperties = {
-  marginTop: 18,
   color: "#665d52",
   lineHeight: 1.8,
   fontSize: 14,
@@ -473,6 +917,22 @@ const primaryButtonStyle: React.CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   cursor: "pointer",
+  textDecoration: "none",
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 48,
+  padding: "0 18px",
+  borderRadius: 14,
+  border: "1px solid #d9cfbf",
+  background: "#fff",
+  color: "#171717",
+  fontWeight: 800,
+  cursor: "pointer",
+  textDecoration: "none",
 };
 
 const successBoxStyle: React.CSSProperties = {
@@ -503,6 +963,13 @@ const emailTextareaStyle: React.CSSProperties = {
   background: "#fff",
   resize: "vertical",
   outline: "none",
+};
+
+const emailActionsStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 12,
+  flexWrap: "wrap",
 };
 
 const emptyStateStyle: React.CSSProperties = {

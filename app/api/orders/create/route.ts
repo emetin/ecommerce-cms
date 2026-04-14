@@ -116,6 +116,7 @@ export async function POST(req: Request) {
         String(item.quantity),
         String(item.unitPrice),
         String(item.lineTotal),
+        now,
       ])
     );
 

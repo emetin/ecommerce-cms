@@ -164,7 +164,9 @@ export default function ProductDetailClient({
   productImages,
   allProductImages,
 }: ProductDetailClientProps) {
-  const [selectedVariant, setSelectedVariant] = useState<VariantItem | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<VariantItem | null>(
+    null
+  );
   const [selectedImage, setSelectedImage] = useState("");
 
   const baseGalleryImages = useMemo(
@@ -179,7 +181,9 @@ export default function ProductDetailClient({
 
   const selectedVariantImage = useMemo(() => {
     return normalizeImageUrl(
-      String(selectedVariant?.variant_image || selectedVariant?.image_id || "").trim()
+      String(
+        selectedVariant?.variant_image || selectedVariant?.image_id || ""
+      ).trim()
     );
   }, [selectedVariant]);
 
@@ -307,7 +311,9 @@ export default function ProductDetailClient({
                   ) : null}
 
                   {product.product_category ? (
-                    <div style={secondaryBadgeStyle}>{product.product_category}</div>
+                    <div style={secondaryBadgeStyle}>
+                      {product.product_category}
+                    </div>
                   ) : null}
 
                   {product.type ? (
@@ -406,7 +412,9 @@ export default function ProductDetailClient({
                   fontSize: 15,
                 }}
               >
-                {product.description || product.short_description || "No detailed product description has been added yet."}
+                {product.description ||
+                  product.short_description ||
+                  "No detailed product description has been added yet."}
               </div>
             </div>
 

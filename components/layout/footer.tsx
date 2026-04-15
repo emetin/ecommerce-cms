@@ -40,7 +40,7 @@ export default function Footer() {
                   height: 42,
                   borderRadius: 12,
                   background:
-                    "linear-gradient(135deg, #17352d 0%, #2f7d62 75%, #49a487 100%)",
+                    "linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)",
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -50,7 +50,7 @@ export default function Footer() {
                   letterSpacing: "0.04em",
                 }}
               >
-                PT
+                GF
               </div>
 
               <div style={{ display: "grid", gap: 2 }}>
@@ -60,9 +60,10 @@ export default function Footer() {
                     fontWeight: 800,
                     letterSpacing: "-0.02em",
                     lineHeight: 1.1,
+                    fontFamily: "var(--font-heading)",
                   }}
                 >
-                  Patak Textile
+                  Globaltex Fine Linens
                 </span>
                 <span
                   style={{
@@ -73,7 +74,7 @@ export default function Footer() {
                     fontWeight: 800,
                   }}
                 >
-                  Corporate Textile Presentation
+                  Luxury Hospitality Textiles
                 </span>
               </div>
             </div>
@@ -87,8 +88,10 @@ export default function Footer() {
                 maxWidth: 420,
               }}
             >
-              A more confident digital structure for presenting textile categories,
-              collections and brand trust in a professional, future-ready format.
+              Premium textile solutions for hotels, resorts, residences, and
+              hospitality-driven projects. Explore our collections, product
+              range, and sourcing support through a refined, professional
+              presentation.
             </p>
           </div>
 
@@ -123,16 +126,28 @@ export default function Footer() {
                 Product Showcase
               </Link>
               <Link href="/about-us" style={footerLinkStyle}>
-                Corporate Story
+                Brand Story
               </Link>
             </div>
           </div>
 
           <div>
             <div style={footerTitleStyle}>Contact</div>
-            <div style={{ color: "rgba(255,255,255,0.74)", lineHeight: 1.9, fontSize: 15 }}>
-              <div>Use this area for corporate contact details.</div>
-              <div>General inquiries, collection reviews and textile discussions.</div>
+            <div
+              style={{
+                color: "rgba(255,255,255,0.74)",
+                lineHeight: 1.9,
+                fontSize: 15,
+              }}
+            >
+              <div>
+                Connect with our team for hospitality sourcing, collection
+                inquiries, and product discussions.
+              </div>
+              <div>
+                Discover textile solutions tailored for premium guest
+                experiences.
+              </div>
               <div style={{ marginTop: 14 }}>
                 <Link href="/contact-us" style={footerButtonStyle}>
                   Contact Our Team
@@ -156,9 +171,10 @@ export default function Footer() {
             fontSize: 14,
           }}
         >
-          <div>© 2026 Patak Textile. All rights reserved.</div>
+          <div>© 2026 Globaltex Fine Linens. All rights reserved.</div>
           <div>
-            Corporate textile catalog presentation designed for long-term brand growth.
+            Luxury hospitality textile presentation designed for long-term brand
+            growth.
           </div>
         </div>
       </div>
@@ -194,9 +210,9 @@ const footerButtonStyle: React.CSSProperties = {
   minHeight: 44,
   padding: "0 16px",
   borderRadius: 12,
-  background: "#2f7d62",
+  background: "var(--primary)",
   color: "#fff",
-  border: "1px solid #2f7d62",
+  border: "1px solid var(--primary)",
   textDecoration: "none",
   fontWeight: 800,
 };

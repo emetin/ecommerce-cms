@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import CartButton from "../cart/CartButton";
 
 const navigation = [
   { label: "Home", href: "/" },
@@ -39,6 +40,7 @@ export default function Header() {
             alignItems: "center",
             justifyContent: "space-between",
             gap: 20,
+            flexWrap: "wrap",
           }}
         >
           <Link
@@ -49,6 +51,7 @@ export default function Header() {
               display: "inline-flex",
               alignItems: "center",
               gap: 12,
+              minWidth: 0,
             }}
           >
             <div
@@ -57,7 +60,7 @@ export default function Header() {
                 height: 42,
                 borderRadius: 12,
                 background:
-                  "linear-gradient(135deg, #17352d 0%, #2f7d62 75%, #49a487 100%)",
+                  "linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -65,21 +68,23 @@ export default function Header() {
                 fontWeight: 900,
                 fontSize: 16,
                 letterSpacing: "0.04em",
+                flexShrink: 0,
               }}
             >
-              PT
+              GF
             </div>
 
             <div style={{ display: "grid", gap: 2 }}>
               <span
                 style={{
                   fontSize: 18,
-                  fontWeight: 800,
+                  fontWeight: 700,
                   letterSpacing: "-0.02em",
                   lineHeight: 1.1,
+                  fontFamily: "var(--font-heading)",
                 }}
               >
-                Patak Textile
+                Globaltex Fine Linens
               </span>
               <span
                 style={{
@@ -90,7 +95,7 @@ export default function Header() {
                   fontWeight: 800,
                 }}
               >
-                Corporate Textile Catalog
+                Luxury Hospitality Textiles
               </span>
             </div>
           </Link>
@@ -121,9 +126,11 @@ export default function Header() {
                     fontSize: 14,
                     fontWeight: 800,
                     letterSpacing: "0.01em",
-                    color: active ? "#fff" : "#2f2a24",
-                    background: active ? "#2f7d62" : "transparent",
-                    border: active ? "1px solid #2f7d62" : "1px solid transparent",
+                    color: active ? "#ffffff" : "#2f2a24",
+                    background: active ? "var(--primary)" : "transparent",
+                    border: active
+                      ? "1px solid var(--primary)"
+                      : "1px solid transparent",
                     transition: "all 0.2s ease",
                   }}
                 >
@@ -133,7 +140,15 @@ export default function Header() {
             })}
           </nav>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <CartButton />
+
             <Link
               href="/contact-us"
               style={{
@@ -146,9 +161,9 @@ export default function Header() {
                 justifyContent: "center",
                 fontSize: 14,
                 fontWeight: 800,
-                color: "#fff",
-                background: "#2f7d62",
-                border: "1px solid #2f7d62",
+                color: "#ffffff",
+                background: "var(--primary)",
+                border: "1px solid var(--primary)",
                 whiteSpace: "nowrap",
               }}
             >

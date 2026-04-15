@@ -56,6 +56,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 fontSize: 32,
                 fontWeight: 800,
                 lineHeight: 1,
+                fontFamily: "var(--font-heading)",
               }}
             >
               Globaltex Admin
@@ -175,11 +176,14 @@ function AdminNavLink({
         padding: "0 18px",
         borderRadius: 999,
         textDecoration: "none",
-        background: isActive ? "#2f7d62" : "#fff",
+        background: isActive ? "var(--primary)" : "#fff",
         color: isActive ? "#fff" : "#171717",
         fontWeight: 700,
-        border: isActive ? "1px solid #2f7d62" : "1px solid #ddd3c5",
+        border: isActive
+          ? "1px solid var(--primary)"
+          : "1px solid #ddd3c5",
         boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+        transition: "all 0.2s ease",
       }}
     >
       {children}
@@ -195,10 +199,10 @@ const viewSiteButtonStyle: React.CSSProperties = {
   padding: "0 18px",
   borderRadius: 999,
   textDecoration: "none",
-  background: "#2f7d62",
+  background: "var(--primary)",
   color: "#fff",
   fontWeight: 700,
-  border: "1px solid #2f7d62",
+  border: "1px solid var(--primary)",
 };
 
 const logoutButtonStyle: React.CSSProperties = {

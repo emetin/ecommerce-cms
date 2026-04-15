@@ -5,8 +5,9 @@ import {
   getSheetHeaders,
   updateSheetRowByRowNumber,
   findRowNumberByField,
+  getSheetData,
 } from "./sheets";
-import { getCartByToken, getCartItems, syncCartTotals, type CartItemRecord } from "./cart";
+import { getCartByToken, syncCartTotals } from "./cart";
 import { toMoney, toNumber } from "./money";
 import { createId, createOrderNumber, nowIso } from "./ids";
 
@@ -236,24 +237,16 @@ export async function getOrderByNumber(orderNumber: string) {
   };
 }
 
-export async function getAllOrders() {
-  const orders = await findSheetItemsByField<OrderRecord>(
-    ORDERS_SHEET,
-    "id",
-    "",
-    { forceFresh: true, ttlSeconds: 0 }
-  ).catch(async () => {
-    return (await import("./sheets")).then(async ({ getSheetData }) => {
-      return (await getSheetData(ORDERS_SHEET, {
-        forceFresh: true,
-        ttlSeconds: 0,
-      })) as OrderRecord[];
-    });
-  });
+export async function getAllOrders(): Promise<OrderRecord[]> {
+  const rows = (await getSheetData(ORDERS_SHEET, {
+    forceFresh: true,
+    ttlSeconds: 0,
+  })) as OrderRecord[];
 
-  return [...orders].sort((a, b) => {
+  return [...rows].sort((a, b) => {
     return (
-      new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+      new Date(b.created_at || 0).getTime() -
+      new Date(a.created_at || 0).getTime()
     );
   });
 }

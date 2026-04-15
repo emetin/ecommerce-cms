@@ -1,42 +1,27 @@
 import { NextResponse } from "next/server";
-import { getSheetData } from "../../../../../lib/sheets";
-import { verifyAdminSessionToken } from "../../../../../lib/admin-auth";
+import { isAuthenticatedAdmin } from "../../../../../lib/admin-auth";
+import { toNumber } from "../../../../../lib/money";
+import { findSheetItemsByField } from "../../../../../lib/sheets";
 
-type OrderItemRow = {
-  id?: string;
-  order_id?: string;
-  product_slug?: string;
-  variant_id?: string;
-  sku?: string;
-  product_title?: string;
-  variant_label?: string;
-  quantity?: string;
-  unit_price?: string;
-  line_total?: string;
-  created_at?: string;
+type OrderItemRecord = {
+  id: string;
+  order_id: string;
+  product_slug: string;
+  variant_id: string;
+  sku: string;
+  product_title: string;
+  variant_title: string;
+  quantity: string;
+  unit_price: string;
+  line_total: string;
+  created_at: string;
 };
-
-function normalizeText(value: unknown) {
-  return String(value || "").trim();
-}
-
-function parseAdminTokenFromCookie(cookieHeader: string) {
-  const match = cookieHeader.match(/ptx_admin_auth=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function toSafeNumber(value: unknown, fallback = 0) {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : fallback;
-}
 
 export async function GET(req: Request) {
   try {
-    const cookieHeader = req.headers.get("cookie") || "";
-    const token = parseAdminTokenFromCookie(cookieHeader);
-    const isAdmin = await verifyAdminSessionToken(token);
+    const allowed = await isAuthenticatedAdmin();
 
-    if (!isAdmin) {
+    if (!allowed) {
       return NextResponse.json(
         { ok: false, error: "Unauthorized." },
         { status: 401 }
@@ -44,7 +29,7 @@ export async function GET(req: Request) {
     }
 
     const { searchParams } = new URL(req.url);
-    const orderId = normalizeText(searchParams.get("orderId"));
+    const orderId = String(searchParams.get("orderId") || "").trim();
 
     if (!orderId) {
       return NextResponse.json(
@@ -53,39 +38,35 @@ export async function GET(req: Request) {
       );
     }
 
-    const rows = (await getSheetData("order_items", {
-      ttlSeconds: 30,
-    })) as OrderItemRow[];
-
-    const items = rows
-      .filter((row) => normalizeText(row.order_id) === orderId)
-      .map((row) => ({
-        id: normalizeText(row.id),
-        order_id: normalizeText(row.order_id),
-        product_slug: normalizeText(row.product_slug),
-        variant_id: normalizeText(row.variant_id),
-        sku: normalizeText(row.sku),
-        product_title: normalizeText(row.product_title),
-        variant_label: normalizeText(row.variant_label),
-        quantity: toSafeNumber(row.quantity, 0),
-        unit_price: toSafeNumber(row.unit_price, 0),
-        line_total: toSafeNumber(row.line_total, 0),
-        created_at: normalizeText(row.created_at),
-      }));
+    const items = await findSheetItemsByField<OrderItemRecord>(
+      "order_items",
+      "order_id",
+      orderId,
+      { forceFresh: true, ttlSeconds: 0 }
+    );
 
     return NextResponse.json({
       ok: true,
-      items,
+      items: items.map((item) => ({
+        id: item.id,
+        order_id: item.order_id,
+        product_slug: item.product_slug,
+        variant_id: item.variant_id,
+        sku: item.sku,
+        product_title: item.product_title,
+        variant_label: item.variant_title,
+        quantity: toNumber(item.quantity),
+        unit_price: toNumber(item.unit_price),
+        line_total: toNumber(item.line_total),
+        created_at: item.created_at,
+      })),
     });
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to load order items.";
+
     return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unknown error while loading order items.",
-      },
+      { ok: false, error: message },
       { status: 500 }
     );
   }

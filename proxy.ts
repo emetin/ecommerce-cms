@@ -28,12 +28,33 @@ function isAllowedAdminAuthRoute(pathname: string) {
   );
 }
 
+/**
+ * Public customer/order routes:
+ * - /api/orders/create            -> guest order request from cart
+ * - /api/orders/[orderNumber]     -> public order lookup
+ *
+ * Protected customer routes:
+ * - /account/*
+ * - /api/orders/my
+ * - future customer-only order actions
+ */
 function isCustomerProtectedRoute(pathname: string) {
-  return pathname.startsWith("/account") || pathname.startsWith("/api/orders");
+  return (
+    pathname.startsWith("/account") ||
+    pathname === "/api/orders/my" ||
+    pathname.startsWith("/api/orders/my/")
+  );
 }
 
 function isCustomerAuthRoute(pathname: string) {
   return pathname.startsWith("/api/customer-auth");
+}
+
+function isPublicOrderRoute(pathname: string) {
+  if (pathname === "/api/orders/create") return true;
+
+  const dynamicOrderLookup = /^\/api\/orders\/[^/]+$/.test(pathname);
+  return dynamicOrderLookup;
 }
 
 export async function proxy(request: NextRequest) {
@@ -47,6 +68,7 @@ export async function proxy(request: NextRequest) {
   const isCustomerPortalLogin = pathname === "/portal-login";
   const customerProtectedRoute = isCustomerProtectedRoute(pathname);
   const customerAuthRoute = isCustomerAuthRoute(pathname);
+  const publicOrderRoute = isPublicOrderRoute(pathname);
 
   const shouldCheckAdmin =
     isAdminRoute || isPortalRoute || isAdminAuthRoute || protectedAdminApiRoute;
@@ -54,7 +76,11 @@ export async function proxy(request: NextRequest) {
   const shouldCheckCustomer =
     isCustomerPortalLogin || customerProtectedRoute || customerAuthRoute;
 
-  if (!shouldCheckAdmin && !shouldCheckCustomer) {
+  if (!shouldCheckAdmin && !shouldCheckCustomer && !publicOrderRoute) {
+    return NextResponse.next();
+  }
+
+  if (publicOrderRoute) {
     return NextResponse.next();
   }
 
@@ -71,50 +97,52 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const adminAuthCookie = request.cookies.get(ADMIN_COOKIE_NAME)?.value;
-  const isAdminLoggedIn = await isAuthenticatedAdmin(adminAuthCookie);
+  if (shouldCheckAdmin) {
+    const adminAuthCookie = request.cookies.get(ADMIN_COOKIE_NAME)?.value;
+    const isAdminLoggedIn = await isAuthenticatedAdmin(adminAuthCookie);
 
-  if (isPortalRoute) {
-    if (isAdminLoggedIn) {
-      return NextResponse.redirect(new URL("/admin/products", request.url));
+    if (isPortalRoute) {
+      if (isAdminLoggedIn) {
+        return NextResponse.redirect(new URL("/admin/products", request.url));
+      }
+
+      return NextResponse.next();
     }
 
-    return NextResponse.next();
-  }
+    if (!isPortalRoute && (isAdminRoute || protectedAdminApiRoute) && !isAdminLoggedIn) {
+      if (protectedAdminApiRoute) {
+        return NextResponse.json(
+          { ok: false, error: "Yetkisiz admin erişimi." },
+          { status: 401 }
+        );
+      }
 
-  if (shouldCheckAdmin && !isPortalRoute && !isAdminLoggedIn) {
-    if (protectedAdminApiRoute) {
-      return NextResponse.json(
-        { ok: false, error: "Yetkisiz admin erişimi." },
-        { status: 401 }
-      );
-    }
-
-    if (isAdminRoute) {
       return NextResponse.redirect(new URL("/portal-ptx-admin", request.url));
     }
   }
 
-  const customerAuthCookie = request.cookies.get(CUSTOMER_COOKIE_NAME)?.value;
-  const isCustomerLoggedIn = await isAuthenticatedCustomer(customerAuthCookie);
+  if (shouldCheckCustomer) {
+    const customerAuthCookie = request.cookies.get(CUSTOMER_COOKIE_NAME)?.value;
+    const isCustomerLoggedIn = await isAuthenticatedCustomer(customerAuthCookie);
 
-  if (isCustomerPortalLogin) {
-    if (isCustomerLoggedIn) {
-      return NextResponse.redirect(new URL("/account", request.url));
+    if (isCustomerPortalLogin) {
+      if (isCustomerLoggedIn) {
+        return NextResponse.redirect(new URL("/account", request.url));
+      }
+
+      return NextResponse.next();
     }
 
-    return NextResponse.next();
-  }
+    if (customerProtectedRoute && !isCustomerLoggedIn) {
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json(
+          { ok: false, error: "Müşteri girişi gerekli." },
+          { status: 401 }
+        );
+      }
 
-  if (customerProtectedRoute && !isCustomerLoggedIn) {
-    if (pathname.startsWith("/api/orders")) {
-      return NextResponse.json(
-        { ok: false, error: "Müşteri girişi gerekli." },
-        { status: 401 }
-      );
+      return NextResponse.redirect(new URL("/portal-login", request.url));
     }
-
-    return NextResponse.redirect(new URL("/portal-login", request.url));
   }
 
   return NextResponse.next();

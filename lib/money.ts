@@ -6,12 +6,31 @@ function normalizeRawNumber(value: unknown): number {
   }
 
   if (typeof value === "string") {
-    const cleaned = value
-      .replace(/\$/g, "")
-      .replace(/,/g, "")
-      .trim();
+    const raw = value.trim();
 
-    const parsed = Number(cleaned);
+    if (!raw) return 0;
+
+    const cleaned = raw.replace(/\$/g, "").replace(/\s/g, "");
+
+    const hasComma = cleaned.includes(",");
+    const hasDot = cleaned.includes(".");
+
+    let normalized = cleaned;
+
+    if (hasComma && hasDot) {
+      const lastComma = cleaned.lastIndexOf(",");
+      const lastDot = cleaned.lastIndexOf(".");
+
+      if (lastComma > lastDot) {
+        normalized = cleaned.replace(/\./g, "").replace(",", ".");
+      } else {
+        normalized = cleaned.replace(/,/g, "");
+      }
+    } else if (hasComma) {
+      normalized = cleaned.replace(",", ".");
+    }
+
+    const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
   }
 

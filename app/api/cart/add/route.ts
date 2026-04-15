@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureCartToken } from "../../../../lib/cart-cookie";
 import { addItemToCart } from "../../../../lib/cart";
+import { resolveCartCatalogItem } from "../../../../lib/catalog";
 
 export async function POST(req: Request) {
   try {
@@ -8,13 +9,7 @@ export async function POST(req: Request) {
 
     const productSlug = String(body?.product_slug || "").trim();
     const variantId = String(body?.variant_id || "").trim();
-    const productTitle = String(body?.product_title || "").trim();
-    const variantTitle = String(body?.variant_title || "").trim();
-    const sku = String(body?.sku || "").trim();
-    const image = String(body?.image || "").trim();
-    const unitPrice = body?.unit_price;
-    const compareAtPrice = body?.compare_at_price;
-    const quantity = Number(body?.quantity || 1);
+    const requestedQuantity = Number(body?.quantity || 1);
 
     if (!productSlug) {
       return NextResponse.json(
@@ -23,16 +18,26 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!productTitle) {
+    const resolved = await resolveCartCatalogItem(productSlug, variantId);
+
+    if (!resolved.variant?.id) {
       return NextResponse.json(
-        { ok: false, error: "product_title is required." },
+        {
+          ok: false,
+          error:
+            "This product does not have a purchasable variant yet. Please request a quote.",
+        },
         { status: 400 }
       );
     }
 
-    if (unitPrice == null || unitPrice === "") {
+    if (resolved.unitPrice <= 0) {
       return NextResponse.json(
-        { ok: false, error: "unit_price is required." },
+        {
+          ok: false,
+          error:
+            "This product does not have an active price yet. Please request a quote.",
+        },
         { status: 400 }
       );
     }
@@ -41,14 +46,14 @@ export async function POST(req: Request) {
 
     const cart = await addItemToCart(cartToken, {
       product_slug: productSlug,
-      variant_id: variantId,
-      product_title: productTitle,
-      variant_title: variantTitle,
-      sku,
-      image,
-      unit_price: unitPrice,
-      compare_at_price: compareAtPrice,
-      quantity,
+      variant_id: resolved.variant.id || "",
+      product_title: resolved.productTitle,
+      variant_title: resolved.variantTitle,
+      sku: resolved.sku,
+      image: resolved.image,
+      unit_price: resolved.unitPrice,
+      compare_at_price: resolved.compareAtPrice,
+      quantity: Number.isFinite(requestedQuantity) ? requestedQuantity : 1,
     });
 
     return NextResponse.json({

@@ -160,9 +160,7 @@ export default function CartPageClient() {
                     >
                       <button
                         type="button"
-                        onClick={() =>
-                          handleUpdateQuantity(item.id, quantity - 1)
-                        }
+                        onClick={() => handleUpdateQuantity(item.id, quantity - 1)}
                         disabled={isLoading}
                         style={qtyButtonStyle}
                       >
@@ -181,9 +179,7 @@ export default function CartPageClient() {
 
                       <button
                         type="button"
-                        onClick={() =>
-                          handleUpdateQuantity(item.id, quantity + 1)
-                        }
+                        onClick={() => handleUpdateQuantity(item.id, quantity + 1)}
                         disabled={isLoading}
                         style={qtyButtonStyle}
                       >
@@ -295,9 +291,12 @@ export default function CartPageClient() {
             </div>
 
             <div style={{ display: "grid", gap: "10px" }}>
-              <button
-                type="button"
+              <Link
+                href="/order-request"
                 style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                   padding: "14px 18px",
                   borderRadius: "10px",
                   border: "none",
@@ -305,11 +304,11 @@ export default function CartPageClient() {
                   color: "#fff",
                   fontSize: "14px",
                   fontWeight: 600,
-                  cursor: "pointer",
+                  textDecoration: "none",
                 }}
               >
-                Proceed to Checkout
-              </button>
+                Continue to Order Request
+              </Link>
 
               <button
                 type="button"

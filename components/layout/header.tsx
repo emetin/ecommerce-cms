@@ -9,6 +9,7 @@ const navigation = [
   { label: "About Us", href: "/about-us" },
   { label: "Collections", href: "/collections" },
   { label: "Products", href: "/products" },
+  { label: "Order Lookup", href: "/order-lookup" },
   { label: "Contact Us", href: "/contact-us" },
 ];
 

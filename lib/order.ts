@@ -308,3 +308,147 @@ export async function updateOrderStatus(
     items,
   };
 }
+
+export async function getOrderByCartId(cartId: string) {
+  const normalizedCartId = normalize(cartId);
+
+  if (!normalizedCartId) {
+    return null;
+  }
+
+  const order = await findSheetItemByField<OrderRecord>(
+    ORDERS_SHEET,
+    "cart_id",
+    normalizedCartId,
+    { forceFresh: true, ttlSeconds: 0 }
+  );
+
+  if (!order) {
+    return null;
+  }
+
+  const items = await findSheetItemsByField<OrderItemRecord>(
+    ORDER_ITEMS_SHEET,
+    "order_id",
+    order.id,
+    { forceFresh: true, ttlSeconds: 0 }
+  );
+
+  return {
+    order,
+    items,
+  };
+}
+
+export async function createPaidOrderFromCartToken(
+  cartToken: string,
+  input: CreateOrderInput & {
+    paid_status?: string;
+  }
+) {
+  const normalizedCartToken = normalize(cartToken);
+
+  if (!normalizedCartToken) {
+    throw new Error("Cart token not found.");
+  }
+
+  const cart = await getCartByToken(normalizedCartToken);
+
+  if (!cart) {
+    throw new Error("Cart not found.");
+  }
+
+  const existing = await getOrderByCartId(cart.id);
+
+  if (existing) {
+    return existing;
+  }
+
+  const hydratedCart = await syncCartTotals(cart.id);
+  const cartItems = hydratedCart.items || [];
+
+  if (!cartItems.length) {
+    throw new Error("Your cart is empty.");
+  }
+
+  const email = normalize(input.email).toLowerCase();
+
+  if (!email) {
+    throw new Error("Email is required.");
+  }
+
+  const now = nowIso();
+  const finalStatus = normalize(input.paid_status) || "paid";
+
+  const orderRecord: OrderRecord = {
+    id: createId("order"),
+    order_number: createOrderNumber(),
+    cart_token: normalizedCartToken,
+    cart_id: cart.id,
+    customer_id: "",
+    email,
+    first_name: normalize(input.first_name),
+    last_name: normalize(input.last_name),
+    company: normalize(input.company),
+    phone: normalize(input.phone),
+    country: normalize(input.country),
+    city: normalize(input.city),
+    address_line_1: normalize(input.address_line_1),
+    address_line_2: normalize(input.address_line_2),
+    postal_code: normalize(input.postal_code),
+    note: normalize(input.note),
+    status: finalStatus,
+    currency: normalize(cart.currency) || "USD",
+    subtotal: toMoney(hydratedCart.totals.subtotal),
+    discount_total: toMoney(hydratedCart.totals.discount_total),
+    shipping_total: toMoney(hydratedCart.totals.shipping_total),
+    tax_total: toMoney(hydratedCart.totals.tax_total),
+    grand_total: toMoney(hydratedCart.totals.grand_total),
+    item_count: String(hydratedCart.totals.item_count),
+    created_at: now,
+    updated_at: now,
+  };
+
+  const orderRow = await buildRowFromHeaders(ORDERS_SHEET, orderRecord);
+  await appendSheetRow(ORDERS_SHEET, orderRow);
+
+  for (const cartItem of cartItems) {
+    const orderItem: OrderItemRecord = {
+      id: createId("orderitem"),
+      order_id: orderRecord.id,
+      product_slug: normalize(cartItem.product_slug),
+      variant_id: normalize(cartItem.variant_id),
+      product_title: normalize(cartItem.product_title),
+      variant_title: normalize(cartItem.variant_title),
+      sku: normalize(cartItem.sku),
+      image: normalize(cartItem.image),
+      unit_price: toMoney(cartItem.unit_price),
+      compare_at_price: toMoney(cartItem.compare_at_price),
+      quantity: String(toNumber(cartItem.quantity)),
+      line_total: toMoney(cartItem.line_total),
+      created_at: now,
+      updated_at: now,
+    };
+
+    const orderItemRow = await buildRowFromHeaders(ORDER_ITEMS_SHEET, orderItem);
+    await appendSheetRow(ORDER_ITEMS_SHEET, orderItemRow);
+  }
+
+  const cartRowNumber = await findRowNumberByField("carts", "id", cart.id);
+
+  if (cartRowNumber) {
+    const updatedCart = {
+      ...cart,
+      status: "converted",
+      updated_at: nowIso(),
+    };
+
+    const cartRow = await buildRowFromHeaders("carts", updatedCart);
+    await updateSheetRowByRowNumber("carts", cartRowNumber, cartRow);
+  }
+
+  return {
+    order: orderRecord,
+    items: cartItems,
+  };
+}

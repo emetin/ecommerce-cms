@@ -65,7 +65,7 @@ export default function CartPageClient() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) 360px",
+            gridTemplateColumns: "minmax(0, 1fr) 380px",
             gap: "24px",
             alignItems: "start",
           }}
@@ -292,7 +292,7 @@ export default function CartPageClient() {
 
             <div style={{ display: "grid", gap: "10px" }}>
               <Link
-                href="/order-request"
+                href="/checkout"
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -303,11 +303,30 @@ export default function CartPageClient() {
                   background: "#111",
                   color: "#fff",
                   fontSize: "14px",
-                  fontWeight: 600,
+                  fontWeight: 700,
                   textDecoration: "none",
                 }}
               >
-                Continue to Order Request
+                Proceed to Checkout
+              </Link>
+
+              <Link
+                href="/order-request"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "14px 18px",
+                  borderRadius: "10px",
+                  border: "1px solid #d9d9d9",
+                  background: "#fff",
+                  color: "#111",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  textDecoration: "none",
+                }}
+              >
+                Request Quote
               </Link>
 
               <button

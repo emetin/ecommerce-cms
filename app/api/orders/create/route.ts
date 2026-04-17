@@ -1,6 +1,18 @@
 import { NextResponse } from "next/server";
 import { getCartTokenFromCookies } from "../../../../lib/cart-cookie";
 import { createOrderFromCartToken } from "../../../../lib/order";
+import {
+  CUSTOMER_COOKIE_NAME,
+  readCustomerFromSessionToken,
+} from "../../../../lib/customer-auth";
+
+function getCookieValue(cookieHeader: string, name: string) {
+  const match = cookieHeader.match(
+    new RegExp(`${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]+)`)
+  );
+
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 export async function POST(req: Request) {
   try {
@@ -12,6 +24,10 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    const cookieHeader = req.headers.get("cookie") || "";
+    const customerToken = getCookieValue(cookieHeader, CUSTOMER_COOKIE_NAME);
+    const session = await readCustomerFromSessionToken(customerToken);
 
     const body = await req.json();
 
@@ -27,7 +43,9 @@ export async function POST(req: Request) {
     const postalCode = String(body?.postal_code || "").trim();
     const note = String(body?.note || "").trim();
 
-    if (!email) {
+    const effectiveEmail = session?.email || email;
+
+    if (!effectiveEmail) {
       return NextResponse.json(
         { ok: false, error: "email is required." },
         { status: 400 }
@@ -35,7 +53,8 @@ export async function POST(req: Request) {
     }
 
     const result = await createOrderFromCartToken(cartToken, {
-      email,
+      customer_id: session?.customerId || "",
+      email: effectiveEmail,
       first_name: firstName,
       last_name: lastName,
       company,

@@ -47,8 +47,10 @@ export async function POST(req: Request) {
       customerId: customer.id,
       email: customer.email,
       companyName: customer.companyName,
+      contactName: customer.contactName,
       priceTier: customer.priceTier,
       currency: customer.currency,
+      mustChangePassword: customer.mustChangePassword,
     });
 
     const response = NextResponse.json({
@@ -58,9 +60,12 @@ export async function POST(req: Request) {
         customerId: customer.id,
         email: customer.email,
         companyName: customer.companyName,
+        contactName: customer.contactName,
         priceTier: customer.priceTier,
         currency: customer.currency,
+        mustChangePassword: customer.mustChangePassword,
       },
+      next_path: customer.mustChangePassword ? "/change-password" : "/account",
     });
 
     response.cookies.set({

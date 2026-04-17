@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useCart } from "../cart/CartContext";
 import { formatMoney } from "../../lib/money";
@@ -10,6 +10,24 @@ type CheckoutApiResponse = {
   error?: string;
   checkout_url?: string;
   session_id?: string;
+};
+
+type CustomerProfileResponse = {
+  ok: boolean;
+  customer?: {
+    id?: string;
+    email?: string;
+    first_name?: string;
+    last_name?: string;
+    company?: string;
+    phone?: string;
+    country?: string;
+    city?: string;
+    address_line_1?: string;
+    address_line_2?: string;
+    postal_code?: string;
+    status?: string;
+  } | null;
 };
 
 async function parseJsonSafe(response: Response) {
@@ -39,12 +57,73 @@ export default function CheckoutPageClient() {
     cardholder_name: "",
   });
 
+  const [autofillApplied, setAutofillApplied] = useState(false);
+  const [loadingCustomer, setLoadingCustomer] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const items = cart?.items || [];
   const subtotal = Number(cart?.totals?.subtotal || 0);
   const itemCount = Number(cart?.totals?.item_count || 0);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCustomerProfile() {
+      try {
+        const response = await fetch("/api/customer-auth/profile", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const data = (await parseJsonSafe(
+          response
+        )) as CustomerProfileResponse | null;
+
+        if (!active) return;
+
+        if (!response.ok || !data?.ok || !data.customer) {
+          return;
+        }
+
+        const customer = data.customer;
+
+        setForm((prev) => ({
+          ...prev,
+          email: prev.email || customer.email || "",
+          first_name: prev.first_name || customer.first_name || "",
+          last_name: prev.last_name || customer.last_name || "",
+          company: prev.company || customer.company || "",
+          phone: prev.phone || customer.phone || "",
+          country: prev.country || customer.country || "",
+          city: prev.city || customer.city || "",
+          address_line_1: prev.address_line_1 || customer.address_line_1 || "",
+          address_line_2: prev.address_line_2 || customer.address_line_2 || "",
+          postal_code: prev.postal_code || customer.postal_code || "",
+          cardholder_name:
+            prev.cardholder_name ||
+            [customer.first_name, customer.last_name]
+              .filter(Boolean)
+              .join(" "),
+        }));
+
+        setAutofillApplied(true);
+      } catch {
+        // no-op
+      } finally {
+        if (active) {
+          setLoadingCustomer(false);
+        }
+      }
+    }
+
+    loadCustomerProfile();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const canContinue = useMemo(() => {
     return (
@@ -112,8 +191,15 @@ export default function CheckoutPageClient() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>Checkout</h1>
         <p style={textStyle}>
-          Complete your billing and shipping details, then continue securely to payment.
+          Complete your billing and shipping details, then continue securely to
+          payment.
         </p>
+
+        {!loadingCustomer && autofillApplied ? (
+          <div style={autofillNoticeStyle}>
+            Your saved profile and address details were loaded automatically.
+          </div>
+        ) : null}
       </div>
 
       <div style={layoutStyle}>
@@ -224,7 +310,10 @@ export default function CheckoutPageClient() {
               <select
                 value={form.payment_method}
                 onChange={(e) =>
-                  setForm((prev) => ({ ...prev, payment_method: e.target.value }))
+                  setForm((prev) => ({
+                    ...prev,
+                    payment_method: e.target.value,
+                  }))
                 }
                 style={inputStyle}
               >
@@ -411,6 +500,20 @@ const textStyle: React.CSSProperties = {
   lineHeight: 1.8,
   fontSize: 15,
   maxWidth: 820,
+};
+
+const autofillNoticeStyle: React.CSSProperties = {
+  marginTop: 16,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "10px 14px",
+  borderRadius: 999,
+  border: "1px solid #d9d7a8",
+  background: "#f8f5cf",
+  color: "#5e5722",
+  fontSize: 13,
+  fontWeight: 700,
 };
 
 const sectionTitleStyle: React.CSSProperties = {

@@ -12,8 +12,10 @@ type CustomerSessionPayload = {
   customerId: string;
   email: string;
   companyName: string;
+  contactName: string;
   priceTier: string;
   currency: string;
+  mustChangePassword: boolean;
   exp: number;
   iat: number;
   nonce: string;
@@ -21,20 +23,35 @@ type CustomerSessionPayload = {
 
 type CustomerRow = {
   id?: string;
-  company_name?: string;
-  contact_name?: string;
   email?: string;
   password_hash?: string;
+
+  first_name?: string;
+  last_name?: string;
+  company?: string;
+  phone?: string;
+  country?: string;
+  city?: string;
+  address_line_1?: string;
+  address_line_2?: string;
+  postal_code?: string;
+
   status?: string;
+  created_at?: string;
+  updated_at?: string;
+  last_login_at?: string;
+  tax_exempt?: string;
+  approved_at?: string;
+  must_change_password?: string;
+
+  // legacy fallback
+  company_name?: string;
+  contact_name?: string;
   customer_code?: string;
   price_tier?: string;
   currency?: string;
   shipping_terms?: string;
   payment_terms?: string;
-  tax_exempt?: string;
-  approved_at?: string;
-  created_at?: string;
-  updated_at?: string;
 };
 
 function getEnvValue(name: string) {
@@ -74,6 +91,11 @@ function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
+function normalizeBooleanString(value: unknown) {
+  const raw = normalizeLower(value);
+  return raw === "true";
+}
+
 function safeEqual(a: string, b: string) {
   if (a.length !== b.length) {
     return false;
@@ -85,6 +107,18 @@ function safeEqual(a: string, b: string) {
   }
 
   return result === 0;
+}
+
+function buildContactName(customer: CustomerRow) {
+  const first = normalizeText(customer.first_name);
+  const last = normalizeText(customer.last_name);
+  const full = [first, last].filter(Boolean).join(" ").trim();
+
+  return full || normalizeText(customer.contact_name);
+}
+
+function buildCompanyName(customer: CustomerRow) {
+  return normalizeText(customer.company) || normalizeText(customer.company_name);
 }
 
 export function createNonce(size = 24) {
@@ -130,17 +164,21 @@ export function getExpiredCustomerCookieOptions() {
 export async function createCustomerSessionToken(input: {
   customerId: string;
   email: string;
-  companyName: string;
+  companyName?: string;
+  contactName?: string;
   priceTier?: string;
   currency?: string;
+  mustChangePassword?: boolean;
 }) {
   const payload: CustomerSessionPayload = {
     sub: "customer",
     customerId: normalizeText(input.customerId),
-    email: normalizeText(input.email),
+    email: normalizeLower(input.email),
     companyName: normalizeText(input.companyName),
+    contactName: normalizeText(input.contactName),
     priceTier: normalizeText(input.priceTier || "standard") || "standard",
     currency: normalizeText(input.currency || "USD") || "USD",
+    mustChangePassword: Boolean(input.mustChangePassword),
     iat: nowInSeconds(),
     exp: nowInSeconds() + CUSTOMER_SESSION_DURATION_SECONDS,
     nonce: createNonce(16),
@@ -191,10 +229,12 @@ export async function readCustomerFromSessionToken(token?: string | null) {
 
     return {
       customerId: normalizeText(payload.customerId),
-      email: normalizeText(payload.email),
+      email: normalizeLower(payload.email),
       companyName: normalizeText(payload.companyName),
+      contactName: normalizeText(payload.contactName),
       priceTier: normalizeText(payload.priceTier || "standard") || "standard",
       currency: normalizeText(payload.currency || "USD") || "USD",
+      mustChangePassword: Boolean(payload.mustChangePassword),
     };
   } catch {
     return null;
@@ -242,11 +282,12 @@ export async function verifyCustomerCredentials(email: string, password: string)
 
   return {
     id: normalizeText(customer.id),
-    email: normalizeText(customer.email),
-    companyName: normalizeText(customer.company_name),
-    contactName: normalizeText(customer.contact_name),
+    email: normalizeLower(customer.email),
+    companyName: buildCompanyName(customer),
+    contactName: buildContactName(customer),
     priceTier: normalizeText(customer.price_tier || "standard") || "standard",
     currency: normalizeText(customer.currency || "USD") || "USD",
     customerCode: normalizeText(customer.customer_code),
+    mustChangePassword: normalizeBooleanString(customer.must_change_password),
   };
 }

@@ -10,6 +10,7 @@ import {
 import { getCartByToken, syncCartTotals } from "./cart";
 import { toMoney, toNumber } from "./money";
 import { createId, createOrderNumber, nowIso } from "./ids";
+import { findCustomerByEmail, findCustomerById } from "./customer-account";
 
 const ORDERS_SHEET = "orders";
 const ORDER_ITEMS_SHEET = "order_items";
@@ -20,7 +21,8 @@ export type OrderStatus =
   | "reviewing"
   | "quoted"
   | "approved"
-  | "cancelled";
+  | "cancelled"
+  | "paid";
 
 export type OrderRecord = {
   id: string;
@@ -69,6 +71,7 @@ export type OrderItemRecord = {
 };
 
 export type CreateOrderInput = {
+  customer_id?: string;
   email: string;
   first_name?: string;
   last_name?: string;
@@ -102,6 +105,32 @@ async function buildRowFromHeaders(
   });
 }
 
+async function resolveCustomerContext(input: {
+  customer_id?: string;
+  email?: string;
+}) {
+  const customerId = normalize(input.customer_id);
+  const email = normalize(input.email).toLowerCase();
+
+  if (customerId) {
+    const customer = await findCustomerById(customerId);
+
+    if (customer) {
+      return customer;
+    }
+  }
+
+  if (email) {
+    const customer = await findCustomerByEmail(email);
+
+    if (customer) {
+      return customer;
+    }
+  }
+
+  return null;
+}
+
 export async function createOrderFromCartToken(
   cartToken: string,
   input: CreateOrderInput
@@ -131,6 +160,11 @@ export async function createOrderFromCartToken(
     throw new Error("Email is required.");
   }
 
+  const resolvedCustomer = await resolveCustomerContext({
+    customer_id: input.customer_id,
+    email,
+  });
+
   const now = nowIso();
 
   const orderRecord: OrderRecord = {
@@ -138,12 +172,14 @@ export async function createOrderFromCartToken(
     order_number: createOrderNumber(),
     cart_token: normalizedCartToken,
     cart_id: cart.id,
-    customer_id: "",
+    customer_id: normalize(resolvedCustomer?.id),
     email,
-    first_name: normalize(input.first_name),
-    last_name: normalize(input.last_name),
-    company: normalize(input.company),
-    phone: normalize(input.phone),
+    first_name:
+      normalize(input.first_name) || normalize(resolvedCustomer?.first_name),
+    last_name:
+      normalize(input.last_name) || normalize(resolvedCustomer?.last_name),
+    company: normalize(input.company) || normalize(resolvedCustomer?.company),
+    phone: normalize(input.phone) || normalize(resolvedCustomer?.phone),
     country: normalize(input.country),
     city: normalize(input.city),
     address_line_1: normalize(input.address_line_1),
@@ -377,6 +413,11 @@ export async function createPaidOrderFromCartToken(
     throw new Error("Email is required.");
   }
 
+  const resolvedCustomer = await resolveCustomerContext({
+    customer_id: input.customer_id,
+    email,
+  });
+
   const now = nowIso();
   const finalStatus = normalize(input.paid_status) || "paid";
 
@@ -385,12 +426,14 @@ export async function createPaidOrderFromCartToken(
     order_number: createOrderNumber(),
     cart_token: normalizedCartToken,
     cart_id: cart.id,
-    customer_id: "",
+    customer_id: normalize(resolvedCustomer?.id),
     email,
-    first_name: normalize(input.first_name),
-    last_name: normalize(input.last_name),
-    company: normalize(input.company),
-    phone: normalize(input.phone),
+    first_name:
+      normalize(input.first_name) || normalize(resolvedCustomer?.first_name),
+    last_name:
+      normalize(input.last_name) || normalize(resolvedCustomer?.last_name),
+    company: normalize(input.company) || normalize(resolvedCustomer?.company),
+    phone: normalize(input.phone) || normalize(resolvedCustomer?.phone),
     country: normalize(input.country),
     city: normalize(input.city),
     address_line_1: normalize(input.address_line_1),

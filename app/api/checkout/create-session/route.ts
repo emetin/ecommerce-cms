@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { getCartTokenFromCookies } from "../../../../lib/cart-cookie";
 import { getHydratedCartByToken } from "../../../../lib/cart";
 import { getStripeServer } from "../../../../lib/stripe";
+import {
+  CUSTOMER_COOKIE_NAME,
+  readCustomerFromSessionToken,
+} from "../../../../lib/customer-auth";
+import { findCustomerByEmail, findCustomerById } from "../../../../lib/customer-account";
 
 function normalize(value?: string) {
   return String(value || "").trim();
@@ -19,6 +24,14 @@ function getBaseUrl() {
 
 function buildAbsoluteUrl(path: string) {
   return `${getBaseUrl()}${path}`;
+}
+
+function getCookieValue(cookieHeader: string, name: string) {
+  const match = cookieHeader.match(
+    new RegExp(`${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]+)`)
+  );
+
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 export async function POST(req: Request) {
@@ -43,20 +56,55 @@ export async function POST(req: Request) {
       );
     }
 
+    const cookieHeader = req.headers.get("cookie") || "";
+    const customerToken = getCookieValue(cookieHeader, CUSTOMER_COOKIE_NAME);
+    const sessionCustomer = await readCustomerFromSessionToken(customerToken);
+
+    let profileCustomer: Awaited<ReturnType<typeof findCustomerById>> | null = null;
+
+    if (sessionCustomer?.customerId) {
+      profileCustomer = await findCustomerById(sessionCustomer.customerId);
+    } else if (sessionCustomer?.email) {
+      profileCustomer = await findCustomerByEmail(sessionCustomer.email);
+    }
+
     const body = await req.json();
 
-    const email = normalize(body?.email).toLowerCase();
-    const firstName = normalize(body?.first_name);
-    const lastName = normalize(body?.last_name);
-    const company = normalize(body?.company);
-    const phone = normalize(body?.phone);
-    const country = normalize(body?.country);
-    const city = normalize(body?.city);
-    const addressLine1 = normalize(body?.address_line_1);
-    const addressLine2 = normalize(body?.address_line_2);
-    const postalCode = normalize(body?.postal_code);
+    const email = (
+      normalize(body?.email).toLowerCase() ||
+      normalize(sessionCustomer?.email).toLowerCase() ||
+      normalize(profileCustomer?.email).toLowerCase()
+    );
+
+    const firstName =
+      normalize(body?.first_name) || normalize(profileCustomer?.first_name);
+
+    const lastName =
+      normalize(body?.last_name) || normalize(profileCustomer?.last_name);
+
+    const company =
+      normalize(body?.company) || normalize(profileCustomer?.company);
+
+    const phone = normalize(body?.phone) || normalize(profileCustomer?.phone);
+
+    const country =
+      normalize(body?.country) || normalize(profileCustomer?.country);
+
+    const city = normalize(body?.city) || normalize(profileCustomer?.city);
+
+    const addressLine1 =
+      normalize(body?.address_line_1) || normalize(profileCustomer?.address_line_1);
+
+    const addressLine2 =
+      normalize(body?.address_line_2) || normalize(profileCustomer?.address_line_2);
+
+    const postalCode =
+      normalize(body?.postal_code) || normalize(profileCustomer?.postal_code);
+
     const paymentMethod = normalize(body?.payment_method || "card");
-    const cardholderName = normalize(body?.cardholder_name);
+    const cardholderName =
+      normalize(body?.cardholder_name) ||
+      [firstName, lastName].filter(Boolean).join(" ");
 
     if (!email) {
       return NextResponse.json(
@@ -79,7 +127,9 @@ export async function POST(req: Request) {
 
       if (!unitAmount || unitAmount < 1) {
         throw new Error(
-          `Invalid unit price for product: ${item.product_title || item.product_slug || "unknown"}`
+          `Invalid unit price for product: ${
+            item.product_title || item.product_slug || "unknown"
+          }`
         );
       }
 
@@ -114,6 +164,7 @@ export async function POST(req: Request) {
         source: "global-cms-checkout",
         cart_token: cartToken,
         cart_id: hydratedCart.cart.id,
+        customer_id: normalize(sessionCustomer?.customerId || profileCustomer?.id),
         customer_email: email,
         first_name: firstName,
         last_name: lastName,

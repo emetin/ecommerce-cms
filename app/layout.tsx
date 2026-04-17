@@ -1,10 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Header from "../components/layout/header";
-import Footer from "../components/layout/footer";
-import { CartProvider } from "../components/cart/CartContext";
-import CartDrawer from "../components/cart/CartDrawer";
 import { Figtree, Playfair_Display } from "next/font/google";
+import AppShell from "../components/layout/AppShell";
 
 const figtree = Figtree({
   subsets: ["latin"],
@@ -36,12 +33,7 @@ export default function RootLayout({
       className={`${figtree.variable} ${playfairDisplay.variable}`}
     >
       <body>
-        <CartProvider>
-          <Header />
-          <main>{children}</main>
-          <Footer />
-          <CartDrawer />
-        </CartProvider>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

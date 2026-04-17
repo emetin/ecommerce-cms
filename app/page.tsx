@@ -45,6 +45,46 @@ function normalizeText(value?: string) {
   return String(value || "").trim();
 }
 
+function isPublished(value?: string) {
+  return normalizeText(value).toLowerCase() === "published";
+}
+
+async function loadHomeData() {
+  try {
+    const [productsData, collectionsData, blogData] = await Promise.all([
+      getSheetData("products", { ttlSeconds: 300 }),
+      getSheetData("collections", { ttlSeconds: 300 }),
+      getSheetData("blog", { ttlSeconds: 300 }),
+    ]);
+
+    const products = (productsData as ProductItem[]).filter((item) =>
+      isPublished(item.status)
+    );
+
+    const collections = (collectionsData as CollectionItem[]).filter((item) =>
+      isPublished(item.status)
+    );
+
+    const blog = (blogData as BlogItem[]).filter((item) =>
+      isPublished(item.status)
+    );
+
+    return {
+      products,
+      collections,
+      blog,
+    };
+  } catch (error) {
+    console.error("Failed to load homepage data:", error);
+
+    return {
+      products: [] as ProductItem[],
+      collections: [] as CollectionItem[],
+      blog: [] as BlogItem[],
+    };
+  }
+}
+
 export const metadata: Metadata = buildPageMetadata({
   title: "Wholesale Hospitality Textile Collections",
   description:
@@ -53,23 +93,7 @@ export const metadata: Metadata = buildPageMetadata({
 });
 
 export default async function HomePage() {
-  const [productsData, collectionsData, blogData] = await Promise.all([
-    getSheetData("products"),
-    getSheetData("collections"),
-    getSheetData("blog"),
-  ]);
-
-  const products = (productsData as ProductItem[]).filter(
-    (item) => String(item.status || "").trim().toLowerCase() === "published"
-  );
-
-  const collections = (collectionsData as CollectionItem[]).filter(
-    (item) => String(item.status || "").trim().toLowerCase() === "published"
-  );
-
-  const blog = (blogData as BlogItem[]).filter(
-    (item) => String(item.status || "").trim().toLowerCase() === "published"
-  );
+  const { products, collections, blog } = await loadHomeData();
 
   const featuredProducts = products.slice(0, 6);
   const featuredCollections = collections.slice(0, 4);
@@ -92,11 +116,14 @@ export default async function HomePage() {
 
             <div className="home-hero__copy">
               <h1 className="home-hero__title">
-                Structured wholesale textile presentation for hotels, resorts, residences, and project-based sourcing
+                Structured wholesale textile presentation for hotels, resorts,
+                residences, and project-based sourcing
               </h1>
 
               <p className="home-hero__text">
-                Present collections, categories, and product families through a cleaner B2B experience designed for hospitality decision-makers and long-term procurement conversations.
+                Present collections, categories, and product families through a
+                cleaner B2B experience designed for hospitality decision-makers
+                and long-term procurement conversations.
               </p>
             </div>
 
@@ -112,7 +139,8 @@ export default async function HomePage() {
                 <div className="home-hero__feature-kicker">Collections</div>
                 <div className="home-hero__feature-title">Category-led</div>
                 <div className="home-hero__feature-text">
-                  Guide buyers through curated product groups instead of disconnected listings.
+                  Guide buyers through curated product groups instead of
+                  disconnected listings.
                 </div>
               </div>
 
@@ -120,7 +148,8 @@ export default async function HomePage() {
                 <div className="home-hero__feature-kicker">Presentation</div>
                 <div className="home-hero__feature-title">Project-ready</div>
                 <div className="home-hero__feature-text">
-                  Support hotel, resort, residence, and contract procurement discussions with clearer structure.
+                  Support hotel, resort, residence, and contract procurement
+                  discussions with clearer structure.
                 </div>
               </div>
 
@@ -128,7 +157,8 @@ export default async function HomePage() {
                 <div className="home-hero__feature-kicker">Workflow</div>
                 <div className="home-hero__feature-title">Scalable</div>
                 <div className="home-hero__feature-text">
-                  Manage products, media, and collection relations through a lean content architecture.
+                  Manage products, media, and collection relations through a
+                  lean content architecture.
                 </div>
               </div>
             </div>
@@ -154,7 +184,8 @@ export default async function HomePage() {
               <div style={featureKickerStyle}>01 / Positioning</div>
               <h3 style={featureTitleStyle}>Built for B2B presentation</h3>
               <p style={featureTextStyle}>
-                The experience is shaped to feel more suitable for wholesale buyers, project teams, and procurement conversations.
+                The experience is shaped to feel more suitable for wholesale
+                buyers, project teams, and procurement conversations.
               </p>
             </article>
 
@@ -162,7 +193,8 @@ export default async function HomePage() {
               <div style={featureKickerStyle}>02 / Structure</div>
               <h3 style={featureTitleStyle}>Collections guide the journey</h3>
               <p style={featureTextStyle}>
-                A collection-first structure helps visitors understand categories, product families, and sourcing direction faster.
+                A collection-first structure helps visitors understand
+                categories, product families, and sourcing direction faster.
               </p>
             </article>
 
@@ -170,15 +202,19 @@ export default async function HomePage() {
               <div style={featureKickerStyle}>03 / Clarity</div>
               <h3 style={featureTitleStyle}>Products feel more intentional</h3>
               <p style={featureTextStyle}>
-                Vendor, product category, and type data make each product page more useful in B2B context.
+                Vendor, product category, and type data make each product page
+                more useful in B2B context.
               </p>
             </article>
 
             <article className="home-feature-card">
               <div style={featureKickerStyle}>04 / Conversion</div>
-              <h3 style={featureTitleStyle}>Designed for inquiry, not retail noise</h3>
+              <h3 style={featureTitleStyle}>
+                Designed for inquiry, not retail noise
+              </h3>
               <p style={featureTextStyle}>
-                Contact flow, request mindset, and category presentation are aligned with sales-qualified lead generation.
+                Contact flow, request mindset, and category presentation are
+                aligned with sales-qualified lead generation.
               </p>
             </article>
           </div>
@@ -196,13 +232,16 @@ export default async function HomePage() {
               />
 
               <p>
-                Buyers evaluating hospitality textile partners usually want clarity, category confidence, and a smoother path to inquiry.
-                This experience is built to support that behavior through better hierarchy and more structured product presentation.
+                Buyers evaluating hospitality textile partners usually want
+                clarity, category confidence, and a smoother path to inquiry.
+                This experience is built to support that behavior through better
+                hierarchy and more structured product presentation.
               </p>
 
               <p>
-                Instead of overwhelming visitors with retail-style friction, the site creates room for collections, product families,
-                and long-term sourcing conversations.
+                Instead of overwhelming visitors with retail-style friction, the
+                site creates room for collections, product families, and
+                long-term sourcing conversations.
               </p>
             </div>
 
@@ -220,7 +259,8 @@ export default async function HomePage() {
                   Better hierarchy creates stronger procurement confidence
                 </div>
                 <div className="home-split__media-card-text">
-                  Strong collection structure and clear product detail create a more useful experience for wholesale buyers.
+                  Strong collection structure and clear product detail create a
+                  more useful experience for wholesale buyers.
                 </div>
               </div>
             </div>
@@ -327,14 +367,19 @@ export default async function HomePage() {
             <div className="cta-panel-strong__circle--two" />
 
             <div className="cta-panel-strong__inner">
-              <div className="cta-panel-strong__kicker">Start a conversation</div>
+              <div className="cta-panel-strong__kicker">
+                Start a conversation
+              </div>
 
               <h2 className="cta-panel-strong__title">
-                Share your hospitality project, product category needs, or sourcing goals
+                Share your hospitality project, product category needs, or
+                sourcing goals
               </h2>
 
               <p className="cta-panel-strong__text">
-                Move buyers from browsing into a clearer inquiry flow with product families, collection visibility, and structured contact capture.
+                Move buyers from browsing into a clearer inquiry flow with
+                product families, collection visibility, and structured contact
+                capture.
               </p>
 
               <div className="cta-panel-strong__actions">

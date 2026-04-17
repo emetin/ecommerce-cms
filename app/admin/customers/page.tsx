@@ -4,19 +4,26 @@ import { useEffect, useMemo, useState } from "react";
 
 type CustomerItem = {
   id: string;
-  company_name: string;
-  contact_name: string;
+  full_name: string;
+  first_name: string;
+  last_name: string;
+  company: string;
   email: string;
+  phone: string;
+  country: string;
+  city: string;
+  address_line_1: string;
+  address_line_2: string;
+  postal_code: string;
   status: string;
   customer_code: string;
   price_tier: string;
   currency: string;
-  shipping_terms: string;
-  payment_terms: string;
   tax_exempt: string;
   approved_at: string;
   created_at: string;
   updated_at: string;
+  last_login_at: string;
 };
 
 type ResetResult = {
@@ -27,7 +34,13 @@ type ResetResult = {
 };
 
 const STATUS_OPTIONS = ["active", "inactive"];
-const PRICE_TIER_OPTIONS = ["all", "standard", "wholesale", "distributor", "vip"];
+const PRICE_TIER_OPTIONS = [
+  "all",
+  "standard",
+  "wholesale",
+  "distributor",
+  "vip",
+];
 
 function normalizeText(value?: string) {
   return String(value || "").trim();
@@ -135,7 +148,8 @@ export default function AdminCustomersPage() {
 
       const nextStatusMap: Record<string, string> = {};
       nextItems.forEach((item: CustomerItem) => {
-        nextStatusMap[item.id] = normalizeLower(item.status || "inactive") || "inactive";
+        nextStatusMap[item.id] =
+          normalizeLower(item.status || "inactive") || "inactive";
       });
       setStatusMap(nextStatusMap);
     } catch (error) {
@@ -160,9 +174,10 @@ export default function AdminCustomersPage() {
 
       const matchesSearch =
         !query ||
-        normalizeLower(item.company_name).includes(query) ||
-        normalizeLower(item.contact_name).includes(query) ||
+        normalizeLower(item.company).includes(query) ||
+        normalizeLower(item.full_name).includes(query) ||
         normalizeLower(item.email).includes(query) ||
+        normalizeLower(item.phone).includes(query) ||
         normalizeLower(item.customer_code).includes(query);
 
       const matchesStatus =
@@ -215,13 +230,13 @@ export default function AdminCustomersPage() {
 
       setResetResult({
         customerId: data?.customer?.id || item.id,
-        companyName: data?.customer?.companyName || item.company_name,
+        companyName: data?.customer?.companyName || item.company,
         email: nextEmail,
         temporaryPassword: nextPassword,
       });
 
       setGeneratedEmail(
-        generateEmailTemplate(item.contact_name, nextEmail, nextPassword)
+        generateEmailTemplate(item.full_name, nextEmail, nextPassword)
       );
 
       setSuccessMessage("Temporary password generated successfully.");
@@ -256,7 +271,7 @@ export default function AdminCustomersPage() {
       }
 
       setSuccessMessage(
-        `Customer ${item.company_name || item.email} updated successfully.`
+        `Customer ${item.company || item.email} updated successfully.`
       );
       await loadCustomers();
     } catch (error) {
@@ -285,25 +300,33 @@ export default function AdminCustomersPage() {
   }
 
   return (
-    <div style={{ display: "grid", gap: 24 }}>
+    <div style={{ display: "grid", gap: 20 }}>
       <div style={pageHeaderStyle}>
         <div>
           <h1 style={titleStyle}>Customers</h1>
           <p style={subtitleStyle}>
-            Review approved B2B customer accounts, filter by pricing tier and
-            account status, update portal access, and generate temporary passwords
-            with a ready-to-send onboarding email.
+            Review customer portal accounts, update access, and generate temporary
+            passwords with a more compact and scalable layout.
           </p>
         </div>
 
         <div style={headerActionsStyle}>
-          <a href="/api/admin/customers/export?format=csv" style={secondaryButtonStyle}>
+          <a
+            href="/api/admin/customers/export?format=csv"
+            style={secondaryButtonStyle}
+          >
             Export CSV
           </a>
-          <a href="/api/admin/customers/export?format=json" style={secondaryButtonStyle}>
+          <a
+            href="/api/admin/customers/export?format=json"
+            style={secondaryButtonStyle}
+          >
             Export JSON
           </a>
-          <a href="/api/admin/customers/export?format=xml" style={secondaryButtonStyle}>
+          <a
+            href="/api/admin/customers/export?format=xml"
+            style={secondaryButtonStyle}
+          >
             Export XML
           </a>
         </div>
@@ -338,7 +361,7 @@ export default function AdminCustomersPage() {
             <input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search by company, contact, email, or customer code"
+              placeholder="Search by name, company, email, phone, or customer code"
               style={inputStyle}
             />
           </div>
@@ -437,104 +460,83 @@ export default function AdminCustomersPage() {
       ) : filteredItems.length === 0 ? (
         <div style={cardStyle}>No customers matched your current filters.</div>
       ) : (
-        <div style={listGridStyle}>
+        <div style={tableWrapStyle}>
+          <div style={tableHeadStyle}>
+            <div>Name</div>
+            <div>Company</div>
+            <div>Contact</div>
+            <div>Status</div>
+            <div>Tier</div>
+            <div>Approved</div>
+            <div style={{ textAlign: "right" }}>Actions</div>
+          </div>
+
           {filteredItems.map((item) => {
             const isExpanded = expandedCustomerId === item.id;
 
             return (
-              <div key={item.id} style={cardStyle}>
-                <div style={cardTopStyle}>
-                  <div>
-                    <div style={companyTitleStyle}>{item.company_name || "-"}</div>
-                    <div style={contactStyle}>
-                      {item.contact_name || "-"} • {item.email || "-"}
-                    </div>
+              <div key={item.id} style={rowWrapStyle}>
+                <div style={tableRowStyle}>
+                  <div style={nameCellStyle}>
+                    <div style={primaryTextStyle}>{item.full_name || "-"}</div>
+                    {item.customer_code ? (
+                      <div style={secondaryTextStyle}>
+                        Code: {item.customer_code}
+                      </div>
+                    ) : null}
                   </div>
 
-                  <div
-                    style={{
-                      ...statusPillStyle,
-                      ...getStatusStyle(item.status),
-                    }}
-                  >
-                    {item.status || "inactive"}
-                  </div>
-                </div>
-
-                <div style={summaryGridStyle}>
-                  <div>
-                    <div style={metaLabelStyle}>Customer Code</div>
-                    <div style={metaValueStyle}>{item.customer_code || "-"}</div>
+                  <div style={cellStyle}>
+                    <div style={primaryTextStyle}>{item.company || "-"}</div>
                   </div>
 
-                  <div>
-                    <div style={metaLabelStyle}>Price Tier</div>
-                    <div style={metaValueStyle}>{item.price_tier || "-"}</div>
+                  <div style={cellStyle}>
+                    <div style={primaryTextStyle}>{item.email || "-"}</div>
+                    {item.phone ? (
+                      <div style={secondaryTextStyle}>{item.phone}</div>
+                    ) : null}
                   </div>
 
-                  <div>
-                    <div style={metaLabelStyle}>Currency</div>
-                    <div style={metaValueStyle}>{item.currency || "-"}</div>
-                  </div>
-
-                  <div>
-                    <div style={metaLabelStyle}>Approved</div>
-                    <div style={metaValueStyle}>{formatDate(item.approved_at)}</div>
-                  </div>
-                </div>
-
-                <div style={actionsWrapStyle}>
-                  <div style={statusEditorWrapStyle}>
-                    <div style={{ minWidth: 180 }}>
-                      <div style={metaLabelStyle}>Update Status</div>
-                      <select
-                        value={statusMap[item.id] || normalizeLower(item.status) || "inactive"}
-                        onChange={(e) =>
-                          setStatusMap((prev) => ({
-                            ...prev,
-                            [item.id]: e.target.value,
-                          }))
-                        }
-                        style={selectStyle}
-                      >
-                        {STATUS_OPTIONS.map((status) => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateStatus(item)}
-                      disabled={statusLoadingId === item.id}
-                      style={secondaryButtonStyle}
+                  <div style={cellStyle}>
+                    <span
+                      style={{
+                        ...statusPillStyle,
+                        ...getStatusStyle(item.status),
+                      }}
                     >
-                      {statusLoadingId === item.id ? "Saving..." : "Save Status"}
-                    </button>
+                      {item.status || "inactive"}
+                    </span>
                   </div>
 
-                  <div style={actionsRightStyle}>
+                  <div style={cellStyle}>
+                    <div style={primaryTextStyle}>{item.price_tier || "-"}</div>
+                    <div style={secondaryTextStyle}>{item.currency || "-"}</div>
+                  </div>
+
+                  <div style={cellStyle}>
+                    <div style={primaryTextStyle}>{formatDate(item.approved_at)}</div>
+                  </div>
+
+                  <div style={actionsCellStyle}>
                     <button
                       type="button"
                       onClick={() =>
-                        setExpandedCustomerId((prev) => (prev === item.id ? "" : item.id))
+                        setExpandedCustomerId((prev) =>
+                          prev === item.id ? "" : item.id
+                        )
                       }
-                      style={secondaryButtonStyle}
+                      style={secondaryButtonStyleCompact}
                     >
-                      {isExpanded ? "Hide Details" : "View Details"}
+                      {isExpanded ? "Hide" : "Details"}
                     </button>
 
                     <button
                       type="button"
                       onClick={() => handleResetPassword(item)}
                       disabled={resetLoadingId === item.id}
-                      style={primaryButtonStyle}
+                      style={primaryButtonStyleCompact}
                     >
-                      {resetLoadingId === item.id
-                        ? "Generating..."
-                        : "Generate Temporary Password"}
+                      {resetLoadingId === item.id ? "Generating..." : "Temp Password"}
                     </button>
                   </div>
                 </div>
@@ -543,18 +545,48 @@ export default function AdminCustomersPage() {
                   <div style={detailsPanelStyle}>
                     <div style={detailsGridStyle}>
                       <div>
-                        <div style={metaLabelStyle}>Shipping Terms</div>
-                        <div style={metaValueStyle}>{item.shipping_terms || "-"}</div>
+                        <div style={metaLabelStyle}>First Name</div>
+                        <div style={metaValueStyle}>{item.first_name || "-"}</div>
                       </div>
 
                       <div>
-                        <div style={metaLabelStyle}>Payment Terms</div>
-                        <div style={metaValueStyle}>{item.payment_terms || "-"}</div>
+                        <div style={metaLabelStyle}>Last Name</div>
+                        <div style={metaValueStyle}>{item.last_name || "-"}</div>
                       </div>
 
                       <div>
                         <div style={metaLabelStyle}>Tax Exempt</div>
                         <div style={metaValueStyle}>{item.tax_exempt || "-"}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>Country</div>
+                        <div style={metaValueStyle}>{item.country || "-"}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>City</div>
+                        <div style={metaValueStyle}>{item.city || "-"}</div>
+                      </div>
+
+                      <div>
+                        <div style={metaLabelStyle}>Postal Code</div>
+                        <div style={metaValueStyle}>{item.postal_code || "-"}</div>
+                      </div>
+
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <div style={metaLabelStyle}>Address</div>
+                        <div style={metaValueStyle}>
+                          {[
+                            item.address_line_1,
+                            item.address_line_2,
+                            item.city,
+                            item.country,
+                            item.postal_code,
+                          ]
+                            .filter(Boolean)
+                            .join(", ") || "-"}
+                        </div>
                       </div>
 
                       <div>
@@ -568,8 +600,44 @@ export default function AdminCustomersPage() {
                       </div>
 
                       <div>
-                        <div style={metaLabelStyle}>Portal Email</div>
-                        <div style={metaValueStyle}>{item.email || "-"}</div>
+                        <div style={metaLabelStyle}>Last Login</div>
+                        <div style={metaValueStyle}>
+                          {formatDate(item.last_login_at)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={detailsActionsBarStyle}>
+                      <div style={statusEditorInlineStyle}>
+                        <select
+                          value={
+                            statusMap[item.id] ||
+                            normalizeLower(item.status) ||
+                            "inactive"
+                          }
+                          onChange={(e) =>
+                            setStatusMap((prev) => ({
+                              ...prev,
+                              [item.id]: e.target.value,
+                            }))
+                          }
+                          style={compactSelectStyle}
+                        >
+                          {STATUS_OPTIONS.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateStatus(item)}
+                          disabled={statusLoadingId === item.id}
+                          style={secondaryButtonStyleCompact}
+                        >
+                          {statusLoadingId === item.id ? "Saving..." : "Save Status"}
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -685,56 +753,112 @@ const inputStyle: React.CSSProperties = {
   fontSize: 15,
 };
 
-const listGridStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 18,
-};
-
 const cardStyle: React.CSSProperties = {
   background: "#fff",
   border: "1px solid #ddd3c5",
-  borderRadius: 24,
-  padding: 24,
+  borderRadius: 20,
+  padding: 20,
   boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
 };
 
-const cardTopStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 16,
-  flexWrap: "wrap",
-  marginBottom: 18,
+const tableWrapStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 12,
 };
 
-const companyTitleStyle: React.CSSProperties = {
-  fontSize: 24,
-  lineHeight: 1.15,
+const tableHeadStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.2fr 1fr 1.2fr 0.8fr 0.8fr 0.8fr 1.2fr",
+  gap: 14,
+  padding: "0 16px",
+  color: "#7a7166",
+  fontSize: 12,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  fontWeight: 800,
+};
+
+const rowWrapStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #ddd3c5",
+  borderRadius: 20,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
+  overflow: "hidden",
+};
+
+const tableRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.2fr 1fr 1.2fr 0.8fr 0.8fr 0.8fr 1.2fr",
+  gap: 14,
+  alignItems: "center",
+  padding: "16px",
+};
+
+const nameCellStyle: React.CSSProperties = {
+  minWidth: 0,
+};
+
+const cellStyle: React.CSSProperties = {
+  minWidth: 0,
+};
+
+const primaryTextStyle: React.CSSProperties = {
+  fontSize: 15,
   fontWeight: 800,
   color: "#171717",
-  marginBottom: 6,
+  lineHeight: 1.4,
 };
 
-const contactStyle: React.CSSProperties = {
-  color: "#665d52",
-  lineHeight: 1.7,
-  fontSize: 14,
+const secondaryTextStyle: React.CSSProperties = {
+  marginTop: 4,
+  fontSize: 13,
+  color: "#6f6559",
+  lineHeight: 1.5,
 };
 
 const statusPillStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  minHeight: 34,
+  justifyContent: "center",
+  minHeight: 32,
   padding: "0 12px",
   borderRadius: 999,
   fontSize: 13,
   fontWeight: 800,
+  whiteSpace: "nowrap",
 };
 
-const summaryGridStyle: React.CSSProperties = {
+const actionsCellStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
+const detailsPanelStyle: React.CSSProperties = {
+  padding: "0 16px 16px",
+  borderTop: "1px solid #eee5d9",
+  background: "#fcfaf6",
+};
+
+const detailsGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: 14,
+  paddingTop: 16,
+};
+
+const detailsActionsBarStyle: React.CSSProperties = {
+  marginTop: 16,
+  paddingTop: 14,
+  borderTop: "1px solid #eee5d9",
+};
+
+const statusEditorInlineStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  alignItems: "center",
 };
 
 const metaLabelStyle: React.CSSProperties = {
@@ -753,51 +877,14 @@ const metaValueStyle: React.CSSProperties = {
   fontSize: 14,
 };
 
-const actionsWrapStyle: React.CSSProperties = {
-  marginTop: 18,
-  paddingTop: 16,
-  borderTop: "1px solid #eee5d9",
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 14,
-  flexWrap: "wrap",
-};
-
-const statusEditorWrapStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "flex-end",
-  gap: 12,
-  flexWrap: "wrap",
-};
-
-const actionsRightStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
-};
-
-const selectStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 48,
+const compactSelectStyle: React.CSSProperties = {
+  minHeight: 42,
   padding: "0 14px",
-  borderRadius: 14,
+  borderRadius: 12,
   border: "1px solid #d9cfbf",
-  background: "#fcfbf8",
+  background: "#fff",
   outline: "none",
-  fontSize: 15,
-};
-
-const detailsPanelStyle: React.CSSProperties = {
-  marginTop: 18,
-  paddingTop: 18,
-  borderTop: "1px solid #eee5d9",
-};
-
-const detailsGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  gap: 14,
+  fontSize: 14,
 };
 
 const primaryButtonStyle: React.CSSProperties = {
@@ -828,6 +915,40 @@ const secondaryButtonStyle: React.CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
   textDecoration: "none",
+};
+
+const primaryButtonStyleCompact: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 40,
+  padding: "0 14px",
+  borderRadius: 12,
+  border: "1px solid #2f7d62",
+  background: "#2f7d62",
+  color: "#fff",
+  fontWeight: 800,
+  cursor: "pointer",
+  textDecoration: "none",
+  fontSize: 14,
+  whiteSpace: "nowrap",
+};
+
+const secondaryButtonStyleCompact: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 40,
+  padding: "0 14px",
+  borderRadius: 12,
+  border: "1px solid #d9cfbf",
+  background: "#fff",
+  color: "#171717",
+  fontWeight: 800,
+  cursor: "pointer",
+  textDecoration: "none",
+  fontSize: 14,
+  whiteSpace: "nowrap",
 };
 
 const successBoxStyle: React.CSSProperties = {

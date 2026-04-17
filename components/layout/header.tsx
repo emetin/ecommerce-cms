@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import CartButton from "../cart/CartButton";
 
 const navigation = [
@@ -13,8 +14,89 @@ const navigation = [
   { label: "Contact Us", href: "/contact-us" },
 ];
 
+type CustomerSessionResponse = {
+  ok: boolean;
+  authenticated?: boolean;
+  customer?: {
+    customerId?: string;
+    email?: string;
+    companyName?: string;
+    contactName?: string;
+    priceTier?: string;
+    currency?: string;
+  } | null;
+};
+
 export default function Header() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const [customer, setCustomer] = useState<CustomerSessionResponse["customer"]>(
+    null
+  );
+  const [loadingCustomer, setLoadingCustomer] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCustomer() {
+      try {
+        const response = await fetch("/api/customer-auth/me", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const data = (await response.json()) as CustomerSessionResponse;
+
+        if (!active) return;
+
+        if (response.ok && data?.authenticated && data?.customer) {
+          setCustomer(data.customer);
+        } else {
+          setCustomer(null);
+        }
+      } catch {
+        if (!active) return;
+        setCustomer(null);
+      } finally {
+        if (active) {
+          setLoadingCustomer(false);
+        }
+      }
+    }
+
+    loadCustomer();
+
+    return () => {
+      active = false;
+    };
+  }, [pathname]);
+
+  const customerLabel = useMemo(() => {
+    const contact = String(customer?.contactName || "").trim();
+    const company = String(customer?.companyName || "").trim();
+
+    return contact || company || "My Account";
+  }, [customer]);
+
+  async function handleLogout() {
+    try {
+      setLoggingOut(true);
+
+      await fetch("/api/customer-auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      setCustomer(null);
+      router.push("/portal-login");
+      router.refresh();
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   return (
     <header
@@ -146,9 +228,85 @@ export default function Header() {
               display: "flex",
               alignItems: "center",
               gap: 10,
+              flexWrap: "wrap",
+              justifyContent: "flex-end",
             }}
           >
             <CartButton />
+
+            {!loadingCustomer && customer ? (
+              <>
+                <Link
+                  href="/account"
+                  style={{
+                    textDecoration: "none",
+                    minHeight: 44,
+                    padding: "0 16px",
+                    borderRadius: 14,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 14,
+                    fontWeight: 800,
+                    color: "#171717",
+                    background: "#fff",
+                    border: "1px solid #ddd3c5",
+                    whiteSpace: "nowrap",
+                    maxWidth: 180,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                  title={customerLabel}
+                >
+                  {customerLabel}
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  disabled={loggingOut}
+                  style={{
+                    minHeight: 44,
+                    padding: "0 16px",
+                    borderRadius: 14,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 14,
+                    fontWeight: 800,
+                    color: "#171717",
+                    background: "#fff",
+                    border: "1px solid #ddd3c5",
+                    whiteSpace: "nowrap",
+                    cursor: loggingOut ? "not-allowed" : "pointer",
+                    opacity: loggingOut ? 0.65 : 1,
+                  }}
+                >
+                  {loggingOut ? "Signing Out..." : "Logout"}
+                </button>
+              </>
+            ) : (
+              <Link
+                href="/portal-login"
+                style={{
+                  textDecoration: "none",
+                  minHeight: 46,
+                  padding: "0 18px",
+                  borderRadius: 14,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  color: "#171717",
+                  background: "#fff",
+                  border: "1px solid #ddd3c5",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Login
+              </Link>
+            )}
 
             <Link
               href="/contact-us"

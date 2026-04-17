@@ -2,41 +2,49 @@
 
 import { useState } from "react";
 
-export default function PortalLoginPage() {
+type ForgotResponse = {
+  ok: boolean;
+  error?: string;
+  message?: string;
+  temporaryPassword?: string;
+  customer?: {
+    email?: string;
+    contactName?: string;
+    companyName?: string;
+  };
+};
+
+export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<ForgotResponse | null>(null);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
     try {
       setLoading(true);
-      setMessage("");
+      setError("");
+      setResult(null);
 
-      const response = await fetch("/api/customer-auth/login", {
+      const response = await fetch("/api/customer-auth/forgot-password", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          email,
-          password,
-        }),
+        body: JSON.stringify({ email }),
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as ForgotResponse;
 
       if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Login failed.");
+        throw new Error(data?.error || "Request failed.");
       }
 
-      window.location.href = data?.next_path || "/account";
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "An unknown error occurred."
-      );
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Request failed.");
     } finally {
       setLoading(false);
     }
@@ -55,7 +63,7 @@ export default function PortalLoginPage() {
       <div
         style={{
           width: "100%",
-          maxWidth: 520,
+          maxWidth: 560,
           background: "#fff",
           border: "1px solid #e6ddd0",
           borderRadius: 28,
@@ -85,7 +93,7 @@ export default function PortalLoginPage() {
             color: "#171717",
           }}
         >
-          Approved customer login
+          Forgot Password
         </h1>
 
         <p
@@ -96,8 +104,8 @@ export default function PortalLoginPage() {
             fontSize: 15,
           }}
         >
-          Approved B2B customers can log in here to view pricing and submit
-          orders through the customer portal.
+          Enter your account email to generate a temporary password. You will be
+          asked to change it after login.
         </p>
 
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
@@ -112,23 +120,12 @@ export default function PortalLoginPage() {
             />
           </div>
 
-          <div>
-            <label style={labelStyle}>Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={inputStyle}
-              placeholder="••••••••"
-            />
-          </div>
-
           <button type="submit" disabled={loading} style={primaryButtonStyle}>
-            {loading ? "Signing in..." : "Sign In"}
+            {loading ? "Generating..." : "Generate Temporary Password"}
           </button>
         </form>
 
-        {message ? (
+        {error ? (
           <div
             style={{
               marginTop: 16,
@@ -140,7 +137,39 @@ export default function PortalLoginPage() {
               fontWeight: 700,
             }}
           >
-            {message}
+            {error}
+          </div>
+        ) : null}
+
+        {result?.ok ? (
+          <div
+            style={{
+              marginTop: 16,
+              padding: 16,
+              borderRadius: 16,
+              background: "#eef8f0",
+              border: "1px solid #cfe7d8",
+              color: "#1d6a43",
+              lineHeight: 1.8,
+            }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>
+              Temporary password generated
+            </div>
+            <div>
+              <strong>Email:</strong> {result.customer?.email || "-"}
+            </div>
+            <div>
+              <strong>Temporary Password:</strong>{" "}
+              {result.temporaryPassword || "-"}
+            </div>
+            <div style={{ marginTop: 8 }}>
+              Use this password at{" "}
+              <a href="/portal-login" style={{ color: "#1d6a43", fontWeight: 800 }}>
+                portal login
+              </a>
+              . You will then be asked to change it.
+            </div>
           </div>
         ) : null}
 
@@ -153,14 +182,8 @@ export default function PortalLoginPage() {
             gap: 10,
           }}
         >
-          <a href="/forgot-password" style={secondaryLinkStyle}>
-            Forgot Password
-          </a>
-          <a href="/apply-for-account" style={secondaryLinkStyle}>
-            Apply for an account
-          </a>
-          <a href="/products" style={textLinkStyle}>
-            Continue browsing products
+          <a href="/portal-login" style={secondaryLinkStyle}>
+            Back to Login
           </a>
         </div>
       </div>
@@ -209,11 +232,4 @@ const secondaryLinkStyle: React.CSSProperties = {
   color: "#171717",
   fontWeight: 800,
   textDecoration: "none",
-};
-
-const textLinkStyle: React.CSSProperties = {
-  color: "#171717",
-  fontWeight: 700,
-  textDecoration: "none",
-  textAlign: "center",
 };

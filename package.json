@@ -1,12 +1,13 @@
 {
-  "name": "patak-site",
+  "name": "global-cms",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "admin:hash": "node scripts/generate-admin-password-hash.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

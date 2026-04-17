@@ -50,8 +50,6 @@ type CustomerRow = {
   customer_code?: string;
   price_tier?: string;
   currency?: string;
-  shipping_terms?: string;
-  payment_terms?: string;
 };
 
 function getEnvValue(name: string) {
@@ -92,8 +90,7 @@ function normalizeLower(value: unknown) {
 }
 
 function normalizeBooleanString(value: unknown) {
-  const raw = normalizeLower(value);
-  return raw === "true";
+  return normalizeLower(value) === "true";
 }
 
 function safeEqual(a: string, b: string) {
@@ -102,6 +99,7 @@ function safeEqual(a: string, b: string) {
   }
 
   let result = 0;
+
   for (let i = 0; i < a.length; i += 1) {
     result |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }

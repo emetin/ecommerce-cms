@@ -270,6 +270,23 @@ export default function PortalAdminLoginPage() {
               : "Sign In"}
           </button>
         </form>
+
+        <div
+          style={{
+            marginTop: 16,
+            fontSize: 13,
+            lineHeight: 1.7,
+            color: "#6b6258",
+            background: "#f8f5ef",
+            border: "1px solid #e8dfd2",
+            borderRadius: 14,
+            padding: "12px 14px",
+          }}
+        >
+          Password recovery is intentionally disabled for security.
+          Admin password changes must be performed securely by updating the
+          server environment variables.
+        </div>
       </div>
     </main>
   );

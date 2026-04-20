@@ -4,7 +4,7 @@ import {
   getOrderByNumber,
   type OrderItemRecord,
   type OrderRecord,
-} from "../../../lib/orders";
+} from "../../../lib/order";
 
 function formatMoney(value: string, currency: string) {
   const amount = Number(value || 0);

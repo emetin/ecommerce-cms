@@ -3,12 +3,9 @@ import { NextResponse } from "next/server";
 import {
   isExpired,
   isStrongPassword,
-  normalizeEmail,
-  verifyResetToken,
 } from "../../../../lib/customer-password-reset";
 import {
-  findLatestResetTokenByEmail,
-  markResetTokenUsed,
+  findCustomerByResetToken,
   updateCustomerPasswordHashByEmail,
 } from "../../../../lib/customer-users";
 import {
@@ -19,7 +16,6 @@ import {
 } from "../../../../lib/customer-reset-rate-limit";
 
 type ResetPasswordBody = {
-  email?: string;
   token?: string;
   newPassword?: string;
 };
@@ -46,11 +42,10 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json()) as ResetPasswordBody;
 
-    const email = normalizeEmail(body?.email || "");
-    const token = String(body?.token || "");
+    const token = String(body?.token || "").trim();
     const newPassword = String(body?.newPassword || "");
 
-    if (!email || !token || !newPassword) {
+    if (!token || !newPassword) {
       registerFailedAttempt(clientKey);
 
       return NextResponse.json(
@@ -75,9 +70,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const resetRecord = await findLatestResetTokenByEmail(email);
+    const customer = await findCustomerByResetToken(token);
 
-    if (!resetRecord) {
+    if (!customer) {
       registerFailedAttempt(clientKey);
 
       return NextResponse.json(
@@ -89,21 +84,10 @@ export async function POST(req: Request) {
       );
     }
 
-    if (resetRecord.used === "true" || isExpired(resetRecord.expires_at)) {
-      registerFailedAttempt(clientKey);
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Invalid or expired reset link.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const tokenIsValid = await verifyResetToken(token, resetRecord.token_hash);
-
-    if (!tokenIsValid) {
+    if (
+      !customer.reset_token_expires_at ||
+      isExpired(customer.reset_token_expires_at)
+    ) {
       registerFailedAttempt(clientKey);
 
       return NextResponse.json(
@@ -117,8 +101,10 @@ export async function POST(req: Request) {
 
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
 
-    await updateCustomerPasswordHashByEmail(email, newPasswordHash);
-    await markResetTokenUsed(email, resetRecord.created_at);
+    await updateCustomerPasswordHashByEmail(
+      customer.email,
+      newPasswordHash
+    );
 
     clearFailedAttempts(clientKey);
 

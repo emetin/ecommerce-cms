@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
 import {
   appendSheetRow,
   findRowNumberByField,
@@ -7,6 +6,12 @@ import {
   updateSheetRowByRowNumber,
 } from "../../../../../lib/sheets";
 import { verifyAdminSessionToken } from "../../../../../lib/admin-auth";
+import {
+  buildCustomerResetUrl,
+  createResetExpiryIso,
+  generateRawResetToken,
+} from "../../../../../lib/customer-password-reset";
+import { sendCustomerPortalApprovalEmail } from "../../../../../lib/customer-mail";
 
 type ApproveBody = {
   applicationId?: string;
@@ -30,15 +35,29 @@ function parseAdminTokenFromCookie(cookieHeader: string) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-function createTemporaryPassword(length = 10) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  let result = "";
+function splitContactName(value: string) {
+  const normalized = normalizeText(value);
 
-  for (let i = 0; i < length; i += 1) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  if (!normalized) {
+    return {
+      firstName: "",
+      lastName: "",
+    };
   }
 
-  return result;
+  const parts = normalized.split(/\s+/).filter(Boolean);
+
+  if (parts.length === 1) {
+    return {
+      firstName: parts[0],
+      lastName: "",
+    };
+  }
+
+  return {
+    firstName: parts.slice(0, -1).join(" "),
+    lastName: parts.slice(-1).join(""),
+  };
 }
 
 function slugifyCompanyCode(value: string) {
@@ -67,8 +86,6 @@ export async function POST(req: Request) {
     const applicationId = normalizeText(body?.applicationId);
     const priceTier = normalizeText(body?.priceTier || "wholesale") || "wholesale";
     const currency = normalizeText(body?.currency || "USD") || "USD";
-    const shippingTerms = normalizeText(body?.shippingTerms || "FOB");
-    const paymentTerms = normalizeText(body?.paymentTerms || "Net 30");
     const taxExempt = normalizeText(body?.taxExempt || "false") || "false";
 
     if (!applicationId) {
@@ -91,7 +108,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const allRows = await getSheetRows("customer_applications");
+    const allRows = await getSheetRows("customer_applications", {
+      forceFresh: true,
+      ttlSeconds: 0,
+    });
+
     const headers = allRows[0] || [];
     const row = allRows[applicationRowNumber - 1] || [];
 
@@ -108,6 +129,7 @@ export async function POST(req: Request) {
     }, {});
 
     const currentStatus = normalizeLower(rowObject.status || "pending");
+
     if (currentStatus === "approved") {
       return NextResponse.json(
         { ok: false, error: "This application is already approved." },
@@ -118,6 +140,8 @@ export async function POST(req: Request) {
     const companyName = normalizeText(rowObject.company_name);
     const contactName = normalizeText(rowObject.contact_name);
     const email = normalizeText(rowObject.email).toLowerCase();
+    const phone = normalizeText(rowObject.phone);
+    const country = normalizeText(rowObject.country);
     const createdAt = normalizeText(rowObject.created_at) || new Date().toISOString();
 
     if (!companyName || !contactName || !email) {
@@ -127,7 +151,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const customerRows = await getSheetRows("customers");
+    const customerRows = await getSheetRows("customers", {
+      forceFresh: true,
+      ttlSeconds: 0,
+    });
+
     const customerHeaders = customerRows[0] || [];
     const customerDataRows = customerRows.slice(1);
 
@@ -160,25 +188,38 @@ export async function POST(req: Request) {
     const now = new Date().toISOString();
     const customerId = `cust_${Date.now()}`;
     const customerCode = `CUST-${slugifyCompanyCode(companyName).toUpperCase() || "NEW"}`;
-    const temporaryPassword = createTemporaryPassword(10);
-    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+    const { firstName, lastName } = splitContactName(contactName);
+
+    const resetToken = generateRawResetToken();
+    const resetTokenExpiresAt = createResetExpiryIso();
+    const resetUrl = buildCustomerResetUrl(resetToken, email);
 
     await appendSheetRow("customers", [
-      customerId,
-      companyName,
-      contactName,
-      email,
-      passwordHash,
-      "active",
-      customerCode,
-      priceTier,
-      currency,
-      shippingTerms,
-      paymentTerms,
-      taxExempt,
-      now,
-      createdAt,
-      now,
+      customerId,                // id
+      email,                     // email
+      "",                        // password_hash
+      firstName,                 // first_name
+      lastName,                  // last_name
+      companyName,               // company
+      phone,                     // phone
+      country,                   // country
+      "",                        // city
+      "",                        // address_line_1
+      "",                        // address_line_2
+      "",                        // postal_code
+      "active",                  // status
+      now,                       // created_at
+      now,                       // updated_at
+      "",                        // last_login_at
+      taxExempt,                 // tax_exempt
+      now,                       // approved_at
+      "true",                    // must_change_password
+      priceTier,                 // price_tier
+      currency,                  // currency
+      customerCode,              // customer_code
+      resetToken,                // reset_token
+      resetTokenExpiresAt,       // reset_token_expires_at
+      now,                       // reset_requested_at
     ]);
 
     const updatedApplicationRow = [
@@ -186,8 +227,8 @@ export async function POST(req: Request) {
       companyName,
       contactName,
       email,
-      normalizeText(rowObject.phone),
-      normalizeText(rowObject.country),
+      phone,
+      country,
       normalizeText(rowObject.business_type),
       normalizeText(rowObject.tax_id),
       normalizeText(rowObject.website),
@@ -204,9 +245,16 @@ export async function POST(req: Request) {
       updatedApplicationRow
     );
 
+    await sendCustomerPortalApprovalEmail({
+      to: email,
+      contactName,
+      companyName,
+      resetUrl,
+    });
+
     return NextResponse.json({
       ok: true,
-      message: "Application approved and customer account created.",
+      message: "Application approved, customer account created, and setup email sent.",
       customer: {
         id: customerId,
         companyName,
@@ -216,7 +264,6 @@ export async function POST(req: Request) {
         priceTier,
         currency,
       },
-      temporaryPassword,
     });
   } catch (error) {
     return NextResponse.json(

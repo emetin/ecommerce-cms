@@ -3,14 +3,12 @@ import {
   buildCustomerResetUrl,
   createResetExpiryIso,
   generateRawResetToken,
-  hashResetToken,
   normalizeEmail,
 } from "../../../../lib/customer-password-reset";
 import { sendCustomerPasswordResetEmail } from "../../../../lib/customer-mail";
 import {
   findCustomerByEmail,
-  invalidateActiveResetTokensForEmail,
-  saveCustomerPasswordResetToken,
+  setCustomerResetTokenByEmail,
 } from "../../../../lib/customer-users";
 import {
   clearFailedAttempts,
@@ -63,20 +61,11 @@ export async function POST(req: Request) {
 
     const customer = await findCustomerByEmail(email);
 
-    if (customer) {
+    if (customer && customer.status.toLowerCase() === "active") {
       const rawToken = generateRawResetToken();
-      const tokenHash = await hashResetToken(rawToken);
       const expiresAt = createResetExpiryIso();
 
-      await invalidateActiveResetTokensForEmail(email);
-
-      await saveCustomerPasswordResetToken({
-        email,
-        token_hash: tokenHash,
-        expires_at: expiresAt,
-        used: "false",
-        created_at: new Date().toISOString(),
-      });
+      await setCustomerResetTokenByEmail(email, rawToken, expiresAt);
 
       const resetUrl = buildCustomerResetUrl(rawToken, email);
 

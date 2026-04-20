@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCartTokenFromCookies } from "../../../../lib/cart-cookie";
-import { createOrderFromCartToken } from "../../../../lib/order";
+import { createOrderFromCartToken, getOrderByCartId } from "../../../../lib/order";
 import {
   CUSTOMER_COOKIE_NAME,
   readCustomerFromSessionToken,
@@ -12,6 +12,14 @@ function getCookieValue(cookieHeader: string, name: string) {
   );
 
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function normalizeEmail(value: unknown) {
+  return normalizeText(value).toLowerCase();
 }
 
 export async function POST(req: Request) {
@@ -31,23 +39,44 @@ export async function POST(req: Request) {
 
     const body = await req.json();
 
-    const email = String(body?.email || "").trim().toLowerCase();
-    const firstName = String(body?.first_name || "").trim();
-    const lastName = String(body?.last_name || "").trim();
-    const company = String(body?.company || "").trim();
-    const phone = String(body?.phone || "").trim();
-    const country = String(body?.country || "").trim();
-    const city = String(body?.city || "").trim();
-    const addressLine1 = String(body?.address_line_1 || "").trim();
-    const addressLine2 = String(body?.address_line_2 || "").trim();
-    const postalCode = String(body?.postal_code || "").trim();
-    const note = String(body?.note || "").trim();
+    const email = normalizeEmail(body?.email);
+    const firstName = normalizeText(body?.first_name);
+    const lastName = normalizeText(body?.last_name);
+    const company = normalizeText(body?.company);
+    const phone = normalizeText(body?.phone);
+    const country = normalizeText(body?.country);
+    const city = normalizeText(body?.city);
+    const addressLine1 = normalizeText(body?.address_line_1);
+    const addressLine2 = normalizeText(body?.address_line_2);
+    const postalCode = normalizeText(body?.postal_code);
+    const note = normalizeText(body?.note);
 
-    const effectiveEmail = session?.email || email;
+    const effectiveEmail = normalizeEmail(session?.email || email);
 
     if (!effectiveEmail) {
       return NextResponse.json(
-        { ok: false, error: "email is required." },
+        { ok: false, error: "Email is required." },
+        { status: 400 }
+      );
+    }
+
+    if (!country) {
+      return NextResponse.json(
+        { ok: false, error: "Country is required." },
+        { status: 400 }
+      );
+    }
+
+    if (!city) {
+      return NextResponse.json(
+        { ok: false, error: "City is required." },
+        { status: 400 }
+      );
+    }
+
+    if (!addressLine1) {
+      return NextResponse.json(
+        { ok: false, error: "Address line 1 is required." },
         { status: 400 }
       );
     }
@@ -71,10 +100,27 @@ export async function POST(req: Request) {
       ok: true,
       order: result.order,
       items: result.items,
+      next_path: `/order-success?order=${encodeURIComponent(
+        result.order.order_number
+      )}`,
     });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to create order.";
+
+    if (message === "Your cart is empty.") {
+      return NextResponse.json(
+        { ok: false, error: message },
+        { status: 400 }
+      );
+    }
+
+    if (message === "Cart not found." || message === "Cart token not found.") {
+      return NextResponse.json(
+        { ok: false, error: message },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json(
       { ok: false, error: message },

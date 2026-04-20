@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useCart } from "../cart/CartContext";
 import { formatMoney } from "../../lib/money";
 
-type CheckoutApiResponse = {
+type OrderCreateApiResponse = {
   ok: boolean;
   error?: string;
-  checkout_url?: string;
-  session_id?: string;
+  next_path?: string;
+  order?: {
+    order_number?: string;
+  };
 };
 
 type CustomerProfileResponse = {
@@ -53,8 +55,9 @@ export default function CheckoutPageClient() {
     address_line_2: "",
     postal_code: "",
     billing_same_as_shipping: true,
-    payment_method: "card",
+    payment_method: "order_request",
     cardholder_name: "",
+    note: "",
   });
 
   const [autofillApplied, setAutofillApplied] = useState(false);
@@ -149,24 +152,42 @@ export default function CheckoutPageClient() {
     try {
       setSubmitting(true);
 
-      const response = await fetch("/api/checkout/create-session", {
+      const response = await fetch("/api/orders/create", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          email: form.email,
+          first_name: form.first_name,
+          last_name: form.last_name,
+          company: form.company,
+          phone: form.phone,
+          country: form.country,
+          city: form.city,
+          address_line_1: form.address_line_1,
+          address_line_2: form.address_line_2,
+          postal_code: form.postal_code,
+          note: form.note,
+        }),
       });
 
-      const data = (await parseJsonSafe(response)) as CheckoutApiResponse | null;
+      const data = (await parseJsonSafe(response)) as OrderCreateApiResponse | null;
 
-      if (!response.ok || !data?.ok || !data.checkout_url) {
-        throw new Error(data?.error || "Failed to start checkout.");
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || "Failed to create order.");
       }
 
-      window.location.href = data.checkout_url;
+      const nextPath =
+        data?.next_path ||
+        (data?.order?.order_number
+          ? `/order-success?order=${encodeURIComponent(data.order.order_number)}`
+          : "/order-success");
+
+      window.location.href = nextPath;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start checkout.");
+      setError(err instanceof Error ? err.message : "Failed to create order.");
     } finally {
       setSubmitting(false);
     }
@@ -191,8 +212,8 @@ export default function CheckoutPageClient() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>Checkout</h1>
         <p style={textStyle}>
-          Complete your billing and shipping details, then continue securely to
-          payment.
+          Complete your billing and shipping details to submit your order
+          securely.
         </p>
 
         {!loadingCustomer && autofillApplied ? (
@@ -302,11 +323,26 @@ export default function CheckoutPageClient() {
             />
           </div>
 
-          <div style={sectionTitleStyle}>Payment</div>
+          <div style={sectionTitleStyle}>Order Note</div>
+
+          <div style={gridOneStyle}>
+            <label style={labelStyle}>Note</label>
+            <textarea
+              value={form.note}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, note: e.target.value }))
+              }
+              rows={4}
+              style={textareaStyle}
+              placeholder="Add any delivery, hospitality, or order note here."
+            />
+          </div>
+
+          <div style={sectionTitleStyle}>Order Submission</div>
 
           <div style={paymentPanelStyle}>
             <div style={gridOneStyle}>
-              <label style={labelStyle}>Payment Method</label>
+              <label style={labelStyle}>Checkout Method</label>
               <select
                 value={form.payment_method}
                 onChange={(e) =>
@@ -317,23 +353,14 @@ export default function CheckoutPageClient() {
                 }
                 style={inputStyle}
               >
-                <option value="card">Credit / Debit Card</option>
-                <option value="bank_transfer">Bank Transfer</option>
+                <option value="order_request">Submit Order</option>
               </select>
             </div>
 
-            <div style={gridOneStyle}>
-              <Field
-                label="Cardholder Name"
-                value={form.cardholder_name}
-                onChange={(value) =>
-                  setForm((prev) => ({ ...prev, cardholder_name: value }))
-                }
-              />
-            </div>
-
             <div style={paymentNoticeStyle}>
-              You will be redirected to Stripe&apos;s secure hosted payment page.
+              Your order will be submitted to our system immediately. Payment
+              processing can be connected later without changing the checkout
+              form.
             </div>
           </div>
 
@@ -348,7 +375,7 @@ export default function CheckoutPageClient() {
               cursor: !canContinue || submitting ? "not-allowed" : "pointer",
             }}
           >
-            {submitting ? "Redirecting..." : "Continue to Payment"}
+            {submitting ? "Placing Order..." : "Place Order"}
           </button>
         </form>
 
@@ -557,6 +584,18 @@ const inputStyle: React.CSSProperties = {
   fontSize: 15,
   color: "#171717",
   background: "#fff",
+};
+
+const textareaStyle: React.CSSProperties = {
+  width: "100%",
+  borderRadius: 14,
+  border: "1px solid #ddd3c5",
+  padding: "14px",
+  fontSize: 15,
+  color: "#171717",
+  background: "#fff",
+  resize: "vertical",
+  minHeight: 120,
 };
 
 const paymentPanelStyle: React.CSSProperties = {

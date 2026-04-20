@@ -59,6 +59,19 @@ export default function ForgotPasswordPage() {
           border: "1px solid #e5e5e5",
         }}
       >
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 800,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "#8a7f72",
+            marginBottom: 10,
+          }}
+        >
+          Customer Portal
+        </div>
+
         <h1
           style={{
             fontSize: 28,
@@ -79,15 +92,30 @@ export default function ForgotPasswordPage() {
             marginBottom: 20,
           }}
         >
-          Enter your email address and we will send you a secure reset link.
+          Enter your account email address and we will send you a secure password
+          reset link.
         </p>
 
         <form onSubmit={handleSubmit}>
+          <label
+            htmlFor="email"
+            style={{
+              display: "block",
+              marginBottom: 8,
+              fontWeight: 700,
+              fontSize: 14,
+              color: "#171717",
+            }}
+          >
+            Email
+          </label>
+
           <input
+            id="email"
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="Email address"
+            placeholder="you@company.com"
             autoComplete="email"
             required
             style={{
@@ -154,6 +182,33 @@ export default function ForgotPasswordPage() {
             {error}
           </div>
         ) : null}
+
+        <div
+          style={{
+            marginTop: 18,
+            paddingTop: 18,
+            borderTop: "1px solid #ece7de",
+          }}
+        >
+          <a
+            href="/login"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "100%",
+              minHeight: 48,
+              borderRadius: 12,
+              border: "1px solid #d9cfbf",
+              background: "#fff",
+              color: "#171717",
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
+          >
+            Back to Login
+          </a>
+        </div>
       </div>
     </main>
   );

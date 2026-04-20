@@ -15,14 +15,13 @@ type ApplicationItem = {
   notes: string;
   status: string;
   created_at: string;
-  approved_at: string;
+  reviewed_at: string;
   reviewed_by: string;
 };
 
 type ApprovalResult = {
   companyName: string;
   email: string;
-  temporaryPassword: string;
 };
 
 type ApprovalConfig = {
@@ -91,37 +90,6 @@ function getStatusStyle(value?: string): React.CSSProperties {
   };
 }
 
-function generateEmailTemplate(
-  contactName: string,
-  email: string,
-  password: string
-) {
-  return `Dear ${contactName || "Partner"},
-
-We are pleased to inform you that your company has been successfully approved as a B2B partner of Globaltex Fine Linens.
-
-You may now access your customer portal using the credentials below:
-
-Portal Access: https://www.globaltexusa.com/portal-login
-Email: ${email}
-Temporary Password: ${password}
-
-Through your account, you will be able to:
-- access your assigned wholesale pricing structure
-- review our hospitality collections
-- create and submit order requests
-- manage your account workflow more efficiently
-
-For security reasons, we recommend updating your password after your first login.
-
-If you require support for hospitality sourcing, custom developments, embroidery, or bulk project requirements, our team will be pleased to assist you.
-
-Warm regards,
-Globaltex Fine Linens
-customerservice@globaltexusa.com
-https://www.globaltexusa.com/`;
-}
-
 export default function AdminCustomerApplicationsPage() {
   const [items, setItems] = useState<ApplicationItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,7 +97,6 @@ export default function AdminCustomerApplicationsPage() {
 
   const [approveLoadingId, setApproveLoadingId] = useState("");
   const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null);
-  const [generatedEmail, setGeneratedEmail] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
   const [searchInput, setSearchInput] = useState("");
@@ -229,7 +196,6 @@ export default function AdminCustomerApplicationsPage() {
     try {
       setApproveLoadingId(item.id);
       setApprovalResult(null);
-      setGeneratedEmail("");
       setSuccessMessage("");
 
       const approvalConfig =
@@ -257,42 +223,21 @@ export default function AdminCustomerApplicationsPage() {
       }
 
       const nextEmail = data?.customer?.email || item.email;
-      const nextPassword = data?.temporaryPassword || "";
 
       setApprovalResult({
         companyName: data?.customer?.companyName || item.company_name,
         email: nextEmail,
-        temporaryPassword: nextPassword,
       });
 
-      setGeneratedEmail(
-        generateEmailTemplate(item.contact_name, nextEmail, nextPassword)
+      setSuccessMessage(
+        "Application approved. The customer account was created and an automatic setup email was sent."
       );
 
-      setSuccessMessage("Application approved and customer account created.");
       await loadApplications();
     } catch (error) {
       alert(error instanceof Error ? error.message : "An unknown error occurred.");
     } finally {
       setApproveLoadingId("");
-    }
-  }
-
-  async function handleCopyEmail() {
-    try {
-      await navigator.clipboard.writeText(generatedEmail);
-      alert("Email copied successfully.");
-    } catch {
-      alert("Failed to copy email.");
-    }
-  }
-
-  async function handleCopyText(value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      alert("Copied successfully.");
-    } catch {
-      alert("Failed to copy.");
     }
   }
 
@@ -396,44 +341,8 @@ export default function AdminCustomerApplicationsPage() {
               <strong>Email:</strong> {approvalResult.email}
             </div>
             <div>
-              <strong>Temporary Password:</strong> {approvalResult.temporaryPassword}
+              <strong>Status:</strong> Setup email sent automatically
             </div>
-          </div>
-        </div>
-      ) : null}
-
-      {generatedEmail ? (
-        <div style={emailBoxStyle}>
-          <div style={{ fontWeight: 800, fontSize: 18, color: "#171717" }}>
-            Ready Email
-          </div>
-
-          <textarea value={generatedEmail} readOnly style={emailTextareaStyle} />
-
-          <div style={emailActionsStyle}>
-            <button
-              type="button"
-              onClick={() => handleCopyText(approvalResult?.temporaryPassword || "")}
-              style={secondaryButtonStyle}
-            >
-              Copy Password
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleCopyText(approvalResult?.email || "")}
-              style={secondaryButtonStyle}
-            >
-              Copy Email Address
-            </button>
-
-            <button
-              type="button"
-              onClick={handleCopyEmail}
-              style={primaryButtonStyle}
-            >
-              Copy Email
-            </button>
           </div>
         </div>
       ) : null}
@@ -519,7 +428,7 @@ export default function AdminCustomerApplicationsPage() {
                     >
                       {approveLoadingId === item.id
                         ? "Approving..."
-                        : "Approve & Create Customer"}
+                        : "Approve & Send Setup Email"}
                     </button>
                   ) : null}
                 </div>
@@ -543,8 +452,8 @@ export default function AdminCustomerApplicationsPage() {
                       </div>
 
                       <div>
-                        <div style={metaLabelStyle}>Approved At</div>
-                        <div style={metaValueStyle}>{formatDate(item.approved_at)}</div>
+                        <div style={metaLabelStyle}>Reviewed At</div>
+                        <div style={metaValueStyle}>{formatDate(item.reviewed_at)}</div>
                       </div>
                     </div>
 
@@ -941,35 +850,6 @@ const successBoxStyle: React.CSSProperties = {
   background: "#eef8f0",
   border: "1px solid #cfe7d8",
   color: "#1d6a43",
-};
-
-const emailBoxStyle: React.CSSProperties = {
-  padding: 20,
-  borderRadius: 18,
-  background: "#f8f5ef",
-  border: "1px solid #e5ddd2",
-  display: "grid",
-  gap: 12,
-};
-
-const emailTextareaStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 320,
-  borderRadius: 14,
-  border: "1px solid #d9cfbf",
-  padding: 14,
-  fontSize: 14,
-  lineHeight: 1.7,
-  background: "#fff",
-  resize: "vertical",
-  outline: "none",
-};
-
-const emailActionsStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 12,
-  flexWrap: "wrap",
 };
 
 const emptyStateStyle: React.CSSProperties = {

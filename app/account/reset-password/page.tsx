@@ -7,7 +7,6 @@ export default function ResetPasswordPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const email = useMemo(() => searchParams.get("email") || "", [searchParams]);
   const token = useMemo(() => searchParams.get("token") || "", [searchParams]);
 
   const [newPassword, setNewPassword] = useState("");
@@ -21,7 +20,7 @@ export default function ResetPasswordPage() {
     setError("");
     setSuccess("");
 
-    if (!email || !token) {
+    if (!token) {
       setError("Invalid reset link.");
       return;
     }
@@ -40,7 +39,6 @@ export default function ResetPasswordPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email,
           token,
           newPassword,
         }),
@@ -60,7 +58,7 @@ export default function ResetPasswordPage() {
       setSuccess(data?.message || "Password updated successfully.");
 
       setTimeout(() => {
-        router.push("/account/login");
+        router.push("/login");
       }, 1500);
     } catch {
       setError("Something went wrong. Please try again.");

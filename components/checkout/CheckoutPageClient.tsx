@@ -63,7 +63,9 @@ export default function CheckoutPageClient() {
   const [autofillApplied, setAutofillApplied] = useState(false);
   const [loadingCustomer, setLoadingCustomer] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [startingPayment, setStartingPayment] = useState(false);
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
 
   const items = cart?.items || [];
   const subtotal = Number(cart?.totals?.subtotal || 0);
@@ -140,44 +142,73 @@ export default function CheckoutPageClient() {
     );
   }, [items.length, form]);
 
+  const isPayNow = form.payment_method === "pay_now";
+
+  async function submitOrderRequest() {
+    const response = await fetch("/api/orders/create", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        email: form.email,
+        first_name: form.first_name,
+        last_name: form.last_name,
+        company: form.company,
+        phone: form.phone,
+        country: form.country,
+        city: form.city,
+        address_line_1: form.address_line_1,
+        address_line_2: form.address_line_2,
+        postal_code: form.postal_code,
+        note: form.note,
+      }),
+    });
+
+    const data = (await parseJsonSafe(response)) as OrderCreateApiResponse | null;
+
+    if (!response.ok || !data?.ok) {
+      throw new Error(data?.error || "Failed to create order.");
+    }
+
+    return data;
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setInfo("");
 
     if (!canContinue) {
       setError("Please complete the required checkout fields.");
       return;
     }
 
+    if (isPayNow) {
+      try {
+        setStartingPayment(true);
+
+        setInfo(
+          "Online payment will be connected next. For now, please use Submit Order."
+        );
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to initialize online payment."
+        );
+      } finally {
+        setStartingPayment(false);
+      }
+
+      return;
+    }
+
     try {
       setSubmitting(true);
 
-      const response = await fetch("/api/orders/create", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          email: form.email,
-          first_name: form.first_name,
-          last_name: form.last_name,
-          company: form.company,
-          phone: form.phone,
-          country: form.country,
-          city: form.city,
-          address_line_1: form.address_line_1,
-          address_line_2: form.address_line_2,
-          postal_code: form.postal_code,
-          note: form.note,
-        }),
-      });
-
-      const data = (await parseJsonSafe(response)) as OrderCreateApiResponse | null;
-
-      if (!response.ok || !data?.ok) {
-        throw new Error(data?.error || "Failed to create order.");
-      }
+      const data = await submitOrderRequest();
 
       const nextPath =
         data?.next_path ||
@@ -191,6 +222,33 @@ export default function CheckoutPageClient() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function onClickPayNow() {
+    setError("");
+    setInfo("");
+
+    if (!canContinue) {
+      setError("Please complete the required checkout fields.");
+      return;
+    }
+
+    try {
+      setStartingPayment(true);
+      setForm((prev) => ({ ...prev, payment_method: "pay_now" }));
+
+      setInfo(
+        "Online payment is not connected yet. Stripe or another provider can be added next."
+      );
+    } finally {
+      setStartingPayment(false);
+    }
+  }
+
+  async function onClickSubmitOrder() {
+    setError("");
+    setInfo("");
+    setForm((prev) => ({ ...prev, payment_method: "order_request" }));
   }
 
   if (!items.length && !isLoading) {
@@ -223,11 +281,11 @@ export default function CheckoutPageClient() {
         ) : null}
       </div>
 
-      <div style={layoutStyle}>
+      <div style={responsiveLayoutStyle}>
         <form onSubmit={onSubmit} style={formCardStyle}>
           <div style={sectionTitleStyle}>Contact Information</div>
 
-          <div style={gridTwoStyle}>
+          <div style={responsiveGridTwoStyle}>
             <Field
               label="First Name"
               required
@@ -246,7 +304,7 @@ export default function CheckoutPageClient() {
             />
           </div>
 
-          <div style={gridTwoStyle}>
+          <div style={responsiveGridTwoStyle}>
             <Field
               label="Email"
               required
@@ -276,7 +334,7 @@ export default function CheckoutPageClient() {
 
           <div style={sectionTitleStyle}>Shipping Address</div>
 
-          <div style={gridTwoStyle}>
+          <div style={responsiveGridTwoStyle}>
             <Field
               label="Country"
               required
@@ -306,7 +364,7 @@ export default function CheckoutPageClient() {
             />
           </div>
 
-          <div style={gridTwoStyle}>
+          <div style={responsiveGridTwoStyle}>
             <Field
               label="Address Line 2"
               value={form.address_line_2}
@@ -338,45 +396,78 @@ export default function CheckoutPageClient() {
             />
           </div>
 
-          <div style={sectionTitleStyle}>Order Submission</div>
+          <div style={sectionTitleStyle}>Checkout Method</div>
 
           <div style={paymentPanelStyle}>
-            <div style={gridOneStyle}>
-              <label style={labelStyle}>Checkout Method</label>
-              <select
-                value={form.payment_method}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    payment_method: e.target.value,
-                  }))
-                }
-                style={inputStyle}
+            <div style={checkoutMethodWrapStyle}>
+              <button
+                type="button"
+                onClick={onClickSubmitOrder}
+                style={{
+                  ...methodButtonStyle,
+                  ...(form.payment_method === "order_request"
+                    ? methodButtonActiveStyle
+                    : {}),
+                }}
               >
-                <option value="order_request">Submit Order</option>
-              </select>
+                <div style={methodTitleStyle}>Submit Order</div>
+                <div style={methodTextStyle}>
+                  Best for hotels and wholesale buyers. Submit now, finalize
+                  payment later by invoice, bank transfer, or direct approval.
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={onClickPayNow}
+                style={{
+                  ...methodButtonStyle,
+                  ...(form.payment_method === "pay_now"
+                    ? methodButtonActiveStyle
+                    : {}),
+                }}
+              >
+                <div style={methodTitleStyle}>Pay Now</div>
+                <div style={methodTextStyle}>
+                  Online payment option. Stripe or another payment gateway can
+                  be connected next.
+                </div>
+              </button>
             </div>
 
             <div style={paymentNoticeStyle}>
-              Your order will be submitted to our system immediately. Payment
-              processing can be connected later without changing the checkout
-              form.
+              {form.payment_method === "order_request"
+                ? "Your order will be submitted to our system immediately. Payment processing can be completed later without changing the checkout form."
+                : "Pay Now mode is selected. The UI is ready, but the online payment provider is not connected yet."}
             </div>
           </div>
 
           {error ? <div style={errorStyle}>{error}</div> : null}
+          {info ? <div style={infoStyle}>{info}</div> : null}
 
-          <button
-            type="submit"
-            disabled={!canContinue || submitting}
-            style={{
-              ...submitButtonStyle,
-              opacity: !canContinue || submitting ? 0.65 : 1,
-              cursor: !canContinue || submitting ? "not-allowed" : "pointer",
-            }}
-          >
-            {submitting ? "Placing Order..." : "Place Order"}
-          </button>
+          <div style={submitActionsStyle}>
+            <button
+              type="submit"
+              disabled={!canContinue || submitting || startingPayment}
+              style={{
+                ...submitButtonStyle,
+                opacity:
+                  !canContinue || submitting || startingPayment ? 0.65 : 1,
+                cursor:
+                  !canContinue || submitting || startingPayment
+                    ? "not-allowed"
+                    : "pointer",
+              }}
+            >
+              {form.payment_method === "pay_now"
+                ? startingPayment
+                  ? "Preparing Payment..."
+                  : "Pay Now"
+                : submitting
+                ? "Placing Order..."
+                : "Place Order"}
+            </button>
+          </div>
         </form>
 
         <aside style={summaryCardStyle}>
@@ -479,7 +570,7 @@ const headerStyle: React.CSSProperties = {
   marginBottom: 28,
 };
 
-const layoutStyle: React.CSSProperties = {
+const responsiveLayoutStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) 380px",
   gap: 24,
@@ -550,7 +641,7 @@ const sectionTitleStyle: React.CSSProperties = {
   marginTop: 4,
 };
 
-const gridTwoStyle: React.CSSProperties = {
+const responsiveGridTwoStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr 1fr",
   gap: 16,
@@ -607,6 +698,40 @@ const paymentPanelStyle: React.CSSProperties = {
   background: "#fcfbf8",
 };
 
+const checkoutMethodWrapStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 12,
+};
+
+const methodButtonStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+  textAlign: "left",
+  padding: 16,
+  borderRadius: 16,
+  border: "1px solid #ddd3c5",
+  background: "#fff",
+  cursor: "pointer",
+};
+
+const methodButtonActiveStyle: React.CSSProperties = {
+  border: "1px solid #171717",
+  background: "#f8f5ef",
+};
+
+const methodTitleStyle: React.CSSProperties = {
+  fontSize: 15,
+  fontWeight: 800,
+  color: "#171717",
+};
+
+const methodTextStyle: React.CSSProperties = {
+  fontSize: 13,
+  lineHeight: 1.6,
+  color: "#6b6256",
+};
+
 const paymentNoticeStyle: React.CSSProperties = {
   padding: "12px 14px",
   borderRadius: 14,
@@ -614,6 +739,12 @@ const paymentNoticeStyle: React.CSSProperties = {
   background: "#fff",
   color: "#6b6256",
   fontSize: 14,
+};
+
+const submitActionsStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr",
+  gap: 12,
 };
 
 const submitButtonStyle: React.CSSProperties = {
@@ -725,6 +856,16 @@ const errorStyle: React.CSSProperties = {
   border: "1px solid #f1c7c7",
   background: "#fff4f4",
   color: "#9b2c2c",
+  fontSize: 14,
+  fontWeight: 600,
+};
+
+const infoStyle: React.CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 14,
+  border: "1px solid #d9d7a8",
+  background: "#f8f5cf",
+  color: "#5e5722",
   fontSize: 14,
   fontWeight: 600,
 };

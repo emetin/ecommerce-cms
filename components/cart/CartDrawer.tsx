@@ -275,6 +275,26 @@ export default function CartDrawer() {
               View Cart
             </Link>
 
+            {!!items.length && (
+              <Link
+                href="/checkout"
+                onClick={closeDrawer}
+                style={{
+                  display: "block",
+                  textAlign: "center",
+                  padding: "14px 18px",
+                  background: "#d8bc55",
+                  color: "#fff",
+                  textDecoration: "none",
+                  borderRadius: "10px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                }}
+              >
+                Go to Checkout
+              </Link>
+            )}
+
             {!!items.length ? (
               <button
                 type="button"

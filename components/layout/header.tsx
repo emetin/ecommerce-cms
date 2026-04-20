@@ -27,9 +27,26 @@ type CustomerSessionResponse = {
   } | null;
 };
 
+function useIsMobile(breakpoint = 1180) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    function update() {
+      setIsMobile(window.innerWidth <= breakpoint);
+    }
+
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [breakpoint]);
+
+  return isMobile;
+}
+
 export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
+  const isMobile = useIsMobile();
 
   const [customer, setCustomer] = useState<CustomerSessionResponse["customer"]>(
     null
@@ -117,14 +134,24 @@ export default function Header() {
         }}
       >
         <div
-          style={{
-            minHeight: 82,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 20,
-            flexWrap: "wrap",
-          }}
+          style={
+            isMobile
+              ? {
+                  minHeight: 82,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "stretch",
+                  gap: 14,
+                  padding: "16px 0",
+                }
+              : {
+                  minHeight: 82,
+                  display: "grid",
+                  gridTemplateColumns: "auto minmax(0,1fr) auto",
+                  alignItems: "center",
+                  gap: 20,
+                }
+          }
         >
           <Link
             href="/"
@@ -135,6 +162,7 @@ export default function Header() {
               alignItems: "center",
               gap: 12,
               minWidth: 0,
+              flexShrink: 0,
             }}
           >
             <div
@@ -157,7 +185,7 @@ export default function Header() {
               GF
             </div>
 
-            <div style={{ display: "grid", gap: 2 }}>
+            <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
               <span
                 style={{
                   fontSize: 18,
@@ -165,6 +193,7 @@ export default function Header() {
                   letterSpacing: "-0.02em",
                   lineHeight: 1.1,
                   fontFamily: "var(--font-heading)",
+                  whiteSpace: "nowrap",
                 }}
               >
                 Globaltex Fine Linens
@@ -176,6 +205,7 @@ export default function Header() {
                   letterSpacing: "0.08em",
                   color: "#7a7064",
                   fontWeight: 800,
+                  whiteSpace: "nowrap",
                 }}
               >
                 Luxury Hospitality Textiles
@@ -184,12 +214,24 @@ export default function Header() {
           </Link>
 
           <nav
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "wrap",
-            }}
+            style={
+              isMobile
+                ? {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }
+                : {
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    flexWrap: "nowrap",
+                    minWidth: 0,
+                    overflow: "hidden",
+                  }
+            }
           >
             {navigation.map((item) => {
               const active = pathname === item.href;
@@ -215,6 +257,8 @@ export default function Header() {
                       ? "1px solid var(--primary)"
                       : "1px solid transparent",
                     transition: "all 0.2s ease",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
                   }}
                 >
                   {item.label}
@@ -224,13 +268,24 @@ export default function Header() {
           </nav>
 
           <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              flexWrap: "wrap",
-              justifyContent: "flex-end",
-            }}
+            style={
+              isMobile
+                ? {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }
+                : {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "nowrap",
+                    justifyContent: "flex-end",
+                    minWidth: 0,
+                    flexShrink: 0,
+                  }
+            }
           >
             <CartButton />
 
@@ -252,13 +307,25 @@ export default function Header() {
                     background: "#fff",
                     border: "1px solid #ddd3c5",
                     whiteSpace: "nowrap",
-                    maxWidth: 180,
+                    maxWidth: isMobile ? "100%" : 140,
+                    minWidth: 0,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
+                    flexShrink: 0,
                   }}
                   title={customerLabel}
                 >
-                  {customerLabel}
+                  <span
+                    style={{
+                      display: "block",
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {customerLabel}
+                  </span>
                 </Link>
 
                 <button
@@ -280,6 +347,7 @@ export default function Header() {
                     whiteSpace: "nowrap",
                     cursor: loggingOut ? "not-allowed" : "pointer",
                     opacity: loggingOut ? 0.65 : 1,
+                    flexShrink: 0,
                   }}
                 >
                   {loggingOut ? "Signing Out..." : "Logout"}
@@ -302,6 +370,7 @@ export default function Header() {
                   background: "#fff",
                   border: "1px solid #ddd3c5",
                   whiteSpace: "nowrap",
+                  flexShrink: 0,
                 }}
               >
                 Login
@@ -324,6 +393,7 @@ export default function Header() {
                 background: "var(--primary)",
                 border: "1px solid var(--primary)",
                 whiteSpace: "nowrap",
+                flexShrink: 0,
               }}
             >
               Contact Us

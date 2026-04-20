@@ -141,20 +141,27 @@ select {
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--border);
+  overflow: hidden;
 }
 
 .site-header__inner {
   min-height: 86px;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 24px;
+  overflow: hidden;
+}
+
+.site-header__inner > * {
+  min-width: 0;
 }
 
 .site-logo {
   display: inline-flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .site-logo__eyebrow {
@@ -179,7 +186,9 @@ select {
   align-items: center;
   justify-content: center;
   gap: 28px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .site-nav a {
@@ -188,6 +197,8 @@ select {
   color: var(--text);
   font-weight: 700;
   transition: color 0.2s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .site-nav a::after {
@@ -214,7 +225,24 @@ select {
 .site-header__actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.site-header__actions a,
+.site-header__actions button {
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.site-header__actions a[href="/account"] {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Footer */
@@ -1060,6 +1088,17 @@ select {
   .site-nav {
     justify-content: flex-start;
     gap: 18px;
+    flex-wrap: wrap;
+  }
+
+  .site-header__actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .site-header__actions a[href="/account"] {
+    max-width: 100%;
   }
 
   .site-footer__grid,

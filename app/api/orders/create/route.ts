@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCartTokenFromCookies } from "../../../../lib/cart-cookie";
-import { createOrderFromCartToken, getOrderByCartId } from "../../../../lib/order";
+import { createOrderFromCartToken } from "../../../../lib/order";
 import {
   CUSTOMER_COOKIE_NAME,
   readCustomerFromSessionToken,
@@ -20,6 +20,13 @@ function normalizeText(value: unknown) {
 
 function normalizeEmail(value: unknown) {
   return normalizeText(value).toLowerCase();
+}
+
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    message: "Orders create API is working.",
+  });
 }
 
 export async function POST(req: Request) {
@@ -119,6 +126,13 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { ok: false, error: message },
         { status: 404 }
+      );
+    }
+
+    if (message === "This cart has already been converted to an order.") {
+      return NextResponse.json(
+        { ok: false, error: message },
+        { status: 409 }
       );
     }
 

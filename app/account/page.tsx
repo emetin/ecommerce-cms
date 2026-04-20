@@ -27,6 +27,56 @@ function formatMoney(value: string, currency: string) {
   }
 }
 
+function formatDate(value: string) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value.split("T")[0] || value;
+  }
+
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function getStatusStyle(status: string): React.CSSProperties {
+  const normalized = String(status || "").toLowerCase();
+
+  if (normalized === "paid" || normalized === "completed") {
+    return {
+      background: "#ecfdf3",
+      color: "#166534",
+      border: "1px solid #bbf7d0",
+    };
+  }
+
+  if (normalized === "cancelled") {
+    return {
+      background: "#fef2f2",
+      color: "#b91c1c",
+      border: "1px solid #fecaca",
+    };
+  }
+
+  if (normalized === "processing" || normalized === "shipped") {
+    return {
+      background: "#eff6ff",
+      color: "#1d4ed8",
+      border: "1px solid #bfdbfe",
+    };
+  }
+
+  return {
+    background: "#fff8e8",
+    color: "#8a5a00",
+    border: "1px solid #f5deb0",
+  };
+}
+
 export default async function AccountPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get(CUSTOMER_COOKIE_NAME)?.value || null;
@@ -258,10 +308,10 @@ export default async function AccountPage() {
                     fontSize: 24,
                   }}
                 >
-                  Order History
+                  Previous Orders
                 </h2>
                 <p style={{ margin: "8px 0 0", color: "#665d52" }}>
-                  All submitted orders linked to this account.
+                  A quick summary of your submitted orders.
                 </p>
               </div>
 
@@ -292,132 +342,98 @@ export default async function AccountPage() {
                 No orders found for this account yet.
               </div>
             ) : (
-              <div style={{ display: "grid", gap: 18 }}>
+              <div style={{ display: "grid", gap: 12 }}>
                 {orders.map((order) => (
-                  <article
+                  <div
                     key={order.id}
                     style={{
+                      display: "grid",
+                      gridTemplateColumns: "minmax(0, 1.6fr) 0.9fr 0.9fr 0.9fr auto",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "14px 16px",
+                      borderRadius: 16,
                       border: "1px solid #eadfce",
-                      borderRadius: 22,
-                      padding: 20,
+                      background: "#fff",
                     }}
                   >
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontWeight: 800,
+                          color: "#171717",
+                          fontSize: 16,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {order.order_number}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        color: "#665d52",
+                        fontSize: 14,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {formatDate(order.created_at)}
+                    </div>
+
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        color: "#171717",
+                        fontSize: 14,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {formatMoney(order.grand_total, order.currency)}
+                    </div>
+
+                    <div>
+                      <span
+                        style={{
+                          ...statusPillStyle,
+                          ...getStatusStyle(order.status),
+                        }}
+                      >
+                        {order.status || "submitted"}
+                      </span>
+                    </div>
+
                     <div
                       style={{
                         display: "flex",
-                        justifyContent: "space-between",
-                        gap: 16,
+                        gap: 8,
+                        justifyContent: "flex-end",
                         flexWrap: "wrap",
-                        marginBottom: 16,
-                        paddingBottom: 16,
-                        borderBottom: "1px solid #f0e7db",
                       }}
                     >
-                      <div>
-                        <div
-                          style={{
-                            fontSize: 12,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.08em",
-                            color: "#7a7166",
-                            fontWeight: 800,
-                            marginBottom: 6,
-                          }}
-                        >
-                          Order Number
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 22,
-                            fontWeight: 800,
-                            color: "#171717",
-                          }}
-                        >
-                          {order.order_number}
-                        </div>
-                        <div style={{ marginTop: 6, color: "#665d52" }}>
-                          {order.created_at || "-"}
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          display: "grid",
-                          gap: 10,
-                          minWidth: 220,
-                        }}
+                      <a
+                        href={`/account/orders/${encodeURIComponent(order.order_number)}`}
+                        style={ghostActionStyle}
                       >
-                        <InfoBadge
-                          label="Status"
-                          value={order.status || "-"}
-                        />
-                        <InfoBadge
-                          label="Grand Total"
-                          value={formatMoney(order.grand_total, order.currency)}
-                        />
-                      </div>
-                    </div>
+                        View
+                      </a>
 
-                    <div style={{ display: "grid", gap: 10 }}>
-                      {order.items.map((item) => (
-                        <div
-                          key={item.id}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 12,
-                            flexWrap: "wrap",
-                            background: "#fcfaf6",
-                            borderRadius: 18,
-                            padding: 16,
-                          }}
-                        >
-                          <div>
-                            <div
-                              style={{ fontWeight: 800, color: "#171717" }}
-                            >
-                              {item.product_title || item.product_slug}
-                            </div>
-                            <div style={{ color: "#665d52", marginTop: 4 }}>
-                              {item.variant_title || item.sku || "-"}
-                            </div>
-                          </div>
-
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: 16,
-                              flexWrap: "wrap",
-                              alignItems: "center",
-                              color: "#171717",
-                              fontWeight: 700,
-                            }}
-                          >
-                            <span>Qty: {item.quantity}</span>
-                            <span>
-                              Total: {formatMoney(item.line_total, order.currency)}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {order.note ? (
-                      <div
-                        style={{
-                          marginTop: 14,
-                          padding: 14,
-                          borderRadius: 16,
-                          background: "#fff7e8",
-                          border: "1px solid #f0dfac",
-                          color: "#6c5714",
-                          fontWeight: 700,
+                      <a
+                        href="/cart"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          window.alert(
+                            "Re-order will be connected next. For now, please open the order detail or place a new order from the catalog."
+                          );
+                          window.location.href = "/cart";
                         }}
+                        style={darkActionStyle}
                       >
-                        Note: {order.note}
-                      </div>
-                    ) : null}
-                  </article>
+                        Re-order
+                      </a>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
@@ -448,28 +464,47 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function InfoBadge({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      style={{
-        background: "#f8f4ed",
-        borderRadius: 16,
-        padding: "12px 14px",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 12,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: "#7a7166",
-          fontWeight: 800,
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ color: "#171717", fontWeight: 800 }}>{value}</div>
-    </div>
-  );
-}
+const statusPillStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 34,
+  padding: "0 12px",
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 800,
+  textTransform: "capitalize",
+  whiteSpace: "nowrap",
+};
+
+const ghostActionStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 38,
+  padding: "0 14px",
+  borderRadius: 999,
+  border: "1px solid #d8cebf",
+  background: "#fff",
+  color: "#171717",
+  textDecoration: "none",
+  fontWeight: 700,
+  fontSize: 13,
+  whiteSpace: "nowrap",
+};
+
+const darkActionStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 38,
+  padding: "0 14px",
+  borderRadius: 999,
+  border: "1px solid #171717",
+  background: "#171717",
+  color: "#fff",
+  textDecoration: "none",
+  fontWeight: 700,
+  fontSize: 13,
+  whiteSpace: "nowrap",
+};

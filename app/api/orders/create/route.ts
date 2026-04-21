@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { getCartTokenFromCookies } from "../../../../lib/cart-cookie";
+import {
+  getCartTokenFromCookies,
+  resetCartToken,
+} from "../../../../lib/cart-cookie";
+import { clearCartByToken } from "../../../../lib/cart";
 import { createOrderFromCartToken } from "../../../../lib/order";
 import {
   CUSTOMER_COOKIE_NAME,
@@ -102,6 +106,9 @@ export async function POST(req: Request) {
       postal_code: postalCode,
       note,
     });
+
+    await clearCartByToken(cartToken);
+    await resetCartToken();
 
     return NextResponse.json({
       ok: true,

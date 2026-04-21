@@ -1,5 +1,6 @@
+import type { CSSProperties } from "react";
 import type { Metadata } from "next";
-import { getSheetData } from "../lib/sheets";
+import Image from "next/image";
 import Container from "../components/ui/Container";
 import Section from "../components/ui/Section";
 import SectionHeading from "../components/ui/SectionHeading";
@@ -9,81 +10,9 @@ import ProductCard from "../components/cards/ProductCard";
 import BlogCard from "../components/cards/BlogCard";
 import ScrollPromo from "../components/sections/ScrollPromo";
 import { buildPageMetadata } from "../lib/seo";
+import { getHomePageData } from "../lib/catalog-data";
 
-type ProductItem = {
-  title?: string;
-  slug?: string;
-  description?: string;
-  short_description?: string;
-  image?: string;
-  collection_slug?: string;
-  status?: string;
-  featured?: string;
-  vendor?: string;
-  product_category?: string;
-  type?: string;
-};
-
-type CollectionItem = {
-  title?: string;
-  slug?: string;
-  description?: string;
-  image?: string;
-  status?: string;
-};
-
-type BlogItem = {
-  title?: string;
-  slug?: string;
-  excerpt?: string;
-  content?: string;
-  image?: string;
-  status?: string;
-};
-
-function normalizeText(value?: string) {
-  return String(value || "").trim();
-}
-
-function isPublished(value?: string) {
-  return normalizeText(value).toLowerCase() === "published";
-}
-
-async function loadHomeData() {
-  try {
-    const [productsData, collectionsData, blogData] = await Promise.all([
-      getSheetData("products", { ttlSeconds: 300 }),
-      getSheetData("collections", { ttlSeconds: 300 }),
-      getSheetData("blog", { ttlSeconds: 300 }),
-    ]);
-
-    const products = (productsData as ProductItem[]).filter((item) =>
-      isPublished(item.status)
-    );
-
-    const collections = (collectionsData as CollectionItem[]).filter((item) =>
-      isPublished(item.status)
-    );
-
-    const blog = (blogData as BlogItem[]).filter((item) =>
-      isPublished(item.status)
-    );
-
-    return {
-      products,
-      collections,
-      blog,
-    };
-  } catch (error) {
-    console.error("Failed to load homepage data:", error);
-
-    return {
-      products: [] as ProductItem[],
-      collections: [] as CollectionItem[],
-      blog: [] as BlogItem[],
-    };
-  }
-}
+export const revalidate = 300;
 
 export const metadata: Metadata = buildPageMetadata({
   title: "Wholesale Hospitality Textile Collections",
@@ -93,7 +22,7 @@ export const metadata: Metadata = buildPageMetadata({
 });
 
 export default async function HomePage() {
-  const { products, collections, blog } = await loadHomeData();
+  const { products, collections, blogPosts: blog } = await getHomePageData();
 
   const featuredProducts = products.slice(0, 6);
   const featuredCollections = collections.slice(0, 4);
@@ -102,11 +31,16 @@ export default async function HomePage() {
   return (
     <>
       <section className="home-hero">
-        <img
-          src="https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1800&q=80"
-          alt="Hospitality textile collections"
-          className="home-hero__image"
-        />
+        <div className="home-hero__image-wrap">
+          <Image
+            src="https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1800&q=80"
+            alt="Hospitality textile collections"
+            fill
+            priority
+            sizes="100vw"
+            className="home-hero__image"
+          />
+        </div>
 
         <div className="home-hero__overlay" />
 
@@ -246,10 +180,15 @@ export default async function HomePage() {
             </div>
 
             <div className="home-split__media">
-              <img
-                src="https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1400&q=80"
-                alt="Hospitality sourcing structure"
-              />
+              <div className="home-split__media-image-wrap">
+                <Image
+                  src="https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1400&q=80"
+                  alt="Hospitality sourcing structure"
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                  className="home-split__media-image"
+                />
+              </div>
               <div className="home-split__media-overlay" />
               <div className="home-split__media-card">
                 <div className="home-split__media-card-kicker">
@@ -396,7 +335,7 @@ export default async function HomePage() {
   );
 }
 
-const featureKickerStyle: React.CSSProperties = {
+const featureKickerStyle: CSSProperties = {
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: "0.08em",
@@ -405,7 +344,7 @@ const featureKickerStyle: React.CSSProperties = {
   marginBottom: 12,
 };
 
-const featureTitleStyle: React.CSSProperties = {
+const featureTitleStyle: CSSProperties = {
   margin: "0 0 10px",
   fontSize: 22,
   lineHeight: 1.2,
@@ -413,7 +352,7 @@ const featureTitleStyle: React.CSSProperties = {
   color: "#171717",
 };
 
-const featureTextStyle: React.CSSProperties = {
+const featureTextStyle: CSSProperties = {
   margin: 0,
   color: "#5a5349",
   lineHeight: 1.85,

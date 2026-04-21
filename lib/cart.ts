@@ -1,6 +1,6 @@
 import {
   appendSheetRow,
-  deleteSheetRowsByField,
+  deleteSheetRowByField,
   findSheetItemByField,
   findSheetItemsByField,
   findRowNumberByField,
@@ -298,14 +298,22 @@ export async function addItemToCart(
   });
 
   if (existing) {
-    const rowNumber = await findRowNumberByField(CART_ITEMS_SHEET, "id", existing.id);
+    const rowNumber = await findRowNumberByField(
+      CART_ITEMS_SHEET,
+      "id",
+      existing.id
+    );
 
     if (!rowNumber) {
       throw new Error("Existing cart item row could not be found.");
     }
 
-    const nextQuantity = clampQuantity(toNumber(existing.quantity) + quantityToAdd, 1);
+    const nextQuantity = clampQuantity(
+      toNumber(existing.quantity) + quantityToAdd,
+      1
+    );
     const unitPrice = toNumber(existing.unit_price || input.unit_price);
+
     const updated: CartItemRecord = {
       ...existing,
       product_title: input.product_title || existing.product_title,
@@ -378,7 +386,7 @@ export async function updateCartItemQuantity(
   const nextQuantity = Math.floor(quantity);
 
   if (nextQuantity <= 0) {
-    await deleteSheetRowsByField(CART_ITEMS_SHEET, "id", itemId);
+    await deleteSheetRowByField(CART_ITEMS_SHEET, "id", itemId);
     return syncCartTotals(cart.id);
   }
 
@@ -423,19 +431,25 @@ export async function removeCartItem(
     throw new Error("Cart item not found.");
   }
 
-  await deleteSheetRowsByField(CART_ITEMS_SHEET, "id", itemId);
+  await deleteSheetRowByField(CART_ITEMS_SHEET, "id", itemId);
 
   return syncCartTotals(cart.id);
 }
 
-export async function clearCartByToken(cartToken: string): Promise<HydratedCart | null> {
+export async function clearCartByToken(
+  cartToken: string
+): Promise<HydratedCart | null> {
   const cart = await getCartByToken(cartToken);
 
   if (!cart) {
     return null;
   }
 
-  await deleteSheetRowsByField(CART_ITEMS_SHEET, "cart_id", cart.id);
+  const items = await getCartItems(cart.id);
+
+  for (const item of items) {
+    await deleteSheetRowByField(CART_ITEMS_SHEET, "id", item.id);
+  }
 
   return syncCartTotals(cart.id);
 }

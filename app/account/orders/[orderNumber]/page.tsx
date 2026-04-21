@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatMoney } from "../../../../lib/money";
+import ReorderButton from "../../../../components/account/ReorderButton";
 
 type Order = {
   id: string;
@@ -31,6 +32,8 @@ type Order = {
 
 type OrderItem = {
   id: string;
+  product_slug: string;
+  variant_id: string;
   product_title: string;
   variant_title: string;
   sku: string;
@@ -168,15 +171,23 @@ export default function AccountOrderDetailPage({
           <p style={eyebrowStyle}>Order Detail</p>
           <h1 style={titleStyle}>{orderNumber || "Order"}</h1>
           {order ? (
-            <p style={subtitleStyle}>
-              Placed on {formatDate(order.created_at)}
-            </p>
+            <p style={subtitleStyle}>Placed on {formatDate(order.created_at)}</p>
           ) : null}
         </div>
 
-        <Link href="/account/orders" style={secondaryButtonStyle}>
-          Back to Orders
-        </Link>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {items.length ? (
+            <ReorderButton
+              items={items}
+              label="Re-order This Order"
+              variant="dark"
+            />
+          ) : null}
+
+          <Link href="/account" style={secondaryButtonStyle}>
+            Back to Account
+          </Link>
+        </div>
       </div>
 
       {loading ? (
@@ -348,6 +359,7 @@ const titleStyle: React.CSSProperties = {
   lineHeight: 1.05,
   fontWeight: 800,
   color: "#171717",
+  fontFamily: "var(--font-heading)",
 };
 
 const subtitleStyle: React.CSSProperties = {

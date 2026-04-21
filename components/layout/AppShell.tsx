@@ -1,10 +1,14 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import Header from "./header";
 import Footer from "./footer";
 import { CartProvider } from "../cart/CartContext";
-import CartDrawer from "../cart/CartDrawer";
+
+const CartDrawer = dynamic(() => import("../cart/CartDrawer"), {
+  ssr: false,
+});
 
 export default function AppShell({
   children,

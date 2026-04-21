@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import CartButton from "../cart/CartButton";
 
 const navigation = [
@@ -31,13 +31,28 @@ function useIsMobile(breakpoint = 1180) {
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
-    function update() {
-      setIsMobile(window.innerWidth <= breakpoint);
-    }
+    if (typeof window === "undefined") return;
+
+    const mediaQuery = window.matchMedia(`(max-width: ${breakpoint}px)`);
+
+    const update = (event?: MediaQueryListEvent) => {
+      if (event) {
+        setIsMobile(event.matches);
+        return;
+      }
+
+      setIsMobile(mediaQuery.matches);
+    };
 
     update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", update);
+      return () => mediaQuery.removeEventListener("change", update);
+    }
+
+    mediaQuery.addListener(update);
+    return () => mediaQuery.removeListener(update);
   }, [breakpoint]);
 
   return isMobile;
@@ -45,7 +60,6 @@ function useIsMobile(breakpoint = 1180) {
 
 export default function Header() {
   const pathname = usePathname();
-  const router = useRouter();
   const isMobile = useIsMobile();
 
   const [customer, setCustomer] = useState<CustomerSessionResponse["customer"]>(
@@ -54,42 +68,42 @@ export default function Header() {
   const [loadingCustomer, setLoadingCustomer] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  useEffect(() => {
-    let active = true;
+  const loadCustomer = useCallback(async () => {
+    try {
+      const response = await fetch("/api/customer-auth/me", {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
 
-    async function loadCustomer() {
-      try {
-        const response = await fetch("/api/customer-auth/me", {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
+      const data = (await response.json()) as CustomerSessionResponse;
 
-        const data = (await response.json()) as CustomerSessionResponse;
-
-        if (!active) return;
-
-        if (response.ok && data?.authenticated && data?.customer) {
-          setCustomer(data.customer);
-        } else {
-          setCustomer(null);
-        }
-      } catch {
-        if (!active) return;
+      if (response.ok && data?.authenticated && data?.customer) {
+        setCustomer(data.customer);
+      } else {
         setCustomer(null);
-      } finally {
-        if (active) {
-          setLoadingCustomer(false);
-        }
       }
+    } catch {
+      setCustomer(null);
+    } finally {
+      setLoadingCustomer(false);
     }
+  }, []);
 
-    loadCustomer();
+  useEffect(() => {
+    void loadCustomer();
+  }, [loadCustomer]);
 
-    return () => {
-      active = false;
-    };
-  }, [pathname]);
+  useEffect(() => {
+    const shouldRefreshCustomer =
+      pathname === "/portal-login" ||
+      pathname.startsWith("/account") ||
+      pathname.startsWith("/portal");
+
+    if (!shouldRefreshCustomer) return;
+
+    void loadCustomer();
+  }, [pathname, loadCustomer]);
 
   const customerLabel = useMemo(() => {
     const contact = String(customer?.contactName || "").trim();
@@ -108,8 +122,7 @@ export default function Header() {
       });
 
       setCustomer(null);
-      router.push("/portal-login");
-      router.refresh();
+      window.location.href = "/portal-login";
     } finally {
       setLoggingOut(false);
     }

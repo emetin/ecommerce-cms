@@ -9,6 +9,7 @@ import {
   getOrdersForCustomer,
   sanitizeCustomer,
 } from "../../lib/customer-account";
+import ReorderButton from "../../components/account/ReorderButton";
 
 function formatMoney(value: string, currency: string) {
   const amount = Number(value || 0);
@@ -112,7 +113,7 @@ export default async function AccountPage() {
       style={{
         minHeight: "100vh",
         background: "#f7f4ee",
-        padding: "40px 20px",
+        padding: "40px 20px 70px",
       }}
     >
       <div
@@ -234,6 +235,7 @@ export default async function AccountPage() {
             display: "grid",
             gridTemplateColumns: "320px minmax(0, 1fr)",
             gap: 24,
+            alignItems: "start",
           }}
         >
           <aside
@@ -311,7 +313,8 @@ export default async function AccountPage() {
                   Previous Orders
                 </h2>
                 <p style={{ margin: "8px 0 0", color: "#665d52" }}>
-                  A quick summary of your submitted orders.
+                  Access your past orders and quickly start a new purchase from
+                  the same selections.
                 </p>
               </div>
 
@@ -348,11 +351,12 @@ export default async function AccountPage() {
                     key={order.id}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "minmax(0, 1.6fr) 0.9fr 0.9fr 0.9fr auto",
+                      gridTemplateColumns:
+                        "minmax(0, 1.45fr) 0.95fr 0.95fr 0.9fr auto",
                       alignItems: "center",
                       gap: 12,
-                      padding: "14px 16px",
-                      borderRadius: 16,
+                      padding: "16px 18px",
+                      borderRadius: 18,
                       border: "1px solid #eadfce",
                       background: "#fff",
                     }}
@@ -366,9 +370,14 @@ export default async function AccountPage() {
                           whiteSpace: "nowrap",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
+                          marginBottom: 4,
                         }}
                       >
                         {order.order_number}
+                      </div>
+                      <div style={{ color: "#7a7166", fontSize: 13 }}>
+                        {order.items?.length || 0} item
+                        {Number(order.items?.length || 0) === 1 ? "" : "s"}
                       </div>
                     </div>
 
@@ -410,28 +419,23 @@ export default async function AccountPage() {
                         gap: 8,
                         justifyContent: "flex-end",
                         flexWrap: "wrap",
+                        alignItems: "center",
                       }}
                     >
                       <a
-                        href={`/account/orders/${encodeURIComponent(order.order_number)}`}
+                        href={`/account/orders/${encodeURIComponent(
+                          order.order_number
+                        )}`}
                         style={ghostActionStyle}
                       >
                         View
                       </a>
 
-                      <a
-                        href="/cart"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          window.alert(
-                            "Re-order will be connected next. For now, please open the order detail or place a new order from the catalog."
-                          );
-                          window.location.href = "/cart";
-                        }}
-                        style={darkActionStyle}
-                      >
-                        Re-order
-                      </a>
+                      <ReorderButton
+                        items={order.items || []}
+                        label="Re-order"
+                        variant="dark"
+                      />
                     </div>
                   </div>
                 ))}
@@ -487,22 +491,6 @@ const ghostActionStyle: React.CSSProperties = {
   border: "1px solid #d8cebf",
   background: "#fff",
   color: "#171717",
-  textDecoration: "none",
-  fontWeight: 700,
-  fontSize: 13,
-  whiteSpace: "nowrap",
-};
-
-const darkActionStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 38,
-  padding: "0 14px",
-  borderRadius: 999,
-  border: "1px solid #171717",
-  background: "#171717",
-  color: "#fff",
   textDecoration: "none",
   fontWeight: 700,
   fontSize: 13,

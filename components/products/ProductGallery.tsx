@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { areSameImageUrls, normalizeImageUrl, uniqueImageUrls } from "../../lib/image-url";
+import { memo, useEffect, useMemo, useState } from "react";
+import {
+  areSameImageUrls,
+  normalizeImageUrl,
+  uniqueImageUrls,
+} from "../../lib/image-url";
 
 type ProductGalleryProps = {
   title?: string;
@@ -10,7 +14,7 @@ type ProductGalleryProps = {
   onActiveImageChange?: (image: string) => void;
 };
 
-export default function ProductGallery({
+function ProductGalleryComponent({
   title = "Product",
   images,
   controlledActiveImage,
@@ -18,12 +22,16 @@ export default function ProductGallery({
 }: ProductGalleryProps) {
   const validImages = useMemo(() => {
     return uniqueImageUrls(
-      images.map((item) => normalizeImageUrl(String(item || "").trim())).filter(Boolean)
+      images
+        .map((item) => normalizeImageUrl(String(item || "").trim()))
+        .filter(Boolean)
     );
   }, [images]);
 
   const [activeIndex, setActiveIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  const activeImage = validImages[activeIndex] || validImages[0] || "";
 
   useEffect(() => {
     if (!validImages.length) {
@@ -41,7 +49,7 @@ export default function ProductGallery({
     );
 
     if (nextIndex >= 0) {
-      setActiveIndex(nextIndex);
+      setActiveIndex((prev) => (prev === nextIndex ? prev : nextIndex));
       return;
     }
 
@@ -50,11 +58,41 @@ export default function ProductGallery({
 
   useEffect(() => {
     if (!validImages.length) return;
-    const activeImage = validImages[activeIndex] || validImages[0];
-    if (activeImage) {
-      onActiveImageChange?.(activeImage);
+
+    const nextImage = validImages[activeIndex] || validImages[0];
+    if (nextImage) {
+      onActiveImageChange?.(nextImage);
     }
   }, [activeIndex, validImages, onActiveImageChange]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!lightboxOpen || !validImages.length) return;
+
+      if (event.key === "Escape") {
+        setLightboxOpen(false);
+      }
+
+      if (validImages.length > 1 && event.key === "ArrowLeft") {
+        setActiveIndex((prev) => (prev === 0 ? validImages.length - 1 : prev - 1));
+      }
+
+      if (validImages.length > 1 && event.key === "ArrowRight") {
+        setActiveIndex((prev) => (prev === validImages.length - 1 ? 0 : prev + 1));
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [lightboxOpen, validImages.length]);
+
+  function goPrev() {
+    setActiveIndex((prev) => (prev === 0 ? validImages.length - 1 : prev - 1));
+  }
+
+  function goNext() {
+    setActiveIndex((prev) => (prev === validImages.length - 1 ? 0 : prev + 1));
+  }
 
   if (!validImages.length) {
     return (
@@ -78,16 +116,6 @@ export default function ProductGallery({
     );
   }
 
-  const activeImage = validImages[activeIndex] || validImages[0];
-
-  function goPrev() {
-    setActiveIndex((prev) => (prev === 0 ? validImages.length - 1 : prev - 1));
-  }
-
-  function goNext() {
-    setActiveIndex((prev) => (prev === validImages.length - 1 ? 0 : prev + 1));
-  }
-
   return (
     <>
       <div style={{ display: "grid", gap: 16 }}>
@@ -104,6 +132,9 @@ export default function ProductGallery({
           <img
             src={activeImage}
             alt={title}
+            loading="eager"
+            decoding="async"
+            fetchPriority="high"
             onClick={() => setLightboxOpen(true)}
             style={{
               width: "100%",
@@ -176,41 +207,46 @@ export default function ProductGallery({
               gap: 12,
             }}
           >
-            {validImages.slice(0, 10).map((image, index) => (
-              <button
-                key={`${image}-${index}`}
-                type="button"
-                onClick={() => setActiveIndex(index)}
-                style={{
-                  padding: 0,
-                  borderRadius: 18,
-                  overflow: "hidden",
-                  border:
-                    index === activeIndex
+            {validImages.slice(0, 10).map((image, index) => {
+              const isActive = index === activeIndex;
+
+              return (
+                <button
+                  key={`${image}-${index}`}
+                  type="button"
+                  onClick={() => setActiveIndex(index)}
+                  style={{
+                    padding: 0,
+                    borderRadius: 18,
+                    overflow: "hidden",
+                    border: isActive
                       ? "2px solid #2f7d62"
                       : "1px solid #e7decf",
-                  background: "#fff",
-                  cursor: "pointer",
-                  boxShadow:
-                    index === activeIndex
+                    background: "#fff",
+                    cursor: "pointer",
+                    boxShadow: isActive
                       ? "0 10px 24px rgba(47,125,98,0.16)"
                       : "0 4px 14px rgba(23,23,23,0.04)",
-                  transform: index === activeIndex ? "translateY(-2px)" : "none",
-                  transition: "all 0.2s ease",
-                }}
-              >
-                <img
-                  src={image}
-                  alt={`${title} thumbnail ${index + 1}`}
-                  style={{
-                    width: "100%",
-                    aspectRatio: "1 / 1",
-                    objectFit: "cover",
-                    display: "block",
+                    transform: isActive ? "translateY(-2px)" : "none",
+                    transition: "all 0.2s ease",
                   }}
-                />
-              </button>
-            ))}
+                >
+                  <img
+                    src={image}
+                    alt={`${title} thumbnail ${index + 1}`}
+                    loading="lazy"
+                    decoding="async"
+                    fetchPriority="low"
+                    style={{
+                      width: "100%",
+                      aspectRatio: "1 / 1",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                </button>
+              );
+            })}
           </div>
         ) : null}
       </div>
@@ -254,6 +290,7 @@ export default function ProductGallery({
             <img
               src={activeImage}
               alt={title}
+              decoding="async"
               style={{
                 width: "100%",
                 maxHeight: "85vh",
@@ -370,3 +407,5 @@ const lightboxNavRightStyle: React.CSSProperties = {
   ...lightboxNavBase,
   right: -16,
 };
+
+export default memo(ProductGalleryComponent);

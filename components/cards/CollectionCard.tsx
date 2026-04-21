@@ -1,3 +1,4 @@
+import { memo } from "react";
 import Link from "next/link";
 
 type CollectionCardProps = {
@@ -5,6 +6,7 @@ type CollectionCardProps = {
   description: string;
   image: string;
   href: string;
+  prefetch?: boolean;
 };
 
 const FALLBACK_IMAGE =
@@ -15,17 +17,19 @@ function getSafeImageSrc(value?: string) {
   return src || FALLBACK_IMAGE;
 }
 
-export default function CollectionCard({
+function CollectionCardComponent({
   title,
   description,
   image,
   href,
+  prefetch = false,
 }: CollectionCardProps) {
   const imageSrc = getSafeImageSrc(image);
 
   return (
     <Link
       href={href}
+      prefetch={prefetch}
       style={{
         textDecoration: "none",
         color: "inherit",
@@ -41,6 +45,8 @@ export default function CollectionCard({
           border: "1px solid #e5dbcf",
           background: "#fff",
           boxShadow: "0 8px 22px rgba(23,23,23,0.035)",
+          transition: "transform 180ms ease, box-shadow 180ms ease",
+          willChange: "transform",
         }}
       >
         <div
@@ -53,6 +59,9 @@ export default function CollectionCard({
           <img
             src={imageSrc}
             alt={title}
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
             style={{
               width: "100%",
               aspectRatio: "1 / 0.82",
@@ -163,3 +172,5 @@ export default function CollectionCard({
     </Link>
   );
 }
+
+export default memo(CollectionCardComponent);

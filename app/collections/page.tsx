@@ -20,6 +20,8 @@ type CollectionItem = {
   seo_description?: string;
 };
 
+export const revalidate = 1800;
+
 export const metadata: Metadata = buildPageMetadata({
   title: "Collections",
   description:
@@ -27,19 +29,25 @@ export const metadata: Metadata = buildPageMetadata({
   path: "/collections",
 });
 
+function normalizeText(value?: string) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value?: string) {
+  return normalizeText(value).toLowerCase();
+}
+
 export default async function CollectionsPage() {
   let collections: CollectionItem[] = [];
   let errorMessage = "";
 
   try {
-    const data = await getSheetData("collections");
+    const data = await getSheetData("collections", { ttlSeconds: 1800 });
 
     collections = (data as CollectionItem[])
-      .filter(
-        (item) => String(item.status || "").trim().toLowerCase() === "published"
-      )
+      .filter((item) => normalizeLower(item.status) === "published")
       .sort((a, b) =>
-        String(a.title || "").localeCompare(String(b.title || ""))
+        normalizeText(a.title).localeCompare(normalizeText(b.title))
       );
   } catch (error) {
     errorMessage =
@@ -153,6 +161,7 @@ export default async function CollectionsPage() {
                   }
                   image={collection.image || ""}
                   href={`/collections/${collection.slug || ""}`}
+                  prefetch={false}
                 />
               ))}
             </div>

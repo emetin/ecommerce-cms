@@ -7,7 +7,7 @@ type CacheEntry<T> = {
 const memoryCache = new Map<string, CacheEntry<unknown>>();
 const inFlight = new Map<string, Promise<unknown>>();
 
-const DEFAULT_MAX_ENTRIES = 300;
+const DEFAULT_MAX_ENTRIES = 500;
 
 function now() {
   return Date.now();
@@ -54,6 +54,7 @@ export function getCache<T>(key: string): T | null {
   }
 
   entry.lastAccessed = now();
+
   return entry.data as T;
 }
 
@@ -86,6 +87,11 @@ export function deleteCacheByPrefix(prefix: string): void {
       inFlight.delete(key);
     }
   }
+}
+
+export function clearAllCache(): void {
+  memoryCache.clear();
+  inFlight.clear();
 }
 
 export async function getOrSetCache<T>(

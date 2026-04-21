@@ -1,22 +1,37 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import Link from "next/link";
 import { useCart } from "./CartContext";
 import { formatMoney } from "../../lib/money";
 
-export default function CartDrawer() {
+type CartItem = {
+  id: string;
+  product_title?: string;
+  variant_title?: string;
+  image?: string;
+  unit_price?: number | string;
+  quantity?: number | string;
+};
+
+function CartDrawerComponent() {
   const {
     cart,
     isDrawerOpen,
     closeDrawer,
-    isLoading,
+    isMutating,
     handleUpdateQuantity,
     handleRemoveItem,
     handleClearCart,
   } = useCart();
 
-  const items = cart?.items || [];
-  const subtotal = Number(cart?.totals?.subtotal || 0);
+  const items = useMemo(() => {
+    return (cart?.items || []) as CartItem[];
+  }, [cart]);
+
+  const subtotal = useMemo(() => {
+    return Number(cart?.totals?.subtotal || 0);
+  }, [cart]);
 
   return (
     <>
@@ -100,138 +115,15 @@ export default function CartDrawer() {
             </div>
           ) : (
             <div style={{ display: "grid", gap: "18px" }}>
-              {items.map((item: any) => {
-                const quantity = Number(item.quantity || 1);
-
-                return (
-                  <div
-                    key={item.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "88px 1fr",
-                      gap: "14px",
-                      paddingBottom: "18px",
-                      borderBottom: "1px solid #f1f1f1",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: "88px",
-                        height: "88px",
-                        borderRadius: "10px",
-                        overflow: "hidden",
-                        background: "#f7f7f7",
-                      }}
-                    >
-                      {item.image ? (
-                        <img
-                          src={item.image}
-                          alt={item.product_title}
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                            display: "block",
-                          }}
-                        />
-                      ) : null}
-                    </div>
-
-                    <div>
-                      <div
-                        style={{
-                          fontSize: "15px",
-                          fontWeight: 600,
-                          color: "#111",
-                          marginBottom: "4px",
-                        }}
-                      >
-                        {item.product_title}
-                      </div>
-
-                      {item.variant_title ? (
-                        <div
-                          style={{
-                            fontSize: "13px",
-                            color: "#777",
-                            marginBottom: "8px",
-                          }}
-                        >
-                          {item.variant_title}
-                        </div>
-                      ) : null}
-
-                      <div
-                        style={{
-                          fontSize: "14px",
-                          color: "#222",
-                          marginBottom: "10px",
-                        }}
-                      >
-                        {formatMoney(item.unit_price)}
-                      </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          marginBottom: "10px",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleUpdateQuantity(item.id, quantity - 1)
-                          }
-                          disabled={isLoading}
-                          style={qtyButtonStyle}
-                        >
-                          -
-                        </button>
-
-                        <span
-                          style={{
-                            minWidth: "24px",
-                            textAlign: "center",
-                            fontSize: "14px",
-                          }}
-                        >
-                          {quantity}
-                        </span>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleUpdateQuantity(item.id, quantity + 1)
-                          }
-                          disabled={isLoading}
-                          style={qtyButtonStyle}
-                        >
-                          +
-                        </button>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveItem(item.id)}
-                        disabled={isLoading}
-                        style={{
-                          border: "none",
-                          background: "transparent",
-                          padding: 0,
-                          cursor: "pointer",
-                          fontSize: "13px",
-                          color: "#777",
-                          textDecoration: "underline",
-                        }}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+              {items.map((item) => (
+                <CartDrawerItem
+                  key={item.id}
+                  item={item}
+                  isMutating={isMutating}
+                  onUpdateQuantity={handleUpdateQuantity}
+                  onRemoveItem={handleRemoveItem}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -275,7 +167,7 @@ export default function CartDrawer() {
               View Cart
             </Link>
 
-            {!!items.length && (
+            {!!items.length ? (
               <Link
                 href="/checkout"
                 onClick={closeDrawer}
@@ -293,13 +185,13 @@ export default function CartDrawer() {
               >
                 Go to Checkout
               </Link>
-            )}
+            ) : null}
 
             {!!items.length ? (
               <button
                 type="button"
                 onClick={handleClearCart}
-                disabled={isLoading}
+                disabled={isMutating}
                 style={{
                   display: "block",
                   textAlign: "center",
@@ -310,10 +202,11 @@ export default function CartDrawer() {
                   borderRadius: "10px",
                   fontSize: "14px",
                   fontWeight: 500,
-                  cursor: "pointer",
+                  cursor: isMutating ? "not-allowed" : "pointer",
+                  opacity: isMutating ? 0.65 : 1,
                 }}
               >
-                Clear Cart
+                {isMutating ? "Updating..." : "Clear Cart"}
               </button>
             ) : null}
           </div>
@@ -323,13 +216,166 @@ export default function CartDrawer() {
   );
 }
 
+function CartDrawerItemComponent({
+  item,
+  isMutating,
+  onUpdateQuantity,
+  onRemoveItem,
+}: {
+  item: CartItem;
+  isMutating: boolean;
+  onUpdateQuantity: (itemId: string, quantity: number) => Promise<void>;
+  onRemoveItem: (itemId: string) => Promise<void>;
+}) {
+  const quantity = Math.max(1, Number(item.quantity || 1));
+  const itemPrice = Number(item.unit_price || 0);
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "88px 1fr",
+        gap: "14px",
+        paddingBottom: "18px",
+        borderBottom: "1px solid #f1f1f1",
+      }}
+    >
+      <div
+        style={{
+          width: "88px",
+          height: "88px",
+          borderRadius: "10px",
+          overflow: "hidden",
+          background: "#f7f7f7",
+        }}
+      >
+        {item.image ? (
+          <img
+            src={item.image}
+            alt={item.product_title || "Product"}
+            loading="lazy"
+            decoding="async"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              display: "block",
+            }}
+          />
+        ) : null}
+      </div>
+
+      <div>
+        <div
+          style={{
+            fontSize: "15px",
+            fontWeight: 600,
+            color: "#111",
+            marginBottom: "4px",
+          }}
+        >
+          {item.product_title}
+        </div>
+
+        {item.variant_title ? (
+          <div
+            style={{
+              fontSize: "13px",
+              color: "#777",
+              marginBottom: "8px",
+            }}
+          >
+            {item.variant_title}
+          </div>
+        ) : null}
+
+        <div
+          style={{
+            fontSize: "14px",
+            color: "#222",
+            marginBottom: "10px",
+          }}
+        >
+          {formatMoney(itemPrice)}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            marginBottom: "10px",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => onUpdateQuantity(item.id, Math.max(1, quantity - 1))}
+            disabled={isMutating}
+            style={{
+              ...qtyButtonStyle,
+              opacity: isMutating ? 0.65 : 1,
+              cursor: isMutating ? "not-allowed" : "pointer",
+            }}
+          >
+            -
+          </button>
+
+          <span
+            style={{
+              minWidth: "24px",
+              textAlign: "center",
+              fontSize: "14px",
+            }}
+          >
+            {quantity}
+          </span>
+
+          <button
+            type="button"
+            onClick={() => onUpdateQuantity(item.id, quantity + 1)}
+            disabled={isMutating}
+            style={{
+              ...qtyButtonStyle,
+              opacity: isMutating ? 0.65 : 1,
+              cursor: isMutating ? "not-allowed" : "pointer",
+            }}
+          >
+            +
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => onRemoveItem(item.id)}
+          disabled={isMutating}
+          style={{
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: isMutating ? "not-allowed" : "pointer",
+            fontSize: "13px",
+            color: "#777",
+            textDecoration: "underline",
+            opacity: isMutating ? 0.65 : 1,
+          }}
+        >
+          Remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const CartDrawerItem = memo(CartDrawerItemComponent);
+
 const qtyButtonStyle: React.CSSProperties = {
   width: "30px",
   height: "30px",
   borderRadius: "8px",
   border: "1px solid #ddd",
   background: "#fff",
-  cursor: "pointer",
   fontSize: "16px",
   lineHeight: 1,
 };
+
+export default memo(CartDrawerComponent);

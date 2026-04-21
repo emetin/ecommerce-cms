@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { getSheetData } from "./sheets";
 import { normalizeImageUrl } from "./image-url";
 
@@ -26,11 +27,28 @@ export type ProductImageItem = {
   id?: string;
   product_slug?: string;
   image_url?: string;
+  image_file_id?: string;
+  image_uploaded_at?: string;
   sort_order?: string;
   alt_text?: string;
   is_main?: string;
   created_at?: string;
   updated_at?: string;
+};
+
+export type ProductVariantItem = {
+  id?: string;
+  product_slug?: string;
+  title?: string;
+  sku?: string;
+  price?: string;
+  compare_at_price?: string;
+  status?: string;
+  option1?: string;
+  option2?: string;
+  option3?: string;
+  inventory?: string;
+  image?: string;
 };
 
 function normalizeText(value?: string) {
@@ -98,6 +116,27 @@ export function groupProductImagesBySlug(productImages: ProductImageItem[]) {
   return grouped;
 }
 
+export function groupVariantsBySlug(variants: ProductVariantItem[]) {
+  const grouped = new Map<string, ProductVariantItem[]>();
+
+  for (const item of variants) {
+    const slug = normalizeLower(item.product_slug);
+    if (!slug) continue;
+
+    const status = normalizeLower(item.status);
+    if (!["", "published", "active"].includes(status)) continue;
+
+    const current = grouped.get(slug);
+    if (current) {
+      current.push(item);
+    } else {
+      grouped.set(slug, [item]);
+    }
+  }
+
+  return grouped;
+}
+
 export function getPrimaryProductImage(
   product: ProductItem,
   productImages: ProductImageItem[]
@@ -110,17 +149,22 @@ export function getPrimaryProductImage(
   );
 }
 
-export async function getAllProducts(ttlSeconds = 1800) {
+export const getAllProducts = cache(async (ttlSeconds = 1800) => {
   const productData = await getSheetData("products", { ttlSeconds });
   return (productData as ProductItem[]).filter(hasValidSlug);
-}
+});
 
-export async function getAllProductImages(ttlSeconds = 1800) {
+export const getAllProductImages = cache(async (ttlSeconds = 1800) => {
   const imageData = await getSheetData("product_images", { ttlSeconds });
   return imageData as ProductImageItem[];
-}
+});
 
-export async function getProductsAndImages(ttlSeconds = 1800) {
+export const getAllProductVariants = cache(async (ttlSeconds = 1800) => {
+  const variantData = await getSheetData("product_variants", { ttlSeconds });
+  return variantData as ProductVariantItem[];
+});
+
+export const getProductsAndImages = cache(async (ttlSeconds = 1800) => {
   const [products, allProductImages] = await Promise.all([
     getAllProducts(ttlSeconds),
     getAllProductImages(ttlSeconds),
@@ -133,7 +177,23 @@ export async function getProductsAndImages(ttlSeconds = 1800) {
     allProductImages,
     imagesBySlug,
   };
-}
+});
+
+export const getCatalogBundle = cache(async (ttlSeconds = 1800) => {
+  const [products, allProductImages, allVariants] = await Promise.all([
+    getAllProducts(ttlSeconds),
+    getAllProductImages(ttlSeconds),
+    getAllProductVariants(ttlSeconds),
+  ]);
+
+  return {
+    products,
+    allProductImages,
+    allVariants,
+    imagesBySlug: groupProductImagesBySlug(allProductImages),
+    variantsBySlug: groupVariantsBySlug(allVariants),
+  };
+});
 
 export function getPublishedProducts(products: ProductItem[]) {
   return products
@@ -166,4 +226,26 @@ export function findPublishedProductBySlug(
         normalizeLower(item.status) === "published"
     ) || null
   );
+}
+
+export function findRelatedProducts(
+  products: ProductItem[],
+  currentProduct: ProductItem,
+  limit = 3
+) {
+  const currentSlug = normalizeLower(currentProduct.slug);
+  const currentCollectionSlug = normalizeLower(currentProduct.collection_slug);
+
+  if (!currentCollectionSlug) {
+    return [];
+  }
+
+  return getPublishedProducts(products)
+    .filter((item) => {
+      const itemSlug = normalizeLower(item.slug);
+      const itemCollectionSlug = normalizeLower(item.collection_slug);
+
+      return itemSlug !== currentSlug && itemCollectionSlug === currentCollectionSlug;
+    })
+    .slice(0, limit);
 }

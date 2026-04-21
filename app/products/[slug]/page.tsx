@@ -1,15 +1,13 @@
 import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import {
-  findSheetItemByField,
-  findSheetItemsByField,
-  getSheetData,
-} from "../../../lib/sheets";
+import { getSheetData } from "../../../lib/sheets";
 import { buildPageMetadata } from "../../../lib/seo";
 import { normalizeImageUrl } from "../../../lib/image-url";
 import ProductDetailClient from "../../../components/products/ProductDetailClient";
 import type { VariantItem } from "../../../components/products/ProductPurchasePanel";
+
+export const revalidate = 1800;
 
 type ProductItem = {
   id?: string;
@@ -91,28 +89,100 @@ function getPrimaryProductImage(
   );
 }
 
-const getPublishedProductBySlug = cache(async (slug: string) => {
-  const normalizedSlug = normalizeLower(slug);
+function filterPublishedProducts(products: ProductItem[]) {
+  return products.filter(
+    (item) =>
+      normalizeLower(item.status) === "published" &&
+      Boolean(normalizeLower(item.slug))
+  );
+}
 
-  const product = await findSheetItemByField<ProductItem>(
-    "products",
-    "slug",
-    normalizedSlug
+function filterActiveVariants(variants: VariantItem[]) {
+  return variants.filter((variant) => {
+    const variantStatus = normalizeLower(variant.status);
+    return ["", "published", "active"].includes(variantStatus);
+  });
+}
+
+function groupImagesBySlug(images: ProductImageItem[]) {
+  const map = new Map<string, ProductImageItem[]>();
+
+  for (const image of images) {
+    const slug = normalizeLower(image.product_slug);
+    if (!slug) continue;
+
+    const current = map.get(slug);
+    if (current) {
+      current.push(image);
+    } else {
+      map.set(slug, [image]);
+    }
+  }
+
+  for (const [slug, items] of map.entries()) {
+    map.set(slug, sortProductImages(items));
+  }
+
+  return map;
+}
+
+function groupVariantsBySlug(variants: VariantItem[]) {
+  const map = new Map<string, VariantItem[]>();
+
+  for (const variant of variants) {
+    const slug = normalizeLower(variant.product_slug);
+    if (!slug) continue;
+
+    const status = normalizeLower(variant.status);
+    if (!["", "published", "active"].includes(status)) continue;
+
+    const current = map.get(slug);
+    if (current) {
+      current.push(variant);
+    } else {
+      map.set(slug, [variant]);
+    }
+  }
+
+  return map;
+}
+
+const getCatalogData = cache(async () => {
+  const [allProductsRaw, allProductImagesRaw, allVariantsRaw] = await Promise.all(
+    [
+      getSheetData("products", { ttlSeconds: 1800 }),
+      getSheetData("product_images", { ttlSeconds: 1800 }),
+      getSheetData("product_variants", { ttlSeconds: 1800 }),
+    ]
   );
 
-  if (!product) {
-    return null;
-  }
+  const allProducts = allProductsRaw as ProductItem[];
+  const allProductImages = allProductImagesRaw as ProductImageItem[];
+  const allVariants = allVariantsRaw as VariantItem[];
 
-  if (normalizeLower(product.slug) !== normalizedSlug) {
-    return null;
-  }
+  const publishedProducts = filterPublishedProducts(allProducts);
+  const imagesBySlug = groupImagesBySlug(allProductImages);
+  const variantsBySlug = groupVariantsBySlug(allVariants);
 
-  if (normalizeLower(product.status) !== "published") {
-    return null;
-  }
+  return {
+    allProducts,
+    publishedProducts,
+    allProductImages,
+    allVariants,
+    imagesBySlug,
+    variantsBySlug,
+  };
+});
 
-  return product;
+const getPublishedProductBySlug = cache(async (slug: string) => {
+  const normalizedSlug = normalizeLower(slug);
+  const { publishedProducts } = await getCatalogData();
+
+  return (
+    publishedProducts.find(
+      (product) => normalizeLower(product.slug) === normalizedSlug
+    ) || null
+  );
 });
 
 const getProductPageData = cache(async (slug: string) => {
@@ -129,30 +199,11 @@ const getProductPageData = cache(async (slug: string) => {
     };
   }
 
-  const [variantsData, currentProductImages, allProducts, everyProductImage] =
-    await Promise.all([
-      findSheetItemsByField<VariantItem>(
-        "product_variants",
-        "product_slug",
-        normalizedSlug
-      ),
-      findSheetItemsByField<ProductImageItem>(
-        "product_images",
-        "product_slug",
-        normalizedSlug
-      ),
-      getSheetData("products"),
-      getSheetData("product_images"),
-    ]);
+  const { publishedProducts, allProductImages, imagesBySlug, variantsBySlug } =
+    await getCatalogData();
 
-  const filteredVariants = variantsData.filter((variant) => {
-    const variantStatus = normalizeLower(variant.status);
-    return ["", "published", "active"].includes(variantStatus);
-  });
-
-  const publishedProducts = (allProducts as ProductItem[]).filter(
-    (item) => normalizeLower(item.status) === "published"
-  );
+  const currentProductImages = imagesBySlug.get(normalizedSlug) || [];
+  const filteredVariants = variantsBySlug.get(normalizedSlug) || [];
 
   const currentCollectionSlug = normalizeLower(product.collection_slug);
 
@@ -173,7 +224,7 @@ const getProductPageData = cache(async (slug: string) => {
     relatedProducts,
     variants: filteredVariants,
     productImages: currentProductImages,
-    allProductImages: everyProductImage as ProductImageItem[],
+    allProductImages,
   };
 });
 

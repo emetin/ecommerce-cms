@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import { getSheetData } from "../../../lib/sheets";
 import Container from "../../../components/ui/Container";
@@ -8,6 +9,8 @@ import ButtonLink from "../../../components/ui/ButtonLink";
 import DetailHero from "../../../components/sections/DetailHero";
 import { buildPageMetadata } from "../../../lib/seo";
 import { normalizeImageUrl } from "../../../lib/image-url";
+
+export const revalidate = 1800;
 
 type CollectionItem = {
   id?: string;
@@ -65,33 +68,74 @@ function toSafeOrder(value?: string) {
   return Number.isFinite(num) ? num : 999999;
 }
 
-function formatLabel(value?: string, fallback = "Product") {
-  const raw = normalizeText(value);
-  if (!raw) return fallback;
-
-  return raw
-    .split(/[-,_\s]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-async function getCollectionPageData(slug: string) {
-  const [collectionItems, productItems, collectionProductItems] = await Promise.all([
-    getSheetData("collections"),
-    getSheetData("products"),
-    getSheetData("collection_products"),
-  ]);
+const getCollectionsCatalogData = cache(async () => {
+  const [collectionItems, productItems, collectionProductItems] =
+    await Promise.all([
+      getSheetData("collections", { ttlSeconds: 1800 }),
+      getSheetData("products", { ttlSeconds: 1800 }),
+      getSheetData("collection_products", { ttlSeconds: 1800 }),
+    ]);
 
   const collections = collectionItems as CollectionItem[];
   const allProducts = productItems as ProductItem[];
   const collectionProducts = collectionProductItems as CollectionProductItem[];
 
+  const publishedCollections = collections.filter(
+    (item) =>
+      normalizeLower(item.status) === "published" &&
+      Boolean(normalizeLower(item.slug))
+  );
+
+  const publishedProducts = allProducts.filter(
+    (item) =>
+      normalizeLower(item.status) === "published" &&
+      Boolean(normalizeLower(item.slug))
+  );
+
+  const productMap = new Map<string, ProductItem>();
+  for (const item of publishedProducts) {
+    productMap.set(normalizeLower(item.slug), item);
+  }
+
+  const collectionRelationsMap = new Map<string, CollectionProductItem[]>();
+  for (const relation of collectionProducts) {
+    const collectionSlug = normalizeLower(relation.collection_slug);
+    if (!collectionSlug) continue;
+
+    const current = collectionRelationsMap.get(collectionSlug);
+    if (current) {
+      current.push(relation);
+    } else {
+      collectionRelationsMap.set(collectionSlug, [relation]);
+    }
+  }
+
+  for (const [slug, items] of collectionRelationsMap.entries()) {
+    collectionRelationsMap.set(
+      slug,
+      [...items].sort((a, b) => toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order))
+    );
+  }
+
+  return {
+    collections,
+    allProducts,
+    collectionProducts,
+    publishedCollections,
+    publishedProducts,
+    productMap,
+    collectionRelationsMap,
+  };
+});
+
+const getCollectionPageData = cache(async (slug: string) => {
+  const normalizedSlug = normalizeLower(slug);
+  const { publishedCollections, publishedProducts, productMap, collectionRelationsMap } =
+    await getCollectionsCatalogData();
+
   const collection =
-    collections.find(
-      (item) =>
-        normalizeLower(item.slug) === slug &&
-        normalizeLower(item.status) === "published"
+    publishedCollections.find(
+      (item) => normalizeLower(item.slug) === normalizedSlug
     ) || null;
 
   if (!collection) {
@@ -101,29 +145,18 @@ async function getCollectionPageData(slug: string) {
     };
   }
 
-  const publishedProducts = allProducts.filter(
-    (item) => normalizeLower(item.status) === "published" && normalizeText(item.slug)
-  );
-
-  const relatedCollectionProducts = collectionProducts
-    .filter((item) => normalizeLower(item.collection_slug) === slug)
-    .sort((a, b) => toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order));
+  const relatedCollectionProducts =
+    collectionRelationsMap.get(normalizedSlug) || [];
 
   let products: ProductItem[] = [];
 
   if (relatedCollectionProducts.length > 0) {
-    const productMap = new Map<string, ProductItem>();
-
-    for (const item of publishedProducts) {
-      productMap.set(normalizeLower(item.slug), item);
-    }
-
     products = relatedCollectionProducts
       .map((relation) => productMap.get(normalizeLower(relation.product_slug)))
       .filter(Boolean) as ProductItem[];
   } else {
     products = publishedProducts.filter(
-      (item) => normalizeLower(item.collection_slug) === slug
+      (item) => normalizeLower(item.collection_slug) === normalizedSlug
     );
   }
 
@@ -131,7 +164,7 @@ async function getCollectionPageData(slug: string) {
     collection,
     products,
   };
-}
+});
 
 export async function generateMetadata({
   params,

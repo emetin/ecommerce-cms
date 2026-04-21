@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -16,25 +17,29 @@ import {
   updateCartItem,
 } from "./cart-storage";
 
+type CartPayload = {
+  product_slug: string;
+  variant_id?: string;
+  product_title: string;
+  variant_title?: string;
+  sku?: string;
+  image?: string;
+  unit_price: number | string;
+  compare_at_price?: number | string;
+  quantity?: number;
+};
+
 type CartContextType = {
   cart: any | null;
   isLoading: boolean;
+  isBootstrapping: boolean;
+  isMutating: boolean;
   isDrawerOpen: boolean;
   error: string;
   openDrawer: () => void;
   closeDrawer: () => void;
   refreshCart: () => Promise<void>;
-  handleAddToCart: (payload: {
-    product_slug: string;
-    variant_id?: string;
-    product_title: string;
-    variant_title?: string;
-    sku?: string;
-    image?: string;
-    unit_price: number | string;
-    compare_at_price?: number | string;
-    quantity?: number;
-  }) => Promise<void>;
+  handleAddToCart: (payload: CartPayload) => Promise<void>;
   handleUpdateQuantity: (itemId: string, quantity: number) => Promise<void>;
   handleRemoveItem: (itemId: string) => Promise<void>;
   handleClearCart: () => Promise<void>;
@@ -45,9 +50,20 @@ const CartContext = createContext<CartContextType | null>(null);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = useState<any | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [isMutating, setIsMutating] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [error, setError] = useState("");
+
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const openDrawer = useCallback(() => {
     setIsDrawerOpen(true);
@@ -58,15 +74,29 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshCart = useCallback(async () => {
+    const controller = new AbortController();
+
     try {
-      setIsLoading(true);
-      setError("");
-      const nextCart = await fetchCart();
-      setCart(nextCart);
+      if (mountedRef.current) {
+        setError("");
+      }
+
+      const nextCart = await fetchCart(controller.signal);
+
+      if (mountedRef.current) {
+        setCart(nextCart);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load cart.");
+      const message =
+        err instanceof Error ? err.message : "Failed to load cart.";
+
+      if (mountedRef.current && message !== "The operation was aborted.") {
+        setError(message);
+      }
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) {
+        setIsBootstrapping(false);
+      }
     }
   }, []);
 
@@ -74,51 +104,64 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     refreshCart();
   }, [refreshCart]);
 
-  const handleAddToCart = useCallback(
-    async (payload: {
-      product_slug: string;
-      variant_id?: string;
-      product_title: string;
-      variant_title?: string;
-      sku?: string;
-      image?: string;
-      unit_price: number | string;
-      compare_at_price?: number | string;
-      quantity?: number;
-    }) => {
-      try {
-        setIsLoading(true);
+  const handleAddToCart = useCallback(async (payload: CartPayload) => {
+    try {
+      if (mountedRef.current) {
+        setIsMutating(true);
         setError("");
-        const nextCart = await addToCart(payload);
-        setCart(nextCart);
         setIsDrawerOpen(true);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to add to cart.");
-        throw err;
-      } finally {
-        setIsLoading(false);
       }
-    },
-    []
-  );
+
+      const nextCart = await addToCart(payload);
+
+      if (mountedRef.current) {
+        setCart(nextCart);
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to add to cart.";
+
+      if (mountedRef.current) {
+        setError(message);
+      }
+
+      throw err;
+    } finally {
+      if (mountedRef.current) {
+        setIsMutating(false);
+      }
+    }
+  }, []);
 
   const handleUpdateQuantity = useCallback(
     async (itemId: string, quantity: number) => {
       try {
-        setIsLoading(true);
-        setError("");
+        if (mountedRef.current) {
+          setIsMutating(true);
+          setError("");
+        }
+
         const nextCart = await updateCartItem({
           item_id: itemId,
           quantity,
         });
-        setCart(nextCart);
+
+        if (mountedRef.current) {
+          setCart(nextCart);
+        }
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to update cart item."
-        );
+        const message =
+          err instanceof Error ? err.message : "Failed to update cart item.";
+
+        if (mountedRef.current) {
+          setError(message);
+        }
+
         throw err;
       } finally {
-        setIsLoading(false);
+        if (mountedRef.current) {
+          setIsMutating(false);
+        }
       }
     },
     []
@@ -126,33 +169,59 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const handleRemoveItem = useCallback(async (itemId: string) => {
     try {
-      setIsLoading(true);
-      setError("");
+      if (mountedRef.current) {
+        setIsMutating(true);
+        setError("");
+      }
+
       const nextCart = await removeCartItemRequest({
         item_id: itemId,
       });
-      setCart(nextCart);
+
+      if (mountedRef.current) {
+        setCart(nextCart);
+      }
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to remove cart item."
-      );
+      const message =
+        err instanceof Error ? err.message : "Failed to remove cart item.";
+
+      if (mountedRef.current) {
+        setError(message);
+      }
+
       throw err;
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) {
+        setIsMutating(false);
+      }
     }
   }, []);
 
   const handleClearCart = useCallback(async () => {
     try {
-      setIsLoading(true);
-      setError("");
+      if (mountedRef.current) {
+        setIsMutating(true);
+        setError("");
+      }
+
       const nextCart = await clearCart();
-      setCart(nextCart);
+
+      if (mountedRef.current) {
+        setCart(nextCart);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to clear cart.");
+      const message =
+        err instanceof Error ? err.message : "Failed to clear cart.";
+
+      if (mountedRef.current) {
+        setError(message);
+      }
+
       throw err;
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) {
+        setIsMutating(false);
+      }
     }
   }, []);
 
@@ -160,10 +229,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return Number(cart?.totals?.item_count || 0);
   }, [cart]);
 
+  const isLoading = isBootstrapping || isMutating;
+
   const value = useMemo<CartContextType>(
     () => ({
       cart,
       isLoading,
+      isBootstrapping,
+      isMutating,
       isDrawerOpen,
       error,
       openDrawer,
@@ -178,6 +251,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     [
       cart,
       isLoading,
+      isBootstrapping,
+      isMutating,
       isDrawerOpen,
       error,
       openDrawer,

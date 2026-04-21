@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import Container from "../ui/Container";
 import Section from "../ui/Section";
 import SectionHeading from "../ui/SectionHeading";
@@ -14,8 +14,33 @@ import {
   uniqueImageUrls,
 } from "../../lib/image-url";
 
-const ProductGallery = dynamic(() => import("./ProductGallery"));
-const ProductPurchasePanel = dynamic(() => import("./ProductPurchasePanel"));
+const ProductGallery = dynamic(() => import("./ProductGallery"), {
+  loading: () => (
+    <div
+      style={{
+        width: "100%",
+        minHeight: 560,
+        borderRadius: 24,
+        border: "1px solid #e7ddcf",
+        background: "#f8f4ed",
+      }}
+    />
+  ),
+});
+
+const ProductPurchasePanel = dynamic(() => import("./ProductPurchasePanel"), {
+  loading: () => (
+    <div
+      style={{
+        width: "100%",
+        minHeight: 220,
+        borderRadius: 24,
+        border: "1px solid #e7ddcf",
+        background: "#fffaf4",
+      }}
+    />
+  ),
+});
 
 type ProductItem = {
   id?: string;
@@ -157,7 +182,7 @@ type ProductDetailClientProps = {
   allProductImages: ProductImageItem[];
 };
 
-export default function ProductDetailClient({
+function ProductDetailClientComponent({
   product,
   relatedProducts,
   variants,
@@ -225,9 +250,16 @@ export default function ProductDetailClient({
       const slug = normalizeLower(image.product_slug);
       if (!slug) continue;
 
-      const current = imagesBySlug.get(slug) || [];
-      current.push(image);
-      imagesBySlug.set(slug, current);
+      const current = imagesBySlug.get(slug);
+      if (current) {
+        current.push(image);
+      } else {
+        imagesBySlug.set(slug, [image]);
+      }
+    }
+
+    for (const [slug, items] of imagesBySlug.entries()) {
+      imagesBySlug.set(slug, sortProductImages(items));
     }
 
     const result = new Map<string, string>();
@@ -271,6 +303,7 @@ export default function ProductDetailClient({
           </div>
 
           <div
+            className="product-detail-grid"
             style={{
               display: "grid",
               gridTemplateColumns: "1.05fr 0.95fr",
@@ -384,6 +417,7 @@ export default function ProductDetailClient({
       <Section tone="soft">
         <Container>
           <div
+            className="product-support-grid"
             style={{
               display: "grid",
               gridTemplateColumns: "1.1fr 0.9fr",
@@ -478,6 +512,7 @@ export default function ProductDetailClient({
                     collectionLabel={formatCollectionLabel(item.collection_slug)}
                     vendor={item.vendor || ""}
                     productCategory={item.product_category || item.type || ""}
+                    prefetch={false}
                   />
                 );
               })}
@@ -546,3 +581,5 @@ const metaPanelStyle: React.CSSProperties = {
   border: "1px solid #e8dfd2",
   background: "#fffaf4",
 };
+
+export default memo(ProductDetailClientComponent);

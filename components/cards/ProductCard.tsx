@@ -1,3 +1,4 @@
+import { memo } from "react";
 import Link from "next/link";
 import { normalizeImageUrl } from "../../lib/image-url";
 
@@ -9,12 +10,13 @@ type ProductCardProps = {
   collectionLabel?: string;
   vendor?: string;
   productCategory?: string;
+  prefetch?: boolean;
 };
 
 const FALLBACK_IMAGE =
   "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1200&q=80";
 
-export default function ProductCard({
+function ProductCardComponent({
   title,
   description,
   image,
@@ -22,6 +24,7 @@ export default function ProductCard({
   collectionLabel,
   vendor,
   productCategory,
+  prefetch = false,
 }: ProductCardProps) {
   const finalImage =
     normalizeImageUrl(String(image || "").trim()) || FALLBACK_IMAGE;
@@ -29,6 +32,7 @@ export default function ProductCard({
   return (
     <Link
       href={href}
+      prefetch={prefetch}
       style={{
         textDecoration: "none",
         color: "inherit",
@@ -44,6 +48,8 @@ export default function ProductCard({
           border: "1px solid #e5dbcf",
           background: "#fff",
           boxShadow: "0 8px 22px rgba(23,23,23,0.035)",
+          transition: "transform 180ms ease, box-shadow 180ms ease",
+          willChange: "transform",
         }}
       >
         <div
@@ -58,6 +64,7 @@ export default function ProductCard({
             alt={title}
             loading="lazy"
             decoding="async"
+            fetchPriority="low"
             style={{
               width: "100%",
               aspectRatio: "1 / 0.82",
@@ -87,9 +94,7 @@ export default function ProductCard({
                 <span style={badgeStyle}>{collectionLabel}</span>
               ) : null}
 
-              {vendor ? (
-                <span style={badgeStyleAlt}>{vendor}</span>
-              ) : null}
+              {vendor ? <span style={badgeStyleAlt}>{vendor}</span> : null}
 
               {productCategory ? (
                 <span style={badgeStyleAlt}>{productCategory}</span>
@@ -199,3 +204,5 @@ const badgeStyleAlt: React.CSSProperties = {
   letterSpacing: "0.04em",
   textTransform: "uppercase",
 };
+
+export default memo(ProductCardComponent);

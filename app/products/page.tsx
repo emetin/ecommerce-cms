@@ -12,6 +12,8 @@ import {
   type ProductItem,
 } from "../../lib/product-data";
 
+export const revalidate = 1800;
+
 export const metadata: Metadata = buildPageMetadata({
   title: "Products",
   description:
@@ -185,6 +187,7 @@ export default async function ProductsPage() {
                   description={product.preparedDescription}
                   image={product.preparedImage}
                   href={product.preparedHref}
+                  prefetch={false}
                 />
               ))}
             </div>

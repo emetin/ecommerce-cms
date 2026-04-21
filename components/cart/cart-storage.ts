@@ -12,20 +12,45 @@ async function parseJsonSafe(response: Response) {
   }
 }
 
-export async function fetchCart() {
-  const response = await fetch("/api/cart/get", {
-    method: "GET",
+async function requestCart<TPayload = unknown>(
+  url: string,
+  options?: {
+    method?: "GET" | "POST";
+    payload?: TPayload;
+    signal?: AbortSignal;
+  }
+) {
+  const response = await fetch(url, {
+    method: options?.method || "GET",
     credentials: "include",
     cache: "no-store",
+    signal: options?.signal,
+    headers:
+      options?.method === "POST"
+        ? {
+            "Content-Type": "application/json",
+          }
+        : undefined,
+    body:
+      options?.method === "POST" && options?.payload !== undefined
+        ? JSON.stringify(options.payload)
+        : undefined,
   });
 
   const data = (await parseJsonSafe(response)) as CartApiResponse | null;
 
   if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || "Failed to fetch cart.");
+    throw new Error(data?.error || "Cart request failed.");
   }
 
   return data.cart;
+}
+
+export async function fetchCart(signal?: AbortSignal) {
+  return requestCart("/api/cart/get", {
+    method: "GET",
+    signal,
+  });
 }
 
 export async function addToCart(payload: {
@@ -39,76 +64,31 @@ export async function addToCart(payload: {
   compare_at_price?: number | string;
   quantity?: number;
 }) {
-  const response = await fetch("/api/cart/add", {
+  return requestCart("/api/cart/add", {
     method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
+    payload,
   });
-
-  const data = (await parseJsonSafe(response)) as CartApiResponse | null;
-
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || "Failed to add to cart.");
-  }
-
-  return data.cart;
 }
 
 export async function updateCartItem(payload: {
   item_id: string;
   quantity: number;
 }) {
-  const response = await fetch("/api/cart/update", {
+  return requestCart("/api/cart/update", {
     method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
+    payload,
   });
-
-  const data = (await parseJsonSafe(response)) as CartApiResponse | null;
-
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || "Failed to update cart item.");
-  }
-
-  return data.cart;
 }
 
 export async function removeCartItemRequest(payload: { item_id: string }) {
-  const response = await fetch("/api/cart/remove", {
+  return requestCart("/api/cart/remove", {
     method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
+    payload,
   });
-
-  const data = (await parseJsonSafe(response)) as CartApiResponse | null;
-
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || "Failed to remove cart item.");
-  }
-
-  return data.cart;
 }
 
 export async function clearCart() {
-  const response = await fetch("/api/cart/clear", {
+  return requestCart("/api/cart/clear", {
     method: "POST",
-    credentials: "include",
   });
-
-  const data = (await parseJsonSafe(response)) as CartApiResponse | null;
-
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || "Failed to clear cart.");
-  }
-
-  return data.cart;
 }

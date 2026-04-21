@@ -1,7 +1,7 @@
 "use client";
 
+import { memo, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
 import { useCart } from "../cart/CartContext";
 import { formatMoney } from "../../lib/money";
 
@@ -147,7 +147,35 @@ function filterOutDefaultVariantsWhenRealOnesExist(variants: VariantItem[]) {
   );
 }
 
-export default function ProductPurchasePanel({
+function getInitialVariant(variants: VariantItem[]) {
+  return variants[0] || null;
+}
+
+function findMatchingVariant(
+  variants: VariantItem[],
+  option1Values: string[],
+  option2Values: string[],
+  option3Values: string[],
+  selectedOption1: string,
+  selectedOption2: string,
+  selectedOption3: string
+) {
+  return (
+    variants.find((variant) => {
+      const v1 = normalize(variant.option1_value);
+      const v2 = normalize(variant.option2_value);
+      const v3 = normalize(variant.option3_value);
+
+      const option1Matches = !option1Values.length || v1 === selectedOption1;
+      const option2Matches = !option2Values.length || v2 === selectedOption2;
+      const option3Matches = !option3Values.length || v3 === selectedOption3;
+
+      return option1Matches && option2Matches && option3Matches;
+    }) || getInitialVariant(variants)
+  );
+}
+
+function ProductPurchasePanelComponent({
   product,
   variants = [],
   onVariantChange,
@@ -186,10 +214,9 @@ export default function ProductPurchasePanel({
   );
 
   useEffect(() => {
-    setSelectedOption1(option1.values[0] || "");
-    setSelectedOption2("");
-    setSelectedOption3("");
-    setQuantity(1);
+    setSelectedOption1((prev) =>
+      option1.values.includes(prev) ? prev : option1.values[0] || ""
+    );
   }, [option1.values]);
 
   const availableOption2Values = useMemo(() => {
@@ -207,18 +234,18 @@ export default function ProductPurchasePanel({
           .filter((value) => isMeaningfulValue(value))
       )
     );
-  }, [activeVariants, option1.values.length, option2.values.length, selectedOption1]);
+  }, [activeVariants, option1.values, option2.values.length, selectedOption1]);
 
   const availableOption3Values = useMemo(() => {
     if (!option3.values.length) return [];
 
     const scoped = activeVariants.filter((variant) => {
       const option1Matches =
-        !option1.values.length || normalize(variant.option1_value) === selectedOption1;
+        !option1.values.length ||
+        normalize(variant.option1_value) === selectedOption1;
 
       const option2Matches =
         !option2.values.length ||
-        !availableOption2Values.length ||
         normalize(variant.option2_value) === selectedOption2;
 
       return option1Matches && option2Matches;
@@ -233,12 +260,11 @@ export default function ProductPurchasePanel({
     );
   }, [
     activeVariants,
-    option1.values.length,
-    option2.values.length,
+    option1.values,
+    option2.values,
     option3.values.length,
     selectedOption1,
     selectedOption2,
-    availableOption2Values.length,
   ]);
 
   useEffect(() => {
@@ -266,24 +292,20 @@ export default function ProductPurchasePanel({
   const selectedVariant = useMemo(() => {
     if (!activeVariants.length) return null;
 
-    const found = activeVariants.find((variant) => {
-      const v1 = normalize(variant.option1_value);
-      const v2 = normalize(variant.option2_value);
-      const v3 = normalize(variant.option3_value);
-
-      const option1Matches = !option1.values.length || v1 === selectedOption1;
-      const option2Matches = !option2.values.length || v2 === selectedOption2;
-      const option3Matches = !option3.values.length || v3 === selectedOption3;
-
-      return option1Matches && option2Matches && option3Matches;
-    });
-
-    return found || activeVariants[0] || null;
+    return findMatchingVariant(
+      activeVariants,
+      option1.values,
+      option2.values,
+      option3.values,
+      selectedOption1,
+      selectedOption2,
+      selectedOption3
+    );
   }, [
     activeVariants,
-    option1.values.length,
-    option2.values.length,
-    option3.values.length,
+    option1.values,
+    option2.values,
+    option3.values,
     selectedOption1,
     selectedOption2,
     selectedOption3,
@@ -687,3 +709,5 @@ const secondaryLinkStyle: React.CSSProperties = {
   textDecoration: "none",
   padding: "0 20px",
 };
+
+export default memo(ProductPurchasePanelComponent);

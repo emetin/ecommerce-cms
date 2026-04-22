@@ -1,43 +1,138 @@
 import { NextResponse } from "next/server";
-import { getSheetData, getSheetHeaders } from "../../../../lib/sheets";
+import {
+  getSheetData,
+  getSheetHeaders,
+  updateSheetObjectBySlug,
+} from "../../../../lib/sheets";
 import { updateSheetRowById } from "../../../../lib/sheets-row-utils";
 
 type ProductImageRecord = Record<string, string>;
+type ProductRecord = Record<string, string>;
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
-function normalizeBooleanString(value: unknown, fallback = "false") {
-  return String(value || fallback).trim().toLowerCase() === "true"
-    ? "true"
-    : "false";
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
+function isTrue(value: unknown) {
+  return normalizeLower(value) === "true";
+}
+
+function normalizeBool(value: unknown, fallback = false) {
+  const normalized = normalizeLower(value);
+  if (!normalized) return fallback ? "true" : "false";
+  return normalized === "true" ? "true" : "false";
 }
 
 function extractFileNameFromUrl(url: string) {
-  const normalized = normalizeText(url);
-
-  if (!normalized) {
-    return "";
-  }
-
-  const cleanUrl = normalized.split("?")[0].split("#")[0];
+  const cleanUrl = normalizeText(url).split("?")[0].split("#")[0];
   const parts = cleanUrl.split("/");
   return parts[parts.length - 1] || "";
 }
 
+function toSafeOrder(value: unknown, fallback = 999999) {
+  const num = Number(normalizeText(value));
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function sortImages(items: ProductImageRecord[]) {
+  return [...items].sort((a, b) => {
+    const aMain = isTrue(a.is_main);
+    const bMain = isTrue(b.is_main);
+
+    if (aMain !== bMain) {
+      return aMain ? -1 : 1;
+    }
+
+    return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+  });
+}
+
+function buildRowValues(headers: string[], item: ProductImageRecord) {
+  return headers.map((header) => normalizeText(item[header]));
+}
+
+async function syncProductPrimaryImage(productSlug: string) {
+  const [products, productImages] = await Promise.all([
+    getSheetData("products", {
+      forceFresh: true,
+      ttlSeconds: 0,
+    }) as Promise<ProductRecord[]>,
+    getSheetData("product_images", {
+      forceFresh: true,
+      ttlSeconds: 0,
+    }) as Promise<ProductImageRecord[]>,
+  ]);
+
+  const product =
+    products.find((item) => normalizeLower(item.slug) === normalizeLower(productSlug)) ||
+    null;
+
+  if (!product) return;
+
+  const relatedImages = productImages.filter(
+    (item) => normalizeLower(item.product_slug) === normalizeLower(productSlug)
+  );
+
+  const primaryImage = sortImages(relatedImages)[0]?.image_url || "";
+
+  await updateSheetObjectBySlug("products", productSlug, {
+    image: normalizeText(primaryImage),
+    updated_at: new Date().toISOString(),
+  });
+}
+
+async function clearOtherMainFlags(productSlug: string, excludeId: string) {
+  const [items, headers] = await Promise.all([
+    getSheetData("product_images", {
+      forceFresh: true,
+      ttlSeconds: 0,
+    }) as Promise<ProductImageRecord[]>,
+    getSheetHeaders("product_images", {
+      forceFresh: true,
+      ttlSeconds: 0,
+    }),
+  ]);
+
+  const now = new Date().toISOString();
+
+  const relatedMainItems = items.filter(
+    (item) =>
+      normalizeLower(item.product_slug) === normalizeLower(productSlug) &&
+      normalizeText(item.id) !== excludeId &&
+      isTrue(item.is_main)
+  );
+
+  for (const item of relatedMainItems) {
+    const nextItem: ProductImageRecord = {
+      ...item,
+      is_main: "false",
+      updated_at: now,
+    };
+
+    await updateSheetRowById(
+      "product_images",
+      normalizeText(item.id),
+      buildRowValues(headers, nextItem)
+    );
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
 
-    const id = normalizeText(body?.id);
-    const productSlug = normalizeText(body?.product_slug).toLowerCase();
-    const imageUrl = normalizeText(body?.image_url);
-    const rawImageFileId = normalizeText(body?.image_file_id);
-    const imageUploadedAt = normalizeText(body?.image_uploaded_at);
-    const sortOrder = normalizeText(body?.sort_order);
-    const altText = normalizeText(body?.alt_text);
-    const isMain = normalizeBooleanString(body?.is_main, "false");
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { ok: false, error: "Invalid request body." },
+        { status: 400 }
+      );
+    }
+
+    const id = normalizeText(body.id);
 
     if (!id) {
       return NextResponse.json(
@@ -46,9 +141,19 @@ export async function POST(req: Request) {
       );
     }
 
-    const items = (await getSheetData("product_images")) as ProductImageRecord[];
+    const [items, headers] = await Promise.all([
+      getSheetData("product_images", {
+        forceFresh: true,
+        ttlSeconds: 0,
+      }) as Promise<ProductImageRecord[]>,
+      getSheetHeaders("product_images", {
+        forceFresh: true,
+        ttlSeconds: 0,
+      }),
+    ]);
+
     const current =
-      items.find((item) => String(item.id || "").trim() === id) || null;
+      items.find((item) => normalizeText(item.id) === id) || null;
 
     if (!current) {
       return NextResponse.json(
@@ -57,32 +162,40 @@ export async function POST(req: Request) {
       );
     }
 
-    const headers = await getSheetHeaders("product_images");
-    const updatedAt = new Date().toISOString();
+    const productSlug = normalizeLower(body.product_slug || current.product_slug);
+    const nextIsMain = normalizeBool(body.is_main, isTrue(current.is_main));
 
-    const nextImageUrl = imageUrl || current.image_url || "";
-    const nextImageFileId =
-      rawImageFileId ||
-      current.image_file_id ||
-      extractFileNameFromUrl(nextImageUrl);
-
-    const merged: Record<string, string> = {
+    const merged: ProductImageRecord = {
       ...current,
       id,
-      product_slug: productSlug || current.product_slug || "",
-      image_url: nextImageUrl,
-      image_file_id: nextImageFileId,
-      image_uploaded_at: imageUploadedAt || current.image_uploaded_at || "",
-      sort_order: sortOrder || current.sort_order || "",
-      alt_text: altText || current.alt_text || "",
-      is_main: isMain,
-      created_at: current.created_at || "",
-      updated_at: updatedAt,
+      product_slug: productSlug,
+      image_url: normalizeText(body.image_url || current.image_url),
+      image_file_id:
+        normalizeText(body.image_file_id) ||
+        normalizeText(current.image_file_id) ||
+        extractFileNameFromUrl(
+          normalizeText(body.image_url || current.image_url)
+        ),
+      image_uploaded_at: normalizeText(
+        body.image_uploaded_at || current.image_uploaded_at
+      ),
+      sort_order: normalizeText(body.sort_order || current.sort_order),
+      alt_text: normalizeText(body.alt_text || current.alt_text),
+      is_main: nextIsMain,
+      updated_at: new Date().toISOString(),
     };
 
-    const rowValues = headers.map((header) => merged[header] || "");
+    if (merged.is_main === "true") {
+      await clearOtherMainFlags(productSlug, id);
+    }
 
-    await updateSheetRowById("product_images", id, rowValues);
+    await updateSheetRowById(
+      "product_images",
+      id,
+      buildRowValues(headers, merged)
+    );
+
+    await syncProductPrimaryImage(productSlug);
 
     return NextResponse.json({
       ok: true,

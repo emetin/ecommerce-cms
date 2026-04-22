@@ -35,12 +35,16 @@ type ProductItem = {
   tags?: string;
 };
 
+function normalizeText(value?: string) {
+  return String(value || "").trim();
+}
+
 function isTrue(value?: string) {
-  return String(value || "").trim().toLowerCase() === "true";
+  return normalizeText(value).toLowerCase() === "true";
 }
 
 function toSafeOrder(value?: string) {
-  const num = Number(String(value || "").trim());
+  const num = Number(normalizeText(value));
   return Number.isFinite(num) ? num : 999999;
 }
 
@@ -55,22 +59,6 @@ function sortImages(items: ProductImageItem[]) {
 
     return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
   });
-}
-
-function normalizeStatus(value?: string) {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (
-    normalized === "published" ||
-    normalized === "draft" ||
-    normalized === "archived"
-  ) {
-    return normalized;
-  }
-  return "draft";
-}
-
-function normalizeFeatured(value?: string) {
-  return String(value || "").trim().toLowerCase() === "true" ? "true" : "false";
 }
 
 export default function AdminProductImagesPage({
@@ -98,6 +86,7 @@ export default function AdminProductImagesPage({
   const [replacingId, setReplacingId] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [savingId, setSavingId] = useState("");
+  const [settingMainId, setSettingMainId] = useState("");
   const [fixingAltTexts, setFixingAltTexts] = useState(false);
 
   const createInputRef = useRef<HTMLInputElement | null>(null);
@@ -148,57 +137,13 @@ export default function AdminProductImagesPage({
     loadPage();
   }, [loadPage]);
 
-  async function syncProductMainImage(nextItems: ProductImageItem[]) {
-    const mainItem =
-      nextItems.find((item) => isTrue(item.is_main)) ||
-      sortImages(nextItems)[0] ||
-      null;
-
-    const response = await fetch("/api/products/update", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        slug,
-        title: product?.title || "",
-        description: product?.description || "",
-        short_description: product?.short_description || "",
-        image: mainItem?.image_url || "",
-        gallery: product?.gallery || "",
-        collection_slug: product?.collection_slug || "",
-        status: normalizeStatus(product?.status),
-        featured: normalizeFeatured(product?.featured),
-        seo_title: product?.seo_title || "",
-        seo_description: product?.seo_description || "",
-        vendor: product?.vendor || "",
-        product_category: product?.product_category || "",
-        type: product?.type || "",
-        tags: product?.tags || "",
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(data?.error || "Failed to sync product main image.");
-    }
-
-    setProduct((prev) => ({
-      ...(prev || {}),
-      image: mainItem?.image_url || "",
-      status: normalizeStatus(prev?.status),
-      featured: normalizeFeatured(prev?.featured),
-    }));
-  }
-
-  async function uploadSingleImage(file: File, index: number, totalFiles: number) {
+  async function uploadToStorage(file: File, altText = "") {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("entityType", "product");
 
-    if (newAltText.trim()) {
-      formData.append("alt", newAltText.trim());
+    if (altText.trim()) {
+      formData.append("alt", altText.trim());
     }
 
     const uploadResponse = await fetch("/api/upload", {
@@ -212,38 +157,7 @@ export default function AdminProductImagesPage({
       throw new Error(uploadData?.error || "Failed to upload image.");
     }
 
-    const baseSort = Number(newSortOrder || "0");
-    const computedSortOrder =
-      Number.isFinite(baseSort) && baseSort > 0
-        ? String(baseSort + index)
-        : String(items.length + index + 1);
-
-    const computedIsMain =
-      newIsMain === "true" && index === 0 ? "true" : "false";
-
-    const createResponse = await fetch("/api/product-images/create", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        product_slug: slug,
-        image_url: uploadData.url,
-        image_file_id: uploadData.file_id || uploadData.file_name || "",
-        image_uploaded_at: uploadData.uploaded_at || new Date().toISOString(),
-        sort_order: computedSortOrder,
-        alt_text: newAltText.trim(),
-        is_main: computedIsMain,
-      }),
-    });
-
-    const createData = await createResponse.json();
-
-    if (!createResponse.ok || !createData.ok) {
-      throw new Error(createData?.error || "Failed to save gallery image.");
-    }
-
-    return createData.item as ProductImageItem;
+    return uploadData;
   }
 
   async function handleCreateImage(
@@ -258,25 +172,43 @@ export default function AdminProductImagesPage({
     setUploading(true);
 
     try {
-      const createdItems: ProductImageItem[] = [];
+      const uploadedItems = [];
 
       for (let i = 0; i < files.length; i += 1) {
-        const created = await uploadSingleImage(files[i], i, files.length);
-        createdItems.push(created);
+        const uploadData = await uploadToStorage(files[i], newAltText.trim());
+
+        const baseSort = Number(newSortOrder || "0");
+        const computedSortOrder =
+          Number.isFinite(baseSort) && baseSort > 0
+            ? String(baseSort + i)
+            : String(items.length + i + 1);
+
+        uploadedItems.push({
+          product_slug: slug,
+          image_url: uploadData.url,
+          image_file_id: uploadData.file_id || uploadData.file_name || "",
+          image_uploaded_at: uploadData.uploaded_at || new Date().toISOString(),
+          sort_order: computedSortOrder,
+          alt_text: newAltText.trim(),
+          is_main: newIsMain === "true" && i === 0 ? "true" : "false",
+        });
       }
 
-      const nextItems = [...items, ...createdItems];
-      setItems(nextItems);
+      const response = await fetch("/api/product-images/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          product_slug: slug,
+          items: uploadedItems,
+        }),
+      });
 
-      if (newIsMain === "true") {
-        const firstCreatedMainId = createdItems[0]?.id;
-        if (firstCreatedMainId) {
-          await handleSetMain(firstCreatedMainId, nextItems);
-        } else {
-          await syncProductMainImage(nextItems);
-        }
-      } else {
-        await syncProductMainImage(nextItems);
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || "Failed to save gallery images.");
       }
 
       setNewAltText("");
@@ -288,9 +220,11 @@ export default function AdminProductImagesPage({
           ? "Gallery image added successfully."
           : `${files.length} gallery images added successfully.`
       );
+
+      await loadPage();
     } catch (error) {
       setUploadError(
-        error instanceof Error ? error.message : "Failed to add gallery image."
+        error instanceof Error ? error.message : "Failed to add gallery images."
       );
     } finally {
       setUploading(false);
@@ -322,8 +256,8 @@ export default function AdminProductImagesPage({
       formData.append("file", file);
       formData.append("entityType", "product");
 
-      if (String(current.alt_text || "").trim()) {
-        formData.append("alt", String(current.alt_text || "").trim());
+      if (normalizeText(current.alt_text)) {
+        formData.append("alt", normalizeText(current.alt_text));
       }
 
       formData.append("deleteOldFile", "true");
@@ -361,16 +295,11 @@ export default function AdminProductImagesPage({
       const updateData = await updateResponse.json();
 
       if (!updateResponse.ok || !updateData.ok) {
-        throw new Error(updateData?.error || "Failed to update gallery image row.");
+        throw new Error(updateData?.error || "Failed to update gallery image.");
       }
 
-      const nextItems = items.map((item) =>
-        item.id === replacingId ? updateData.item : item
-      );
-
-      setItems(nextItems);
-      await syncProductMainImage(nextItems);
       setResultMessage("Gallery image replaced successfully.");
+      await loadPage();
     } catch (error) {
       setUploadError(
         error instanceof Error ? error.message : "Failed to replace gallery image."
@@ -413,10 +342,8 @@ export default function AdminProductImagesPage({
         throw new Error(data?.error || "Failed to delete gallery image.");
       }
 
-      const nextItems = items.filter((image) => image.id !== item.id);
-      setItems(nextItems);
-      await syncProductMainImage(nextItems);
       setResultMessage("Gallery image deleted successfully.");
+      await loadPage();
     } catch (error) {
       setResultError(
         error instanceof Error ? error.message : "Failed to delete gallery image."
@@ -455,13 +382,8 @@ export default function AdminProductImagesPage({
         throw new Error(data?.error || "Failed to save gallery image.");
       }
 
-      const nextItems = items.map((image) =>
-        image.id === item.id ? data.item : image
-      );
-
-      setItems(nextItems);
-      await syncProductMainImage(nextItems);
       setResultMessage("Gallery image updated successfully.");
+      await loadPage();
     } catch (error) {
       setResultError(
         error instanceof Error ? error.message : "Failed to update gallery image."
@@ -471,62 +393,51 @@ export default function AdminProductImagesPage({
     }
   }
 
-  async function handleSetMain(
-    targetId?: string,
-    sourceItems?: ProductImageItem[]
-  ) {
+  async function handleSetMain(targetId?: string) {
     if (!targetId) return;
 
     try {
+      setSettingMainId(targetId);
       setResultMessage("");
       setResultError("");
 
-      const baseItems = sourceItems || items;
-      const updatedItems = [...baseItems];
+      const current = items.find((item) => item.id === targetId);
 
-      for (const item of updatedItems) {
-        const nextIsMain = item.id === targetId ? "true" : "false";
-
-        if (String(item.is_main || "false") === nextIsMain) {
-          continue;
-        }
-
-        const response = await fetch("/api/product-images/update", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            id: item.id,
-            product_slug: item.product_slug,
-            image_url: item.image_url,
-            image_file_id: item.image_file_id,
-            image_uploaded_at: item.image_uploaded_at,
-            sort_order: item.sort_order,
-            alt_text: item.alt_text,
-            is_main: nextIsMain,
-          }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.ok) {
-          throw new Error(data?.error || "Failed to set main image.");
-        }
-
-        const index = updatedItems.findIndex((x) => x.id === item.id);
-        if (index !== -1) {
-          updatedItems[index] = data.item;
-        }
+      if (!current) {
+        throw new Error("Target image not found.");
       }
 
-      setItems(updatedItems);
-      await syncProductMainImage(updatedItems);
+      const response = await fetch("/api/product-images/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: current.id,
+          product_slug: current.product_slug,
+          image_url: current.image_url,
+          image_file_id: current.image_file_id,
+          image_uploaded_at: current.image_uploaded_at,
+          sort_order: current.sort_order,
+          alt_text: current.alt_text,
+          is_main: "true",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error || "Failed to set main image.");
+      }
+
       setResultMessage("Main image updated successfully.");
+      await loadPage();
     } catch (error) {
       setResultError(
         error instanceof Error ? error.message : "Failed to set main image."
       );
+    } finally {
+      setSettingMainId("");
     }
   }
 
@@ -781,8 +692,9 @@ export default function AdminProductImagesPage({
                     type="button"
                     style={secondaryButtonStyle}
                     onClick={() => handleSetMain(item.id)}
+                    disabled={settingMainId === item.id}
                   >
-                    Set Main
+                    {settingMainId === item.id ? "Setting..." : "Set Main"}
                   </button>
 
                   <button

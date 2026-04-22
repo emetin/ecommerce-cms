@@ -1,46 +1,53 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import { getSheetData } from "../../../../lib/sheets";
+import { getSheetData, updateSheetObjectBySlug } from "../../../../lib/sheets";
 import { deleteSheetRowById } from "../../../../lib/sheets-row-utils";
 
-type ProductImageRecord = {
-  id?: string;
-  image_file_id?: string;
-  image_url?: string;
-};
+type ProductImageRecord = Record<string, string>;
+type ProductRecord = Record<string, string>;
 
 function normalizeText(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function normalizeBool(value: unknown) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase() === "true";
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
 }
 
-function getUploadsBaseDir() {
-  return path.resolve(process.cwd(), "public", "uploads");
+function isTrue(value: unknown) {
+  return normalizeLower(value) === "true";
 }
 
-function tryDeleteFile(filePath: string) {
+function toSafeOrder(value: unknown, fallback = 999999) {
+  const num = Number(normalizeText(value));
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function sortImages(items: ProductImageRecord[]) {
+  return [...items].sort((a, b) => {
+    const aMain = isTrue(a.is_main);
+    const bMain = isTrue(b.is_main);
+
+    if (aMain !== bMain) {
+      return aMain ? -1 : 1;
+    }
+
+    return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+  });
+}
+
+function tryDeleteLocalFile(filePath: string) {
   try {
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
       return true;
     }
-  } catch (error) {
-    console.error("Local file delete failed:", error);
+  } catch {
+    return false;
   }
 
   return false;
-}
-
-function isSafeUploadPath(fullPath: string) {
-  const uploadsBaseDir = getUploadsBaseDir();
-  const resolved = path.resolve(fullPath);
-  return resolved.startsWith(uploadsBaseDir);
 }
 
 function resolveLocalFilePath(params: {
@@ -49,24 +56,17 @@ function resolveLocalFilePath(params: {
 }) {
   const imageUrl = normalizeText(params.imageUrl);
   const imageFileId = path.basename(normalizeText(params.imageFileId));
-  const uploadsBaseDir = getUploadsBaseDir();
+  const uploadsBaseDir = path.resolve(process.cwd(), "public", "uploads");
 
   if (imageUrl.startsWith("/uploads/")) {
-    const relativePath = imageUrl.replace(/^\/+/, "");
-    const fullPath = path.resolve(process.cwd(), "public", relativePath);
-
-    if (isSafeUploadPath(fullPath)) {
-      return fullPath;
-    }
+    return path.resolve(process.cwd(), "public", imageUrl.replace(/^\/+/, ""));
   }
 
   if (imageFileId) {
-    const possibleDirs = ["product", "collection", "blog"];
-
+    const possibleDirs = ["product", "products", "collection", "blog"];
     for (const dir of possibleDirs) {
       const fullPath = path.resolve(uploadsBaseDir, dir, imageFileId);
-
-      if (isSafeUploadPath(fullPath) && fs.existsSync(fullPath)) {
+      if (fs.existsSync(fullPath)) {
         return fullPath;
       }
     }
@@ -75,13 +75,48 @@ function resolveLocalFilePath(params: {
   return null;
 }
 
+async function syncProductPrimaryImage(productSlug: string) {
+  const [products, productImages] = await Promise.all([
+    getSheetData("products", {
+      forceFresh: true,
+      ttlSeconds: 0,
+    }) as Promise<ProductRecord[]>,
+    getSheetData("product_images", {
+      forceFresh: true,
+      ttlSeconds: 0,
+    }) as Promise<ProductImageRecord[]>,
+  ]);
+
+  const product =
+    products.find((item) => normalizeLower(item.slug) === normalizeLower(productSlug)) ||
+    null;
+
+  if (!product) return;
+
+  const relatedImages = productImages.filter(
+    (item) => normalizeLower(item.product_slug) === normalizeLower(productSlug)
+  );
+
+  const primaryImage = sortImages(relatedImages)[0]?.image_url || "";
+
+  await updateSheetObjectBySlug("products", productSlug, {
+    image: normalizeText(primaryImage),
+    updated_at: new Date().toISOString(),
+  });
+}
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
 
-    const id = normalizeText(body?.id);
-    const deleteLocalFile = normalizeBool(body?.delete_local_file);
-    const deleteDriveFile = normalizeBool(body?.delete_drive_file);
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { ok: false, error: "Invalid request body." },
+        { status: 400 }
+      );
+    }
+
+    const id = normalizeText(body.id);
 
     if (!id) {
       return NextResponse.json(
@@ -90,9 +125,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const items = (await getSheetData("product_images")) as ProductImageRecord[];
+    const items = (await getSheetData("product_images", {
+      forceFresh: true,
+      ttlSeconds: 0,
+    })) as ProductImageRecord[];
+
     const current =
-      items.find((item) => String(item.id || "").trim() === id) || null;
+      items.find((item) => normalizeText(item.id) === id) || null;
 
     if (!current) {
       return NextResponse.json(
@@ -101,35 +140,23 @@ export async function POST(req: Request) {
       );
     }
 
-    let deletedLocalFile = false;
-    let deletedLocalFilePath = "";
-    let driveDeleteSkipped = false;
-
-    if (deleteLocalFile) {
-      const localFilePath = resolveLocalFilePath({
-        imageUrl: current.image_url,
-        imageFileId: current.image_file_id,
-      });
-
-      if (localFilePath) {
-        deletedLocalFile = tryDeleteFile(localFilePath);
-        deletedLocalFilePath = localFilePath;
-      }
-    }
-
-    if (deleteDriveFile) {
-      driveDeleteSkipped = true;
-    }
+    const localFilePath = resolveLocalFilePath({
+      imageUrl: current.image_url,
+      imageFileId: current.image_file_id,
+    });
 
     await deleteSheetRowById("product_images", id);
+
+    if (body.delete_local_file && localFilePath) {
+      tryDeleteLocalFile(localFilePath);
+    }
+
+    await syncProductPrimaryImage(normalizeText(current.product_slug));
 
     return NextResponse.json({
       ok: true,
       message: "Product image deleted successfully.",
       id,
-      deleted_local_file: deletedLocalFile,
-      deleted_local_file_path: deletedLocalFilePath,
-      drive_delete_skipped: driveDeleteSkipped,
     });
   } catch (error) {
     return NextResponse.json(

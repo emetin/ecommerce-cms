@@ -25,7 +25,6 @@ if (!PRIVATE_KEY) {
 }
 
 export type SheetObject = Record<string, string>;
-
 type SpreadsheetMode = "catalog" | "forms";
 
 type SheetMeta = {
@@ -45,6 +44,11 @@ const SHEET_TITLE_ALIASES: Record<string, string[]> = {
   product_images: ["product_images", "Product_Images", "Product Images"],
   customers: ["customers", "Customers"],
   collection_products: ["collection_products", "Collection_Products", "Collection Products"],
+  customer_applications: ["customer_applications", "Customer_Applications", "Customer Applications"],
+  orders: ["orders", "Orders"],
+  order_items: ["order_items", "Order_Items", "Order Items"],
+  carts: ["carts", "Carts"],
+  cart_items: ["cart_items", "Cart_Items", "Cart Items"],
 };
 
 const SHEET_RANGE_MAP: Record<string, string> = {
@@ -55,9 +59,29 @@ const SHEET_RANGE_MAP: Record<string, string> = {
   blog: "A:L",
   Blog: "A:L",
   product_variants: "A:Z",
-  product_images: "A:K",
+  Product_Variants: "A:Z",
+  "Product Variants": "A:Z",
+  product_images: "A:J",
+  Product_Images: "A:J",
+  "Product Images": "A:J",
   customers: "A:ZZ",
+  Customers: "A:ZZ",
   collection_products: "A:ZZ",
+  Collection_Products: "A:ZZ",
+  "Collection Products": "A:ZZ",
+  customer_applications: "A:ZZ",
+  Customer_Applications: "A:ZZ",
+  "Customer Applications": "A:ZZ",
+  orders: "A:ZZ",
+  Orders: "A:ZZ",
+  order_items: "A:ZZ",
+  Order_Items: "A:ZZ",
+  "Order Items": "A:ZZ",
+  carts: "A:ZZ",
+  Carts: "A:ZZ",
+  cart_items: "A:ZZ",
+  Cart_Items: "A:ZZ",
+  "Cart Items": "A:ZZ",
 };
 
 function getAuth() {
@@ -126,7 +150,11 @@ function getCandidateSheetTitles(sheetName: string) {
 }
 
 function getSheetRange(sheetName: string) {
-  return SHEET_RANGE_MAP[sheetName] || SHEET_RANGE_MAP[normalizeCellValueLower(sheetName)] || DEFAULT_SHEET_RANGE;
+  return (
+    SHEET_RANGE_MAP[sheetName] ||
+    SHEET_RANGE_MAP[normalizeCellValueLower(sheetName)] ||
+    DEFAULT_SHEET_RANGE
+  );
 }
 
 function sleep(ms: number) {
@@ -201,7 +229,7 @@ function clearSheetLocalCache(
   deleteCacheByPrefix(`sheet:objects:${mode}:${normalizeCellValueLower(sheetName)}:`);
 
   if (mode === "catalog") {
-    deleteCacheByPrefix(`sheet:meta:catalog:all:`);
+    deleteCacheByPrefix("sheet:meta:catalog:all:");
   }
 }
 
@@ -332,7 +360,11 @@ export async function getSheetRows(
     return fetchSheetRowsUncached(sheetName, mode);
   }
 
-  const cacheKey = getRowsCacheKey(normalizeCellValueLower(sheetName), ttlSeconds, mode);
+  const cacheKey = getRowsCacheKey(
+    normalizeCellValueLower(sheetName),
+    ttlSeconds,
+    mode
+  );
 
   return getOrSetCache<string[][]>(
     cacheKey,
@@ -361,7 +393,11 @@ export async function getSheetData(
     return rowsToObjects(rows);
   }
 
-  const cacheKey = getObjectsCacheKey(normalizeCellValueLower(sheetName), ttlSeconds, mode);
+  const cacheKey = getObjectsCacheKey(
+    normalizeCellValueLower(sheetName),
+    ttlSeconds,
+    mode
+  );
 
   return getOrSetCache<SheetObject[]>(
     cacheKey,
@@ -395,7 +431,11 @@ export async function getSheetHeaders(
     return rowsToHeaders(rows);
   }
 
-  const cacheKey = getHeadersCacheKey(normalizeCellValueLower(sheetName), ttlSeconds, mode);
+  const cacheKey = getHeadersCacheKey(
+    normalizeCellValueLower(sheetName),
+    ttlSeconds,
+    mode
+  );
 
   return getOrSetCache<string[]>(
     cacheKey,
@@ -469,7 +509,7 @@ export async function appendSheetRow(sheetName: string, row: string[]) {
   await withRetry(async () => {
     await sheets.spreadsheets.values.append({
       spreadsheetId: getSpreadsheetId("catalog"),
-      range: `${actualSheetTitle}!A:Z`,
+      range: `${actualSheetTitle}!A:ZZ`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
         values: [row],
@@ -493,7 +533,7 @@ export async function appendSheetRows(sheetName: string, rows: string[][]) {
   await withRetry(async () => {
     await sheets.spreadsheets.values.append({
       spreadsheetId: getSpreadsheetId("catalog"),
-      range: `${actualSheetTitle}!A:Z`,
+      range: `${actualSheetTitle}!A:ZZ`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
         values: rows,
@@ -646,7 +686,10 @@ export async function deleteSheetRowBySlug(sheetName: string, slug: string) {
   }
 
   const sheets = getSheetsClient("catalog");
-  const meta = await getSheetMetaByTitle(sheetName, { forceFresh: true, ttlSeconds: 0 });
+  const meta = await getSheetMetaByTitle(sheetName, {
+    forceFresh: true,
+    ttlSeconds: 0,
+  });
 
   await withRetry(async () => {
     await sheets.spreadsheets.batchUpdate({
@@ -786,4 +829,55 @@ export async function replaceSheetRows(sheetName: string, rows: string[][]) {
   invalidateSheet(sheetName, "catalog");
 
   return { ok: true };
+}
+
+/**
+ * Compatibility exports for older project files
+ */
+
+export async function findSheetItemsByField(
+  sheetName: string,
+  fieldName: string,
+  fieldValue: string,
+  options?: {
+    forceFresh?: boolean;
+    ttlSeconds?: number;
+    mode?: SpreadsheetMode;
+  }
+) {
+  const items = (await getSheetData(sheetName, {
+    forceFresh: options?.forceFresh ?? true,
+    ttlSeconds: options?.ttlSeconds ?? 0,
+    mode: options?.mode ?? "catalog",
+  })) as Record<string, string>[];
+
+  const normalizedTarget = String(fieldValue ?? "").trim().toLowerCase();
+
+  return items.filter((item) => {
+    const currentValue = String(item?.[fieldName] ?? "")
+      .trim()
+      .toLowerCase();
+
+    return currentValue === normalizedTarget;
+  });
+}
+
+export async function findSheetItemByField(
+  sheetName: string,
+  fieldName: string,
+  fieldValue: string,
+  options?: {
+    forceFresh?: boolean;
+    ttlSeconds?: number;
+    mode?: SpreadsheetMode;
+  }
+) {
+  const items = await findSheetItemsByField(
+    sheetName,
+    fieldName,
+    fieldValue,
+    options
+  );
+
+  return items[0] || null;
 }

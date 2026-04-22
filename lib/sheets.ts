@@ -1,9 +1,6 @@
 import { google } from "googleapis";
 import { revalidateTag, unstable_cache } from "next/cache";
-import {
-  deleteCacheByPrefix,
-  getOrSetCache,
-} from "./cache";
+import { deleteCacheByPrefix, getOrSetCache } from "./cache";
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const FORMS_SHEET_ID = process.env.GOOGLE_FORMS_SHEET_ID;
@@ -40,10 +37,6 @@ let jwtAuthInstance: InstanceType<typeof google.auth.JWT> | null = null;
 let sheetsCatalogClientInstance: ReturnType<typeof google.sheets> | null = null;
 let sheetsFormsClientInstance: ReturnType<typeof google.sheets> | null = null;
 
-/**
- * Buradaki mapping ile tüm sheet'leri A:ZZ yerine daha dar range ile okuyabiliriz.
- * İstersen kendi header sayına göre daha da daraltabilirsin.
- */
 const SHEET_RANGE_MAP: Record<string, string> = {
   Products: "A:R",
   Collections: "A:J",
@@ -600,6 +593,61 @@ export async function updateSheetRowBySlug(
   return updateSheetRowByRowNumber(sheetName, rowNumber, rowValues);
 }
 
+export async function updateSheetObjectBySlug(
+  sheetName: string,
+  slug: string,
+  updates: Record<string, string>
+) {
+  const rows = await getSheetRows(sheetName, {
+    forceFresh: true,
+    ttlSeconds: 0,
+    mode: "catalog",
+  });
+
+  if (!rows.length) {
+    throw new Error(`Sheet "${sheetName}" is empty.`);
+  }
+
+  const headers = rowsToHeaders(rows);
+  const slugIndex = headers.findIndex((header) => header === "slug");
+
+  if (slugIndex === -1) {
+    throw new Error(`Field "slug" was not found in "${sheetName}".`);
+  }
+
+  const normalizedSlug = String(slug).trim().toLowerCase();
+
+  let matchedRowIndex = -1;
+
+  for (let i = 1; i < rows.length; i += 1) {
+    const rowSlug = String(rows[i]?.[slugIndex] || "")
+      .trim()
+      .toLowerCase();
+
+    if (rowSlug === normalizedSlug) {
+      matchedRowIndex = i;
+      break;
+    }
+  }
+
+  if (matchedRowIndex === -1) {
+    throw new Error(`No record was found in "${sheetName}" for this slug.`);
+  }
+
+  const existingRow = rows[matchedRowIndex] || [];
+  const nextRowValues = [...existingRow];
+
+  headers.forEach((header, index) => {
+    if (header in updates) {
+      nextRowValues[index] = String(updates[header] ?? "").trim();
+    }
+  });
+
+  const rowNumber = matchedRowIndex + 1;
+
+  return updateSheetRowByRowNumber(sheetName, rowNumber, nextRowValues);
+}
+
 export async function getSheetMetaByTitle(
   sheetName: string,
   options?: { forceFresh?: boolean; ttlSeconds?: number }
@@ -753,10 +801,7 @@ export async function deleteSheetRowByField(
   };
 }
 
-export async function replaceSheetRows(
-  sheetName: string,
-  rows: string[][]
-) {
+export async function replaceSheetRows(sheetName: string, rows: string[][]) {
   const sheets = getSheetsClient("catalog");
 
   await withRetry(async () => {

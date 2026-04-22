@@ -7,109 +7,74 @@ import {
   isAuthenticatedCustomer,
 } from "./lib/customer-auth";
 
-function isProtectedAdminApiRoute(pathname: string) {
-  return (
-    pathname.startsWith("/api/admin/") ||
-    pathname.startsWith("/api/products") ||
-    pathname.startsWith("/api/blog") ||
-    pathname.startsWith("/api/collections") ||
-    pathname.startsWith("/api/product-images") ||
-    pathname.startsWith("/api/variants") ||
-    pathname.startsWith("/api/upload") ||
-    pathname.startsWith("/api/collection-products")
-  );
-}
-
-function isAllowedAdminAuthRoute(pathname: string) {
-  return (
-    pathname === "/api/admin-auth/login" ||
-    pathname === "/api/admin-auth/logout" ||
-    pathname === "/api/admin-auth/csrf"
-  );
-}
-
-/**
- * Public customer/order routes:
- * - /api/orders/create            -> guest order request from cart
- * - /api/orders/[orderNumber]     -> public order lookup
- *
- * Protected customer routes:
- * - /account/*
- * - /api/orders/my
- * - future customer-only order actions
- */
-function isCustomerProtectedRoute(pathname: string) {
-  return (
-    pathname.startsWith("/account") ||
-    pathname === "/api/orders/my" ||
-    pathname.startsWith("/api/orders/my/")
-  );
-}
-
-function isCustomerAuthRoute(pathname: string) {
-  return pathname.startsWith("/api/customer-auth");
-}
-
-function isPublicOrderRoute(pathname: string) {
-  if (pathname === "/api/orders/create") return true;
-
-  const dynamicOrderLookup = /^\/api\/orders\/[^/]+$/.test(pathname);
-  return dynamicOrderLookup;
-}
+import {
+  isAdminPageRoute,
+  isAdminPortalRoute,
+  isAdminAuthRoute,
+  isAllowedAdminAuthRoute,
+  isProtectedAdminApiRoute,
+  isCustomerPortalLoginRoute,
+  isCustomerAuthRoute,
+  isAllowedCustomerAuthRoute,
+  isCustomerProtectedRoute,
+  isPublicOrderRoute,
+} from "./lib/route-access";
 
 export async function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
 
-  const isAdminRoute = pathname.startsWith("/admin");
-  const isPortalRoute = pathname === "/portal-ptx-admin";
-  const isAdminAuthRoute = pathname.startsWith("/api/admin-auth");
+  // ROUTE TYPE TESPİTİ
+  const isAdminRoute = isAdminPageRoute(pathname);
+  const isPortalRoute = isAdminPortalRoute(pathname);
+  const adminAuthRoute = isAdminAuthRoute(pathname);
   const protectedAdminApiRoute = isProtectedAdminApiRoute(pathname);
 
-  const isCustomerPortalLogin = pathname === "/portal-login";
-  const customerProtectedRoute = isCustomerProtectedRoute(pathname);
+  const isCustomerPortalLogin = isCustomerPortalLoginRoute(pathname);
   const customerAuthRoute = isCustomerAuthRoute(pathname);
+  const customerProtectedRoute = isCustomerProtectedRoute(pathname);
   const publicOrderRoute = isPublicOrderRoute(pathname);
 
   const shouldCheckAdmin =
-    isAdminRoute || isPortalRoute || isAdminAuthRoute || protectedAdminApiRoute;
+    isAdminRoute || isPortalRoute || adminAuthRoute || protectedAdminApiRoute;
 
   const shouldCheckCustomer =
-    isCustomerPortalLogin || customerProtectedRoute || customerAuthRoute;
+    isCustomerPortalLogin || customerAuthRoute || customerProtectedRoute;
 
+  // HİÇBİRİNE GİRMİYORSA DEVAM
   if (!shouldCheckAdmin && !shouldCheckCustomer && !publicOrderRoute) {
     return NextResponse.next();
   }
 
+  // PUBLIC ORDER ROUTES
   if (publicOrderRoute) {
     return NextResponse.next();
   }
 
-  if (isAdminAuthRoute && isAllowedAdminAuthRoute(pathname)) {
+  // ADMIN AUTH (LOGIN / LOGOUT vs)
+  if (adminAuthRoute && isAllowedAdminAuthRoute(pathname)) {
     return NextResponse.next();
   }
 
-  if (
-    customerAuthRoute &&
-    (pathname === "/api/customer-auth/login" ||
-      pathname === "/api/customer-auth/logout" ||
-      pathname === "/api/customer-auth/me")
-  ) {
+  // CUSTOMER AUTH (LOGIN / LOGOUT vs)
+  if (customerAuthRoute && isAllowedCustomerAuthRoute(pathname)) {
     return NextResponse.next();
   }
 
+  // ADMIN KONTROLÜ
   if (shouldCheckAdmin) {
     const adminAuthCookie = request.cookies.get(ADMIN_COOKIE_NAME)?.value;
     const isAdminLoggedIn = await isAuthenticatedAdmin(adminAuthCookie);
 
+    // ADMIN LOGIN SAYFASI
     if (isPortalRoute) {
       if (isAdminLoggedIn) {
         return NextResponse.redirect(new URL("/admin/products", request.url));
       }
-
       return NextResponse.next();
     }
 
-    if (!isPortalRoute && (isAdminRoute || protectedAdminApiRoute) && !isAdminLoggedIn) {
+    // ADMIN PROTECTED
+    if ((isAdminRoute || protectedAdminApiRoute) && !isAdminLoggedIn) {
       if (protectedAdminApiRoute) {
         return NextResponse.json(
           { ok: false, error: "Yetkisiz admin erişimi." },
@@ -117,22 +82,28 @@ export async function proxy(request: NextRequest) {
         );
       }
 
-      return NextResponse.redirect(new URL("/portal-ptx-admin", request.url));
+      const loginUrl = new URL("/portal-ptx-admin", request.url);
+      loginUrl.searchParams.set("redirect", `${pathname}${search}`);
+      return NextResponse.redirect(loginUrl);
     }
   }
 
+  // CUSTOMER KONTROLÜ
   if (shouldCheckCustomer) {
     const customerAuthCookie = request.cookies.get(CUSTOMER_COOKIE_NAME)?.value;
-    const isCustomerLoggedIn = await isAuthenticatedCustomer(customerAuthCookie);
+    const isCustomerLoggedIn = await isAuthenticatedCustomer(
+      customerAuthCookie
+    );
 
+    // CUSTOMER LOGIN PAGE
     if (isCustomerPortalLogin) {
       if (isCustomerLoggedIn) {
         return NextResponse.redirect(new URL("/account", request.url));
       }
-
       return NextResponse.next();
     }
 
+    // CUSTOMER PROTECTED ROUTES
     if (customerProtectedRoute && !isCustomerLoggedIn) {
       if (pathname.startsWith("/api/")) {
         return NextResponse.json(
@@ -141,26 +112,33 @@ export async function proxy(request: NextRequest) {
         );
       }
 
-      return NextResponse.redirect(new URL("/portal-login", request.url));
+      const loginUrl = new URL("/portal-login", request.url);
+      loginUrl.searchParams.set("redirect", `${pathname}${search}`);
+      return NextResponse.redirect(loginUrl);
     }
   }
 
   return NextResponse.next();
 }
 
+// ⚠️ BURASI ÇOK ÖNEMLİ → STATIC OLMAK ZORUNDA
 export const config = {
   matcher: [
     "/admin/:path*",
     "/portal-ptx-admin",
+
     "/api/admin/:path*",
     "/api/admin-auth/:path*",
+
     "/api/products/:path*",
     "/api/blog/:path*",
     "/api/collections/:path*",
     "/api/product-images/:path*",
     "/api/variants/:path*",
+    "/api/product-variants/:path*",
     "/api/upload/:path*",
     "/api/collection-products/:path*",
+
     "/portal-login",
     "/account/:path*",
     "/api/customer-auth/:path*",

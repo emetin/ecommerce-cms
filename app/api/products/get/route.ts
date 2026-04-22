@@ -49,7 +49,8 @@ export async function GET(req: Request) {
     }
 
     const products = (await getSheetData(SHEET_NAME, {
-      ttlSeconds: 300,
+      forceFresh: true,
+      ttlSeconds: 0,
     })) as ProductRecord[];
 
     const item =

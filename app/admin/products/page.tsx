@@ -27,21 +27,6 @@ type ProductImageItem = {
   updated_at?: string;
 };
 
-type BulkResponse = {
-  ok: boolean;
-  summary?: {
-    total: number;
-    successCount: number;
-    failedCount: number;
-  };
-  results?: Array<{
-    slug: string;
-    ok: boolean;
-    error?: string;
-  }>;
-  error?: string;
-};
-
 const PAGE_SIZE = 50;
 
 function normalizeText(value: unknown) {
@@ -188,14 +173,6 @@ export default function AdminProductsPage() {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-  const [selectedSlugs, setSelectedSlugs] = useState<string[]>([]);
-  const [bulkStatus, setBulkStatus] = useState("");
-  const [bulkFeatured, setBulkFeatured] = useState("");
-  const [bulkCollectionSlug, setBulkCollectionSlug] = useState("");
-  const [bulkLoading, setBulkLoading] = useState(false);
-  const [bulkMessage, setBulkMessage] = useState("");
-  const [bulkError, setBulkError] = useState("");
-
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -265,7 +242,6 @@ export default function AdminProductsPage() {
       setItems(Array.isArray(productData.items) ? productData.items : []);
       setTotal(Number(productData.total || 0));
       setTotalPages(Number(productData.totalPages || 1));
-      setSelectedSlugs([]);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -338,106 +314,6 @@ export default function AdminProductsPage() {
     }
   }
 
-  async function handleBulkUpdate() {
-    try {
-      setBulkLoading(true);
-      setBulkError("");
-      setBulkMessage("");
-
-      if (selectedSlugs.length === 0) {
-        throw new Error("Please select at least one product.");
-      }
-
-      const changes: Record<string, string> = {};
-
-      if (bulkStatus) {
-        changes.status = bulkStatus;
-      }
-
-      if (bulkFeatured) {
-        changes.featured = bulkFeatured;
-      }
-
-      if (bulkCollectionSlug.trim()) {
-        changes.collection_slug = bulkCollectionSlug.trim();
-      }
-
-      if (Object.keys(changes).length === 0) {
-        throw new Error("Please choose at least one field to update.");
-      }
-
-      const response = await fetch("/api/admin/products/bulk", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          items: selectedSlugs.map((slug) => ({
-            slug,
-            changes,
-          })),
-        }),
-      });
-
-      const data = (await response.json()) as BulkResponse;
-
-      if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Bulk update failed.");
-      }
-
-      setBulkMessage(
-        `Updated ${data.summary?.successCount || 0} of ${data.summary?.total || 0} selected product(s).`
-      );
-
-      setBulkStatus("");
-      setBulkFeatured("");
-      setBulkCollectionSlug("");
-
-      await Promise.all([loadProductsOnly(), loadImagesOnly()]);
-    } catch (error) {
-      setBulkError(
-        error instanceof Error ? error.message : "Bulk update failed."
-      );
-    } finally {
-      setBulkLoading(false);
-    }
-  }
-
-  function toggleSelectOne(slug?: string) {
-    if (!slug) return;
-
-    setSelectedSlugs((prev) => {
-      if (prev.includes(slug)) {
-        return prev.filter((item) => item !== slug);
-      }
-
-      return [...prev, slug];
-    });
-  }
-
-  function toggleSelectAllCurrentPage() {
-    const currentPageSlugs = items
-      .map((item) => normalizeText(item.slug))
-      .filter(Boolean);
-
-    const allSelected =
-      currentPageSlugs.length > 0 &&
-      currentPageSlugs.every((slug) => selectedSlugs.includes(slug));
-
-    if (allSelected) {
-      setSelectedSlugs((prev) =>
-        prev.filter((slug) => !currentPageSlugs.includes(slug))
-      );
-      return;
-    }
-
-    setSelectedSlugs((prev) => {
-      const next = new Set(prev);
-      currentPageSlugs.forEach((slug) => next.add(slug));
-      return Array.from(next);
-    });
-  }
-
   const imageMap = useMemo(() => buildImageMap(allImages), [allImages]);
 
   const publishedCount = useMemo(
@@ -455,37 +331,6 @@ export default function AdminProductsPage() {
       ).length,
     [items]
   );
-
-  const allCurrentPageSelected = useMemo(() => {
-    const currentPageSlugs = items
-      .map((item) => normalizeText(item.slug))
-      .filter(Boolean);
-
-    return (
-      currentPageSlugs.length > 0 &&
-      currentPageSlugs.every((slug) => selectedSlugs.includes(slug))
-    );
-  }, [items, selectedSlugs]);
-
-  const hasBulkChanges = useMemo(() => {
-    return Boolean(
-      bulkStatus || bulkFeatured || bulkCollectionSlug.trim().length > 0
-    );
-  }, [bulkStatus, bulkFeatured, bulkCollectionSlug]);
-
-  const canApplyBulkUpdate = selectedSlugs.length > 0 && hasBulkChanges && !bulkLoading;
-
-  const bulkHint = useMemo(() => {
-    if (selectedSlugs.length === 0) {
-      return "Select at least one product to enable bulk update.";
-    }
-
-    if (!hasBulkChanges) {
-      return "Choose at least one bulk field before applying update.";
-    }
-
-    return "";
-  }, [selectedSlugs.length, hasBulkChanges]);
 
   const galleryAudit = useMemo(() => {
     let missingGallery = 0;
@@ -524,8 +369,8 @@ export default function AdminProductsPage() {
         <div>
           <h1 style={titleStyle}>Products</h1>
           <p style={subtitleStyle}>
-            Review products, monitor gallery quality, and jump directly into the
-            Image Manager when a product needs media fixes.
+            Review products, monitor gallery quality, and manage all bulk changes
+            from the dedicated Shopify-style bulk editor.
           </p>
         </div>
 
@@ -533,6 +378,11 @@ export default function AdminProductsPage() {
           <Link href="/admin/products/new" style={primaryButtonStyle}>
             + New Product
           </Link>
+
+          <Link href="/admin/products/bulk" style={secondaryButtonStyle}>
+            Open Bulk Editor
+          </Link>
+
           <a href="/api/products/export?format=csv" style={secondaryButtonStyle}>
             Export CSV
           </a>
@@ -621,63 +471,6 @@ export default function AdminProductsPage() {
         </div>
       </div>
 
-      <div style={bulkBarStyle}>
-        <div style={bulkInfoStyle}>
-          <strong>{selectedSlugs.length}</strong> product(s) selected
-        </div>
-
-        <div style={bulkControlsStyle}>
-          <button
-            type="button"
-            onClick={toggleSelectAllCurrentPage}
-            style={secondarySmallButtonStyle}
-          >
-            {allCurrentPageSelected ? "Unselect Page" : "Select Page"}
-          </button>
-
-          <select
-            value={bulkStatus}
-            onChange={(e) => setBulkStatus(e.target.value)}
-            style={bulkInputStyle}
-          >
-            <option value="">Bulk Status</option>
-            <option value="published">published</option>
-            <option value="draft">draft</option>
-            <option value="archived">archived</option>
-          </select>
-
-          <select
-            value={bulkFeatured}
-            onChange={(e) => setBulkFeatured(e.target.value)}
-            style={bulkInputStyle}
-          >
-            <option value="">Bulk Featured</option>
-            <option value="TRUE">TRUE</option>
-            <option value="FALSE">FALSE</option>
-          </select>
-
-          <input
-            value={bulkCollectionSlug}
-            onChange={(e) => setBulkCollectionSlug(e.target.value)}
-            placeholder="Bulk Collection Slug"
-            style={bulkInputStyle}
-          />
-
-          <button
-            type="button"
-            onClick={handleBulkUpdate}
-            disabled={!canApplyBulkUpdate}
-            style={canApplyBulkUpdate ? primarySmallButtonStyle : disabledButtonStyle}
-          >
-            {bulkLoading ? "Updating..." : "Apply Bulk Update"}
-          </button>
-        </div>
-
-        {bulkHint ? <div style={hintTextStyle}>{bulkHint}</div> : null}
-        {bulkMessage ? <div style={successMessageStyle}>{bulkMessage}</div> : null}
-        {bulkError ? <div style={errorInlineStyle}>{bulkError}</div> : null}
-      </div>
-
       {loading || imagesLoading ? (
         <div style={cardStyle}>Loading...</div>
       ) : errorMessage ? (
@@ -695,13 +488,6 @@ export default function AdminProductsPage() {
             <table style={tableStyle}>
               <thead>
                 <tr>
-                  <th style={thStyle}>
-                    <input
-                      type="checkbox"
-                      checked={allCurrentPageSelected}
-                      onChange={toggleSelectAllCurrentPage}
-                    />
-                  </th>
                   <th style={thStyle}>Product</th>
                   <th style={thStyle}>Slug</th>
                   <th style={thStyle}>Collection</th>
@@ -717,21 +503,9 @@ export default function AdminProductsPage() {
                   const galleryState = getGalleryState(item, imageMap);
                   const featured =
                     String(item.featured || "").toLowerCase() === "true";
-                  const slug = normalizeText(item.slug);
-                  const checked = slug ? selectedSlugs.includes(slug) : false;
 
                   return (
                     <tr key={item.id || item.slug || index}>
-                      <td style={tdStyle}>
-                        {slug ? (
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleSelectOne(slug)}
-                          />
-                        ) : null}
-                      </td>
-
                       <td style={tdStyle}>
                         <div style={productCellStyle}>
                           <div style={thumbWrapStyle}>
@@ -941,55 +715,6 @@ const filterCardStyle: React.CSSProperties = {
   borderRadius: 24,
   padding: 24,
   boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
-};
-
-const bulkBarStyle: React.CSSProperties = {
-  background: "#fff",
-  border: "1px solid #ddd3c5",
-  borderRadius: 24,
-  padding: 24,
-  display: "grid",
-  gap: 16,
-};
-
-const bulkInfoStyle: React.CSSProperties = {
-  fontSize: 15,
-  color: "#5f564b",
-};
-
-const bulkControlsStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 12,
-  flexWrap: "wrap",
-  alignItems: "center",
-};
-
-const bulkInputStyle: React.CSSProperties = {
-  minHeight: 42,
-  padding: "10px 14px",
-  borderRadius: 12,
-  border: "1px solid #d9cfbf",
-  background: "#fcfbf8",
-  outline: "none",
-  fontSize: 14,
-};
-
-const hintTextStyle: React.CSSProperties = {
-  color: "#7d7266",
-  fontSize: 14,
-  fontWeight: 600,
-};
-
-const successMessageStyle: React.CSSProperties = {
-  color: "#1d6a43",
-  fontWeight: 700,
-  fontSize: 14,
-};
-
-const errorInlineStyle: React.CSSProperties = {
-  color: "#8d2f2f",
-  fontWeight: 700,
-  fontSize: 14,
 };
 
 const statsRowStyle: React.CSSProperties = {
@@ -1302,22 +1027,6 @@ const dangerSmallButtonStyle: React.CSSProperties = {
   color: "#8f2d2d",
   fontWeight: 700,
   cursor: "pointer",
-  textDecoration: "none",
-  fontSize: 14,
-};
-
-const disabledButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 38,
-  padding: "0 14px",
-  borderRadius: 12,
-  border: "1px solid #d8d8d8",
-  background: "#f3f3f3",
-  color: "#8a8a8a",
-  fontWeight: 700,
-  cursor: "not-allowed",
   textDecoration: "none",
   fontSize: 14,
 };

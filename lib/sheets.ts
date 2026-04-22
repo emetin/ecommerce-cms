@@ -37,12 +37,27 @@ let jwtAuthInstance: InstanceType<typeof google.auth.JWT> | null = null;
 let sheetsCatalogClientInstance: ReturnType<typeof google.sheets> | null = null;
 let sheetsFormsClientInstance: ReturnType<typeof google.sheets> | null = null;
 
+const SHEET_TITLE_ALIASES: Record<string, string[]> = {
+  products: ["products", "Products"],
+  collections: ["collections", "Collections"],
+  blog: ["blog", "Blog"],
+  product_variants: ["product_variants", "Product_Variants", "Product Variants"],
+  product_images: ["product_images", "Product_Images", "Product Images"],
+  customers: ["customers", "Customers"],
+  collection_products: ["collection_products", "Collection_Products", "Collection Products"],
+};
+
 const SHEET_RANGE_MAP: Record<string, string> = {
+  products: "A:R",
   Products: "A:R",
+  collections: "A:J",
   Collections: "A:J",
+  blog: "A:L",
   Blog: "A:L",
   product_variants: "A:Z",
   product_images: "A:K",
+  customers: "A:ZZ",
+  collection_products: "A:ZZ",
 };
 
 function getAuth() {
@@ -97,8 +112,21 @@ function getSpreadsheetId(mode: SpreadsheetMode = "catalog") {
   return SHEET_ID!;
 }
 
+function normalizeCellValue(value: unknown) {
+  return String(value || "").trim();
+}
+
+function normalizeCellValueLower(value: unknown) {
+  return normalizeCellValue(value).toLowerCase();
+}
+
+function getCandidateSheetTitles(sheetName: string) {
+  const normalized = normalizeCellValueLower(sheetName);
+  return SHEET_TITLE_ALIASES[normalized] || [sheetName];
+}
+
 function getSheetRange(sheetName: string) {
-  return SHEET_RANGE_MAP[sheetName] || DEFAULT_SHEET_RANGE;
+  return SHEET_RANGE_MAP[sheetName] || SHEET_RANGE_MAP[normalizeCellValueLower(sheetName)] || DEFAULT_SHEET_RANGE;
 }
 
 function sleep(ms: number) {
@@ -158,7 +186,7 @@ function getMetaCacheKey(ttlSeconds: number) {
 }
 
 function getSheetTag(sheetName: string, mode: SpreadsheetMode = "catalog") {
-  return `sheet:${mode}:${sheetName}`;
+  return `sheet:${mode}:${normalizeCellValueLower(sheetName)}`;
 }
 
 function clearSheetLocalCache(
@@ -168,6 +196,9 @@ function clearSheetLocalCache(
   deleteCacheByPrefix(`sheet:rows:${mode}:${sheetName}:`);
   deleteCacheByPrefix(`sheet:headers:${mode}:${sheetName}:`);
   deleteCacheByPrefix(`sheet:objects:${mode}:${sheetName}:`);
+  deleteCacheByPrefix(`sheet:rows:${mode}:${normalizeCellValueLower(sheetName)}:`);
+  deleteCacheByPrefix(`sheet:headers:${mode}:${normalizeCellValueLower(sheetName)}:`);
+  deleteCacheByPrefix(`sheet:objects:${mode}:${normalizeCellValueLower(sheetName)}:`);
 
   if (mode === "catalog") {
     deleteCacheByPrefix(`sheet:meta:catalog:all:`);
@@ -177,46 +208,6 @@ function clearSheetLocalCache(
 function invalidateSheet(sheetName: string, mode: SpreadsheetMode = "catalog") {
   clearSheetLocalCache(sheetName, mode);
   revalidateTag(getSheetTag(sheetName, mode), "max");
-}
-
-function normalizeCellValue(value: unknown) {
-  return String(value || "").trim();
-}
-
-function normalizeCellValueLower(value: unknown) {
-  return normalizeCellValue(value).toLowerCase();
-}
-
-async function fetchSheetRowsUncached(
-  sheetName: string,
-  mode: SpreadsheetMode = "catalog"
-): Promise<string[][]> {
-  const sheets = getSheetsClient(mode);
-  const range = getSheetRange(sheetName);
-
-  return withRetry(async () => {
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: getSpreadsheetId(mode),
-      range: `${sheetName}!${range}`,
-    });
-
-    return (response.data.values || []) as string[][];
-  });
-}
-
-function getCachedSheetRowsLoader(
-  sheetName: string,
-  ttlSeconds: number,
-  mode: SpreadsheetMode = "catalog"
-) {
-  return unstable_cache(
-    async () => fetchSheetRowsUncached(sheetName, mode),
-    ["google-sheet-rows", mode, sheetName, String(ttlSeconds)],
-    {
-      revalidate: ttlSeconds,
-      tags: [getSheetTag(sheetName, mode)],
-    }
-  );
 }
 
 async function getAllCatalogSheetMetaUncached(): Promise<SheetMeta[]> {
@@ -233,7 +224,7 @@ async function getAllCatalogSheetMetaUncached(): Promise<SheetMeta[]> {
       const sheetId = sheet.properties?.sheetId;
       const title = sheet.properties?.title;
 
-      if (!sheetId || !title) {
+      if (sheetId === undefined || !title) {
         return null;
       }
 
@@ -243,6 +234,64 @@ async function getAllCatalogSheetMetaUncached(): Promise<SheetMeta[]> {
       };
     })
     .filter(Boolean) as SheetMeta[];
+}
+
+async function resolveActualSheetTitle(
+  sheetName: string,
+  mode: SpreadsheetMode = "catalog"
+) {
+  if (mode === "forms") {
+    return sheetName;
+  }
+
+  const allMeta = await getAllCatalogSheetMetaUncached();
+  const requested = normalizeCellValueLower(sheetName);
+  const candidates = getCandidateSheetTitles(sheetName).map((item) =>
+    normalizeCellValueLower(item)
+  );
+
+  const exactCandidate =
+    allMeta.find((item) => candidates.includes(normalizeCellValueLower(item.title))) ||
+    allMeta.find((item) => normalizeCellValueLower(item.title) === requested);
+
+  if (!exactCandidate) {
+    throw new Error(`Sheet metadata was not found for "${sheetName}".`);
+  }
+
+  return exactCandidate.title;
+}
+
+async function fetchSheetRowsUncached(
+  sheetName: string,
+  mode: SpreadsheetMode = "catalog"
+): Promise<string[][]> {
+  const sheets = getSheetsClient(mode);
+  const actualSheetTitle = await resolveActualSheetTitle(sheetName, mode);
+  const range = getSheetRange(actualSheetTitle);
+
+  return withRetry(async () => {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: getSpreadsheetId(mode),
+      range: `${actualSheetTitle}!${range}`,
+    });
+
+    return (response.data.values || []) as string[][];
+  });
+}
+
+function getCachedSheetRowsLoader(
+  sheetName: string,
+  ttlSeconds: number,
+  mode: SpreadsheetMode = "catalog"
+) {
+  return unstable_cache(
+    async () => fetchSheetRowsUncached(sheetName, mode),
+    ["google-sheet-rows", mode, normalizeCellValueLower(sheetName), String(ttlSeconds)],
+    {
+      revalidate: ttlSeconds,
+      tags: [getSheetTag(sheetName, mode)],
+    }
+  );
 }
 
 function rowsToHeaders(rows: string[][]) {
@@ -283,7 +332,7 @@ export async function getSheetRows(
     return fetchSheetRowsUncached(sheetName, mode);
   }
 
-  const cacheKey = getRowsCacheKey(sheetName, ttlSeconds, mode);
+  const cacheKey = getRowsCacheKey(normalizeCellValueLower(sheetName), ttlSeconds, mode);
 
   return getOrSetCache<string[][]>(
     cacheKey,
@@ -312,7 +361,7 @@ export async function getSheetData(
     return rowsToObjects(rows);
   }
 
-  const cacheKey = getObjectsCacheKey(sheetName, ttlSeconds, mode);
+  const cacheKey = getObjectsCacheKey(normalizeCellValueLower(sheetName), ttlSeconds, mode);
 
   return getOrSetCache<SheetObject[]>(
     cacheKey,
@@ -346,7 +395,7 @@ export async function getSheetHeaders(
     return rowsToHeaders(rows);
   }
 
-  const cacheKey = getHeadersCacheKey(sheetName, ttlSeconds, mode);
+  const cacheKey = getHeadersCacheKey(normalizeCellValueLower(sheetName), ttlSeconds, mode);
 
   return getOrSetCache<string[]>(
     cacheKey,
@@ -363,44 +412,6 @@ export async function getSheetHeaders(
   );
 }
 
-export async function findSheetItemByField<T extends SheetObject>(
-  sheetName: string,
-  fieldName: string,
-  fieldValue: string,
-  options?: {
-    forceFresh?: boolean;
-    ttlSeconds?: number;
-    mode?: SpreadsheetMode;
-  }
-) {
-  const data = (await getSheetData(sheetName, options)) as T[];
-  const normalizedTarget = normalizeCellValueLower(fieldValue);
-
-  return (
-    data.find(
-      (item) => normalizeCellValueLower(item[fieldName]) === normalizedTarget
-    ) || null
-  );
-}
-
-export async function findSheetItemsByField<T extends SheetObject>(
-  sheetName: string,
-  fieldName: string,
-  fieldValue: string,
-  options?: {
-    forceFresh?: boolean;
-    ttlSeconds?: number;
-    mode?: SpreadsheetMode;
-  }
-) {
-  const data = (await getSheetData(sheetName, options)) as T[];
-  const normalizedTarget = normalizeCellValueLower(fieldValue);
-
-  return data.filter(
-    (item) => normalizeCellValueLower(item[fieldName]) === normalizedTarget
-  );
-}
-
 export async function findRowNumberByField(
   sheetName: string,
   fieldName: string,
@@ -409,6 +420,7 @@ export async function findRowNumberByField(
   const rows = await getSheetRows(sheetName, {
     ttlSeconds: DEFAULT_TTL_SECONDS,
     mode: "catalog",
+    forceFresh: true,
   });
 
   if (!rows.length) {
@@ -437,39 +449,6 @@ export async function findRowNumberByField(
   return null;
 }
 
-export async function getSheetRowNumberMapByField(
-  sheetName: string,
-  fieldName: string
-) {
-  const rows = await getSheetRows(sheetName, {
-    ttlSeconds: DEFAULT_TTL_SECONDS,
-    mode: "catalog",
-  });
-
-  if (!rows.length) {
-    return new Map<string, number>();
-  }
-
-  const headers = rowsToHeaders(rows);
-  const fieldIndex = headers.findIndex((header) => header === fieldName);
-
-  if (fieldIndex === -1) {
-    throw new Error(`Field "${fieldName}" was not found in "${sheetName}".`);
-  }
-
-  const map = new Map<string, number>();
-
-  for (let i = 1; i < rows.length; i += 1) {
-    const value = String(rows[i]?.[fieldIndex] || "").trim().toLowerCase();
-
-    if (value) {
-      map.set(value, i + 1);
-    }
-  }
-
-  return map;
-}
-
 function columnNumberToLetter(columnNumber: number) {
   let temp = columnNumber;
   let letter = "";
@@ -485,11 +464,12 @@ function columnNumberToLetter(columnNumber: number) {
 
 export async function appendSheetRow(sheetName: string, row: string[]) {
   const sheets = getSheetsClient("catalog");
+  const actualSheetTitle = await resolveActualSheetTitle(sheetName, "catalog");
 
   await withRetry(async () => {
     await sheets.spreadsheets.values.append({
       spreadsheetId: getSpreadsheetId("catalog"),
-      range: `${sheetName}!A:Z`,
+      range: `${actualSheetTitle}!A:Z`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
         values: [row],
@@ -508,11 +488,12 @@ export async function appendSheetRows(sheetName: string, rows: string[][]) {
   }
 
   const sheets = getSheetsClient("catalog");
+  const actualSheetTitle = await resolveActualSheetTitle(sheetName, "catalog");
 
   await withRetry(async () => {
     await sheets.spreadsheets.values.append({
       spreadsheetId: getSpreadsheetId("catalog"),
-      range: `${sheetName}!A:Z`,
+      range: `${actualSheetTitle}!A:Z`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
         values: rows,
@@ -525,48 +506,19 @@ export async function appendSheetRows(sheetName: string, rows: string[][]) {
   return { ok: true };
 }
 
-export async function appendFormSheetRow(sheetName: string, row: string[]) {
-  const sheets = getSheetsClient("forms");
-
-  await withRetry(async () => {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: getSpreadsheetId("forms"),
-      range: `${sheetName}!A:Z`,
-      valueInputOption: "USER_ENTERED",
-      requestBody: {
-        values: [row],
-      },
-    });
-  });
-
-  invalidateSheet(sheetName, "forms");
-
-  return { ok: true };
-}
-
-export async function getFormSheetData(
-  sheetName: string,
-  options?: { forceFresh?: boolean; ttlSeconds?: number }
-) {
-  return getSheetData(sheetName, {
-    forceFresh: options?.forceFresh ?? false,
-    ttlSeconds: options?.ttlSeconds ?? DEFAULT_TTL_SECONDS,
-    mode: "forms",
-  });
-}
-
 export async function updateSheetRowByRowNumber(
   sheetName: string,
   rowNumber: number,
   rowValues: string[]
 ) {
   const sheets = getSheetsClient("catalog");
+  const actualSheetTitle = await resolveActualSheetTitle(sheetName, "catalog");
   const lastColumnLetter = columnNumberToLetter(rowValues.length);
 
   await withRetry(async () => {
     await sheets.spreadsheets.values.update({
       spreadsheetId: getSpreadsheetId("catalog"),
-      range: `${sheetName}!A${rowNumber}:${lastColumnLetter}${rowNumber}`,
+      range: `${actualSheetTitle}!A${rowNumber}:${lastColumnLetter}${rowNumber}`,
       valueInputOption: "USER_ENTERED",
       requestBody: {
         values: [rowValues],
@@ -669,7 +621,15 @@ export async function getSheetMetaByTitle(
     );
   }
 
-  const sheet = allMeta.find((item) => item.title === sheetName);
+  const candidates = getCandidateSheetTitles(sheetName).map((item) =>
+    normalizeCellValueLower(item)
+  );
+
+  const sheet =
+    allMeta.find((item) => candidates.includes(normalizeCellValueLower(item.title))) ||
+    allMeta.find(
+      (item) => normalizeCellValueLower(item.title) === normalizeCellValueLower(sheetName)
+    );
 
   if (!sheet) {
     throw new Error(`Sheet metadata was not found for "${sheetName}".`);
@@ -686,7 +646,7 @@ export async function deleteSheetRowBySlug(sheetName: string, slug: string) {
   }
 
   const sheets = getSheetsClient("catalog");
-  const meta = await getSheetMetaByTitle(sheetName);
+  const meta = await getSheetMetaByTitle(sheetName, { forceFresh: true, ttlSeconds: 0 });
 
   await withRetry(async () => {
     await sheets.spreadsheets.batchUpdate({
@@ -803,17 +763,18 @@ export async function deleteSheetRowByField(
 
 export async function replaceSheetRows(sheetName: string, rows: string[][]) {
   const sheets = getSheetsClient("catalog");
+  const actualSheetTitle = await resolveActualSheetTitle(sheetName, "catalog");
 
   await withRetry(async () => {
     await sheets.spreadsheets.values.clear({
       spreadsheetId: getSpreadsheetId("catalog"),
-      range: `${sheetName}!A:ZZ`,
+      range: `${actualSheetTitle}!A:ZZ`,
     });
 
     if (rows.length) {
       await sheets.spreadsheets.values.update({
         spreadsheetId: getSpreadsheetId("catalog"),
-        range: `${sheetName}!A1`,
+        range: `${actualSheetTitle}!A1`,
         valueInputOption: "USER_ENTERED",
         requestBody: {
           values: rows,

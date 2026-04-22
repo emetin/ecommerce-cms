@@ -116,12 +116,18 @@ export async function GET(req: Request) {
     }
 
     const [products, variantsRaw, productImagesRaw] = await Promise.all([
-      getSheetData("products", { ttlSeconds: 300 }) as Promise<ProductRecord[]>,
+      getSheetData("products", {
+        forceFresh: true,
+        ttlSeconds: 0,
+      }) as Promise<ProductRecord[]>,
       getSheetData("product_variants", {
         forceFresh: true,
-        ttlSeconds: 30,
+        ttlSeconds: 0,
       }) as Promise<VariantRecord[]>,
-      getSheetData("product_images", { ttlSeconds: 120 }) as Promise<ProductImageRecord[]>,
+      getSheetData("product_images", {
+        forceFresh: true,
+        ttlSeconds: 0,
+      }) as Promise<ProductImageRecord[]>,
     ]);
 
     const product =

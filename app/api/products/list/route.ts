@@ -81,7 +81,8 @@ export async function GET(req: Request) {
     }
 
     const products = (await getSheetData(SHEET_NAME, {
-      ttlSeconds: 1800,
+      forceFresh: true,
+      ttlSeconds: 0,
     })) as ProductItem[];
 
     let items = products.filter((item) => item && normalizeLower(item.slug));
@@ -117,7 +118,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "private, max-age=60, stale-while-revalidate=1800",
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         },
       }
     );

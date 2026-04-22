@@ -80,9 +80,27 @@ function tryDeleteLocalFile(filePath: string) {
   return false;
 }
 
+async function safeDeleteByField(
+  sheetName: string,
+  fieldName: string,
+  fieldValue: string
+) {
+  try {
+    return await deleteSheetRowsByField(sheetName, fieldName, fieldValue);
+  } catch (error) {
+    console.warn(`Optional cleanup skipped for "${sheetName}":`, error);
+    return {
+      ok: false,
+      deletedCount: 0,
+      skipped: true,
+      error: error instanceof Error ? error.message : "Unknown cleanup error.",
+    };
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
     const slug = normalizeSlug(body?.slug);
 
     if (!slug) {
@@ -96,8 +114,14 @@ export async function POST(req: Request) {
     }
 
     const [products, productImages] = await Promise.all([
-      getSheetData("products"),
-      getSheetData("product_images"),
+      getSheetData("products", {
+        forceFresh: true,
+        ttlSeconds: 0,
+      }),
+      getSheetData("product_images", {
+        forceFresh: true,
+        ttlSeconds: 0,
+      }),
     ]);
 
     const productList = products as ProductRecord[];
@@ -106,21 +130,29 @@ export async function POST(req: Request) {
     const targetProduct =
       productList.find((item) => normalizeSlug(item.slug) === slug) || null;
 
+    if (!targetProduct) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Product not found.",
+        },
+        { status: 404 }
+      );
+    }
+
     const relatedImages = imageList.filter(
       (item) => normalizeSlug(item.product_slug) === slug
     );
 
     const deletedFiles: string[] = [];
 
-    if (targetProduct) {
-      const primaryImagePath = resolveLocalFilePath({
-        imageUrl: targetProduct.image,
-        imageFileId: targetProduct.image_file_id,
-      });
+    const primaryImagePath = resolveLocalFilePath({
+      imageUrl: targetProduct.image,
+      imageFileId: targetProduct.image_file_id,
+    });
 
-      if (primaryImagePath && tryDeleteLocalFile(primaryImagePath)) {
-        deletedFiles.push(primaryImagePath);
-      }
+    if (primaryImagePath && tryDeleteLocalFile(primaryImagePath)) {
+      deletedFiles.push(primaryImagePath);
     }
 
     for (const imageItem of relatedImages) {
@@ -139,15 +171,32 @@ export async function POST(req: Request) {
     }
 
     await deleteSheetRowBySlug("products", slug);
-    await deleteSheetRowsByField("product_variants", "product_slug", slug);
-    await deleteSheetRowsByField("product_images", "product_slug", slug);
-    await deleteSheetRowsByField("collection_products", "product_slug", slug);
+    const variantsDelete = await safeDeleteByField(
+      "product_variants",
+      "product_slug",
+      slug
+    );
+    const productImagesDelete = await safeDeleteByField(
+      "product_images",
+      "product_slug",
+      slug
+    );
+    const collectionProductsDelete = await safeDeleteByField(
+      "collection_products",
+      "product_slug",
+      slug
+    );
 
     return NextResponse.json({
       ok: true,
       message: "Product and related records deleted successfully.",
       deleted_local_files_count: deletedFiles.length,
       deleted_local_files: deletedFiles,
+      cleanup: {
+        product_variants: variantsDelete,
+        product_images: productImagesDelete,
+        collection_products: collectionProductsDelete,
+      },
     });
   } catch (error) {
     return NextResponse.json(

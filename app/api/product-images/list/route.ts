@@ -32,7 +32,10 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const productSlug = normalizeText(searchParams.get("product_slug")).toLowerCase();
 
-    const items = (await getSheetData("product_images")) as ProductImageRecord[];
+    const items = (await getSheetData("product_images", {
+      forceFresh: true,
+      ttlSeconds: 0,
+    })) as ProductImageRecord[];
 
     const filtered = items
       .filter((item) => {
@@ -53,10 +56,17 @@ export async function GET(req: Request) {
         return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
       });
 
-    return NextResponse.json({
-      ok: true,
-      items: filtered,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        items: filtered,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        },
+      }
+    );
   } catch (error) {
     return NextResponse.json(
       {

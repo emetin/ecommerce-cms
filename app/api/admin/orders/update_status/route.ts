@@ -1,21 +1,62 @@
 import { NextResponse } from "next/server";
-import { updateOrderStatus, getAllOrders } from "../../../../../lib/order";
-import { isAuthenticatedAdmin } from "../../../../../lib/admin-auth";
+import {
+  getSheetRows,
+  updateSheetRowByRowNumber,
+} from "../../../../../lib/sheets";
+import { verifyAdminSessionToken } from "../../../../../lib/admin-auth";
+
+type UpdateOrderStatusBody = {
+  orderId?: string;
+  status?: string;
+};
+
+const ALLOWED_STATUSES = new Set([
+  "submitted",
+  "reviewing",
+  "quoted",
+  "approved",
+  "processing",
+  "completed",
+  "cancelled",
+  "paid",
+]);
+
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
+function parseAdminTokenFromCookie(cookieHeader: string) {
+  const match = cookieHeader.match(/ptx_admin_auth=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function buildRowObject(headers: string[], row: unknown[]) {
+  return headers.reduce<Record<string, string>>((acc, header, index) => {
+    acc[String(header || "").trim()] = normalizeText(row[index]);
+    return acc;
+  }, {});
+}
 
 export async function POST(req: Request) {
   try {
-    const allowed = await isAuthenticatedAdmin();
+    const cookieHeader = req.headers.get("cookie") || "";
+    const token = parseAdminTokenFromCookie(cookieHeader);
+    const isAdmin = await verifyAdminSessionToken(token);
 
-    if (!allowed) {
+    if (!isAdmin) {
       return NextResponse.json(
         { ok: false, error: "Unauthorized." },
         { status: 401 }
       );
     }
 
-    const body = await req.json();
-    const orderId = String(body?.orderId || "").trim();
-    const status = String(body?.status || "").trim();
+    const body = (await req.json()) as UpdateOrderStatusBody;
+    const orderId = normalizeText(body?.orderId);
+    const status = normalizeLower(body?.status);
 
     if (!orderId) {
       return NextResponse.json(
@@ -24,39 +65,86 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!status) {
+    if (!status || !ALLOWED_STATUSES.has(status)) {
       return NextResponse.json(
-        { ok: false, error: "status is required." },
+        { ok: false, error: "Invalid order status." },
         { status: 400 }
       );
     }
 
-    const orders = await getAllOrders();
-    const order = orders.find((item) => item.id === orderId);
+    const rows = await getSheetRows("orders");
+    const headers = Array.isArray(rows[0])
+      ? rows[0].map((cell) => String(cell || "").trim())
+      : [];
 
-    if (!order?.order_number) {
+    if (!headers.length) {
+      return NextResponse.json(
+        { ok: false, error: "orders sheet headers could not be read." },
+        { status: 500 }
+      );
+    }
+
+    const rowIndex = rows.findIndex((row, index) => {
+      if (index === 0 || !Array.isArray(row)) return false;
+
+      const rowObject = buildRowObject(headers, row);
+      return normalizeText(rowObject.id) === orderId;
+    });
+
+    if (rowIndex === -1) {
       return NextResponse.json(
         { ok: false, error: "Order not found." },
         { status: 404 }
       );
     }
 
-    const result = await updateOrderStatus(order.order_number, status);
+    const currentRow = rows[rowIndex] as unknown[];
+    const order = buildRowObject(headers, currentRow);
+    const now = new Date().toISOString();
+
+    const updatedRow = headers.map((header) => {
+      switch (header) {
+        case "status":
+          return status;
+
+        case "updated_at":
+          return now;
+
+        case "email":
+          return normalizeText(order.email).toLowerCase();
+
+        case "currency":
+          return normalizeText(order.currency || "USD") || "USD";
+
+        default:
+          return normalizeText(order[header]);
+      }
+    });
+
+    await updateSheetRowByRowNumber("orders", rowIndex + 1, updatedRow);
 
     return NextResponse.json({
       ok: true,
+      message: "Order status updated successfully.",
       order: {
-        id: result.order.id,
-        orderNumber: result.order.order_number,
-        status: result.order.status,
+        id: normalizeText(order.id),
+        orderNumber: normalizeText(order.order_number),
+        customerId: normalizeText(order.customer_id),
+        company: normalizeText(order.company),
+        email: normalizeText(order.email).toLowerCase(),
+        status,
+        updatedAt: now,
       },
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to update order status.";
-
     return NextResponse.json(
-      { ok: false, error: message },
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown error while updating order status.",
+      },
       { status: 500 }
     );
   }

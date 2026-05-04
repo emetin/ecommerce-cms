@@ -2,7 +2,6 @@ import {
   appendSheetRows,
   getSheetData,
   getSheetHeaders,
-  getSheetRowNumberMapByField,
   updateSheetRowByRowNumber,
 } from "./sheets";
 
@@ -107,37 +106,56 @@ export const SHEET_CONFIG = {
     xmlRoot: "customerApplications",
     xmlItem: "application",
   },
-  orders: {
+    orders: {
     sheetName: "orders",
     headers: [
       "id",
       "order_number",
+      "cart_token",
+      "cart_id",
       "customer_id",
-      "company_name",
+      "email",
+      "first_name",
+      "last_name",
+      "company",
+      "phone",
+      "country",
+      "city",
+      "address_line_1",
+      "address_line_2",
+      "postal_code",
+      "note",
       "status",
-      "subtotal",
       "currency",
-      "notes",
+      "subtotal",
+      "discount_total",
+      "shipping_total",
+      "tax_total",
+      "grand_total",
+      "item_count",
       "created_at",
       "updated_at",
     ],
     xmlRoot: "orders",
     xmlItem: "order",
   },
-  order_items: {
+    order_items: {
     sheetName: "order_items",
     headers: [
       "id",
       "order_id",
       "product_slug",
       "variant_id",
-      "sku",
       "product_title",
-      "variant_label",
-      "quantity",
+      "variant_title",
+      "sku",
+      "image",
       "unit_price",
+      "compare_at_price",
+      "quantity",
       "line_total",
       "created_at",
+      "updated_at",
     ],
     xmlRoot: "orderItems",
     xmlItem: "item",
@@ -168,6 +186,23 @@ function nowIso() {
 
 function makeId(prefix = "row") {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+}
+
+function buildRowNumberMapByField(
+  items: Record<string, string>[],
+  fieldName: string
+) {
+  const rowMap = new Map<string, number>();
+
+  items.forEach((item, index) => {
+    const value = String(item[fieldName] || "").trim().toLowerCase();
+
+    if (value) {
+      rowMap.set(value, index + 2);
+    }
+  });
+
+  return rowMap;
 }
 
 function normalizeBooleanString(value: string, fallback = "false") {
@@ -288,8 +323,11 @@ export async function importRecords(
     throw new Error(`Import is not enabled for "${type}".`);
   }
 
-  const existingItems = await getSheetData(sheetName, { forceFresh: true });
-  const rowMap = await getSheetRowNumberMapByField(sheetName, "slug");
+  const existingItems = (await getSheetData(sheetName, {
+    forceFresh: true,
+  })) as Record<string, string>[];
+
+  const rowMap = buildRowNumberMapByField(existingItems, "slug");
 
   const existingBySlug = new Map<string, Record<string, string>>();
 
@@ -363,6 +401,7 @@ export async function importRecords(
 
 export async function validateSheetHeaders(type: ContentType) {
   const config = SHEET_CONFIG[type];
+
   const actualHeaders = await getSheetHeaders(config.sheetName, {
     forceFresh: true,
   });

@@ -1,4 +1,9 @@
 import bcrypt from "bcryptjs";
+import {
+  verifyAdminUserCredentials,
+  updateAdminUserLastLogin,
+  type AdminUserWithPermissions,
+} from "./admin-users";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -10,6 +15,12 @@ export const ADMIN_CSRF_DURATION_SECONDS = 60 * 30;
 
 type AdminSessionPayload = {
   sub: "admin";
+  adminUserId: string;
+  email: string;
+  name: string;
+  roleKey: string;
+  permissions: string[];
+  mustChangePassword: boolean;
   exp: number;
   iat: number;
   nonce: string;
@@ -19,7 +30,7 @@ function getEnvValue(name: string) {
   const value = process.env[name]?.trim();
 
   if (!value) {
-    throw new Error(`${name} tanımlı değil.`);
+    throw new Error(`${name} is not defined.`);
   }
 
   return value;
@@ -64,6 +75,7 @@ function safeEqual(a: string, b: string) {
   }
 
   let result = 0;
+
   for (let i = 0; i < a.length; i += 1) {
     result |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
@@ -77,6 +89,22 @@ function nowInSeconds() {
 
 function isAdminAuthDisabled() {
   return process.env.ADMIN_AUTH_DISABLED === "true";
+}
+
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
+function normalizePermissions(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item) => normalizeText(item)).filter(Boolean);
 }
 
 export function createNonce(size = 24) {
@@ -118,13 +146,19 @@ export function getExpiredCsrfCookieOptions() {
   };
 }
 
-export async function createAdminSessionToken() {
+export async function createAdminSessionToken(user: AdminUserWithPermissions) {
   if (isAdminAuthDisabled()) {
     return "dev-admin-bypass-token";
   }
 
   const payload: AdminSessionPayload = {
     sub: "admin",
+    adminUserId: normalizeText(user.id),
+    email: normalizeLower(user.email),
+    name: normalizeText(user.name),
+    roleKey: normalizeLower(user.roleKey),
+    permissions: normalizePermissions(user.permissions),
+    mustChangePassword: Boolean(user.mustChangePassword),
     iat: nowInSeconds(),
     exp: nowInSeconds() + ADMIN_SESSION_DURATION_SECONDS,
     nonce: createNonce(16),
@@ -143,18 +177,26 @@ export async function createAdminSessionToken() {
   return `${unsignedToken}.${signature}`;
 }
 
-export async function verifyAdminSessionToken(token?: string | null) {
+export async function readAdminSessionToken(token?: string | null) {
   if (isAdminAuthDisabled()) {
-    return true;
+    return {
+      adminUserId: "dev-admin",
+      email: "dev-admin@local.test",
+      name: "Development Admin",
+      roleKey: "super_admin",
+      permissions: ["settings:manage"],
+      mustChangePassword: false,
+    };
   }
 
   if (!token) {
-    return false;
+    return null;
   }
 
   const parts = token.split(".");
+
   if (parts.length !== 3) {
-    return false;
+    return null;
   }
 
   const [encodedHeader, encodedPayload, receivedSignature] = parts;
@@ -162,7 +204,7 @@ export async function verifyAdminSessionToken(token?: string | null) {
   const expectedSignature = await signValue(unsignedToken);
 
   if (!safeEqual(receivedSignature, expectedSignature)) {
-    return false;
+    return null;
   }
 
   try {
@@ -170,17 +212,29 @@ export async function verifyAdminSessionToken(token?: string | null) {
     const payload = JSON.parse(payloadJson) as Partial<AdminSessionPayload>;
 
     if (payload.sub !== "admin") {
-      return false;
+      return null;
     }
 
     if (typeof payload.exp !== "number" || payload.exp <= nowInSeconds()) {
-      return false;
+      return null;
     }
 
-    return true;
+    return {
+      adminUserId: normalizeText(payload.adminUserId),
+      email: normalizeLower(payload.email),
+      name: normalizeText(payload.name),
+      roleKey: normalizeLower(payload.roleKey),
+      permissions: normalizePermissions(payload.permissions),
+      mustChangePassword: Boolean(payload.mustChangePassword),
+    };
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function verifyAdminSessionToken(token?: string | null) {
+  const session = await readAdminSessionToken(token);
+  return Boolean(session?.adminUserId);
 }
 
 export async function isAuthenticatedAdmin(cookieValue?: string | null) {
@@ -196,28 +250,30 @@ export function hasAdminCredentialsConfigured() {
     return true;
   }
 
-  return Boolean(
-    process.env.ADMIN_PORTAL_USERNAME?.trim() &&
-      process.env.ADMIN_PASSWORD_HASH?.trim() &&
-      process.env.ADMIN_SESSION_SECRET?.trim()
-  );
+  return Boolean(process.env.ADMIN_SESSION_SECRET?.trim());
 }
 
-export async function verifyAdminCredentials(username: string, password: string) {
+export async function verifyAdminCredentials(email: string, password: string) {
   if (isAdminAuthDisabled()) {
-    return true;
+    return {
+      id: "dev-admin",
+      email: "dev-admin@local.test",
+      name: "Development Admin",
+      roleKey: "super_admin",
+      status: "active",
+      mustChangePassword: false,
+      lastLoginAt: "",
+      createdAt: "",
+      updatedAt: "",
+      permissions: ["settings:manage"],
+    };
   }
 
-  const expectedUsername = getEnvValue("ADMIN_PORTAL_USERNAME");
-  const passwordHash = getEnvValue("ADMIN_PASSWORD_HASH");
+  return verifyAdminUserCredentials(email, password);
+}
 
-  const normalizedUsername = username.trim();
-
-  if (!safeEqual(normalizedUsername, expectedUsername)) {
-    return false;
-  }
-
-  return bcrypt.compare(password, passwordHash);
+export async function markAdminLogin(userId: string) {
+  return updateAdminUserLastLogin(userId);
 }
 
 export function createCsrfToken() {
@@ -237,4 +293,8 @@ export function verifyCsrfToken(
   }
 
   return safeEqual(cookieToken, headerToken);
+}
+
+export async function hashLegacyAdminPassword(password: string) {
+  return bcrypt.hash(String(password || ""), 12);
 }

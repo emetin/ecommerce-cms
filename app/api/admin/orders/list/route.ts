@@ -1,13 +1,20 @@
 import { NextResponse } from "next/server";
 import { getAllOrders } from "../../../../../lib/order";
-import { isAuthenticatedAdmin } from "../../../../../lib/admin-auth";
+import { verifyAdminSessionToken } from "../../../../../lib/admin-auth";
 import { toNumber } from "../../../../../lib/money";
 
-export async function GET() {
-  try {
-    const allowed = await isAuthenticatedAdmin();
+function parseAdminTokenFromCookie(cookieHeader: string) {
+  const match = cookieHeader.match(/ptx_admin_auth=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
-    if (!allowed) {
+export async function GET(req: Request) {
+  try {
+    const cookieHeader = req.headers.get("cookie") || "";
+    const token = parseAdminTokenFromCookie(cookieHeader);
+    const isAdmin = await verifyAdminSessionToken(token);
+
+    if (!isAdmin) {
       return NextResponse.json(
         { ok: false, error: "Unauthorized." },
         { status: 401 }
@@ -21,8 +28,9 @@ export async function GET() {
       order_number: order.order_number,
       customer_id: order.customer_id || "",
       company_name: order.company || "",
-      status: order.status || "pending",
+      status: order.status || "submitted",
       subtotal: toNumber(order.subtotal),
+      grand_total: toNumber(order.grand_total),
       currency: order.currency || "USD",
       notes: order.note || "",
       created_at: order.created_at || "",

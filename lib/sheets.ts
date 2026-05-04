@@ -58,6 +58,10 @@ const SHEET_TITLE_ALIASES: Record<string, string[]> = {
   order_items: ["order_items", "Order_Items", "Order Items"],
   carts: ["carts", "Carts"],
   cart_items: ["cart_items", "Cart_Items", "Cart Items"],
+  admin_users: ["admin_users", "Admin_Users", "Admin Users"],
+  admin_roles: ["admin_roles", "Admin_Roles", "Admin Roles"],
+  draft_orders: ["draft_orders", "Draft_Orders", "Draft Orders"],
+  draft_order_items: ["draft_order_items", "Draft_Order_Items", "Draft Order Items"],
 };
 
 const SHEET_RANGE_MAP: Record<string, string> = {
@@ -93,6 +97,18 @@ const SHEET_RANGE_MAP: Record<string, string> = {
   cart_items: "A:ZZ",
   Cart_Items: "A:ZZ",
   "Cart Items": "A:ZZ",
+  admin_users: "A:ZZ",
+  Admin_Users: "A:ZZ",
+  "Admin Users": "A:ZZ",
+  admin_roles: "A:ZZ",
+  Admin_Roles: "A:ZZ",
+  "Admin Roles": "A:ZZ",
+  draft_orders: "A:ZZ",
+  Draft_Orders: "A:ZZ",
+  "Draft Orders": "A:ZZ",
+  draft_order_items: "A:ZZ",
+  Draft_Order_Items: "A:ZZ",
+  "Draft Order Items": "A:ZZ",
 };
 
 function getAuth() {

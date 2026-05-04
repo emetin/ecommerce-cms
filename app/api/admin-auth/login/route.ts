@@ -5,6 +5,7 @@ import {
   createAdminSessionToken,
   getAdminCookieOptions,
   hasAdminCredentialsConfigured,
+  markAdminLogin,
   verifyAdminCredentials,
   verifyCsrfToken,
 } from "../../../../lib/admin-auth";
@@ -17,8 +18,17 @@ import {
 
 type LoginBody = {
   username?: string;
+  email?: string;
   password?: string;
 };
+
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
 
 export async function POST(req: Request) {
   try {
@@ -26,8 +36,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error:
-            "ADMIN_PORTAL_USERNAME, ADMIN_PASSWORD_HASH veya ADMIN_SESSION_SECRET tanımlı değil.",
+          error: "ADMIN_SESSION_SECRET is not configured.",
         },
         { status: 500 }
       );
@@ -40,7 +49,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: `Çok fazla başarısız giriş denemesi. Lütfen ${limitStatus.retryAfterSeconds} saniye sonra tekrar deneyin.`,
+          error: `Too many failed login attempts. Please try again in ${limitStatus.retryAfterSeconds} seconds.`,
         },
         {
           status: 429,
@@ -58,41 +67,54 @@ export async function POST(req: Request) {
 
     if (!verifyCsrfToken(csrfCookieToken, csrfHeader)) {
       return NextResponse.json(
-        { ok: false, error: "Geçersiz güvenlik doğrulaması." },
+        { ok: false, error: "Invalid security verification." },
         { status: 403 }
       );
     }
 
     const body = (await req.json()) as LoginBody;
 
-    const username = String(body?.username || "");
+    const email = normalizeLower(body?.email || body?.username);
     const password = String(body?.password || "");
 
-    if (!username.trim() || !password) {
+    if (!email || !password) {
       return NextResponse.json(
-        { ok: false, error: "Kullanıcı adı ve şifre zorunludur." },
+        { ok: false, error: "Email and password are required." },
         { status: 400 }
       );
     }
 
-    const isValid = await verifyAdminCredentials(username, password);
+    const adminUser = await verifyAdminCredentials(email, password);
 
-    if (!isValid) {
+    if (!adminUser) {
       registerFailedAttempt(clientKey);
 
       return NextResponse.json(
-        { ok: false, error: "Kullanıcı adı veya şifre hatalı." },
+        { ok: false, error: "Email or password is incorrect." },
         { status: 401 }
       );
     }
 
     clearFailedAttempts(clientKey);
 
-    const token = await createAdminSessionToken();
+    await markAdminLogin(adminUser.id);
+
+    const token = await createAdminSessionToken(adminUser);
 
     const response = NextResponse.json({
       ok: true,
-      message: "Giriş başarılı.",
+      message: "Login successful.",
+      admin: {
+        id: adminUser.id,
+        email: adminUser.email,
+        name: adminUser.name,
+        roleKey: adminUser.roleKey,
+        permissions: adminUser.permissions,
+        mustChangePassword: adminUser.mustChangePassword,
+      },
+      nextPath: adminUser.mustChangePassword
+        ? "/admin/change-password"
+        : "/admin/products",
     });
 
     response.cookies.set({
@@ -116,7 +138,7 @@ export async function POST(req: Request) {
         error:
           error instanceof Error
             ? error.message
-            : "Giriş sırasında bilinmeyen bir hata oluştu.",
+            : "Unknown error during login.",
       },
       { status: 500 }
     );

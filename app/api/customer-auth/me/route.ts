@@ -4,12 +4,16 @@ import {
   readCustomerFromSessionToken,
 } from "../../../../lib/customer-auth";
 
+function getCookieValue(cookieHeader: string, name: string) {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = cookieHeader.match(new RegExp(`${escapedName}=([^;]+)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 export async function GET(req: Request) {
   try {
     const cookieHeader = req.headers.get("cookie") || "";
-    const match = cookieHeader.match(/ptx_customer_auth=([^;]+)/);
-    const token = match ? decodeURIComponent(match[1]) : null;
-
+    const token = getCookieValue(cookieHeader, CUSTOMER_COOKIE_NAME);
     const customer = await readCustomerFromSessionToken(token);
 
     return NextResponse.json({
@@ -26,7 +30,7 @@ export async function GET(req: Request) {
         error:
           error instanceof Error
             ? error.message
-            : "Müşteri oturumu okunamadı.",
+            : "Customer session could not be read.",
       },
       { status: 500 }
     );

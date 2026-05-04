@@ -29,13 +29,38 @@ type OrderLineItem = {
   created_at: string;
 };
 
+type ApiListResponse = {
+  ok?: boolean;
+  error?: string;
+  items?: OrderItem[];
+};
+
+type ApiOrderItemsResponse = {
+  ok?: boolean;
+  error?: string;
+  items?: OrderLineItem[];
+};
+
+type ApiStatusResponse = {
+  ok?: boolean;
+  error?: string;
+  order?: {
+    orderNumber?: string;
+  };
+};
+
 const STATUS_OPTIONS = [
-  "pending",
+  "submitted",
+  "reviewing",
+  "quoted",
   "approved",
   "processing",
   "completed",
   "cancelled",
+  "paid",
 ];
+
+const EXPORT_FORMAT_OPTIONS = ["csv", "json", "xml"];
 
 function normalizeText(value?: string) {
   return String(value || "").trim();
@@ -56,19 +81,22 @@ function formatDate(value?: string) {
   if (!value) return "-";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
 
   return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
     month: "short",
     day: "2-digit",
+    year: "numeric",
   }).format(date);
 }
 
 function getStatusStyle(value?: string): React.CSSProperties {
   const raw = normalizeLower(value);
 
-  if (raw === "completed") {
+  if (raw === "completed" || raw === "paid") {
     return {
       background: "#eef8f0",
       color: "#2f7d62",
@@ -76,11 +104,19 @@ function getStatusStyle(value?: string): React.CSSProperties {
     };
   }
 
-  if (raw === "processing" || raw === "approved") {
+  if (raw === "processing" || raw === "approved" || raw === "quoted") {
     return {
       background: "#eef4fb",
       color: "#315f95",
       border: "1px solid rgba(49,95,149,0.16)",
+    };
+  }
+
+  if (raw === "reviewing" || raw === "submitted") {
+    return {
+      background: "#fff7e8",
+      color: "#8a6418",
+      border: "1px solid rgba(138,100,24,0.18)",
     };
   }
 
@@ -99,6 +135,25 @@ function getStatusStyle(value?: string): React.CSSProperties {
   };
 }
 
+async function readJsonResponse<T>(response: Response, fallbackMessage: string) {
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  if (!contentType.includes("application/json")) {
+    const shortText = rawText.slice(0, 160).replace(/\s+/g, " ").trim();
+
+    throw new Error(
+      `${fallbackMessage} API returned non-JSON response. Status: ${response.status}. Preview: ${shortText}`
+    );
+  }
+
+  try {
+    return JSON.parse(rawText) as T;
+  } catch {
+    throw new Error(`${fallbackMessage} Invalid JSON response.`);
+  }
+}
+
 export default function AdminOrdersPage() {
   const [items, setItems] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,11 +162,14 @@ export default function AdminOrdersPage() {
   const [savingId, setSavingId] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [expandedOrderId, setExpandedOrderId] = useState("");
-  const [orderItemsMap, setOrderItemsMap] = useState<Record<string, OrderLineItem[]>>({});
+  const [orderItemsMap, setOrderItemsMap] = useState<
+    Record<string, OrderLineItem[]>
+  >({});
   const [itemsLoadingId, setItemsLoadingId] = useState("");
 
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   async function loadOrders() {
     try {
@@ -122,21 +180,27 @@ export default function AdminOrdersPage() {
         cache: "no-store",
       });
 
-      const data = await response.json();
+      const data = await readJsonResponse<ApiListResponse>(
+        response,
+        "Failed to load orders."
+      );
 
       if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to load orders.");
+        throw new Error(data.error || "Failed to load orders.");
       }
 
       const nextItems = Array.isArray(data.items) ? data.items : [];
       setItems(nextItems);
 
       const nextStatusMap: Record<string, string> = {};
-      nextItems.forEach((item: OrderItem) => {
-        nextStatusMap[item.id] = item.status || "pending";
+
+      nextItems.forEach((item) => {
+        nextStatusMap[item.id] = item.status || "submitted";
       });
+
       setStatusMap(nextStatusMap);
     } catch (error) {
+      setItems([]);
       setErrorMessage(
         error instanceof Error ? error.message : "An unknown error occurred."
       );
@@ -157,7 +221,9 @@ export default function AdminOrdersPage() {
         !query ||
         normalizeLower(item.order_number).includes(query) ||
         normalizeLower(item.company_name).includes(query) ||
-        normalizeLower(item.customer_id).includes(query);
+        normalizeLower(item.customer_id).includes(query) ||
+        normalizeLower(item.status).includes(query) ||
+        normalizeLower(item.notes).includes(query);
 
       const matchesStatus =
         statusFilter === "all"
@@ -169,25 +235,30 @@ export default function AdminOrdersPage() {
   }, [items, searchInput, statusFilter]);
 
   const stats = useMemo(() => {
-    const pending = items.filter((item) => normalizeLower(item.status) === "pending").length;
-    const approved = items.filter((item) => normalizeLower(item.status) === "approved").length;
-    const processing = items.filter(
-      (item) => normalizeLower(item.status) === "processing"
-    ).length;
-    const completed = items.filter(
-      (item) => normalizeLower(item.status) === "completed"
-    ).length;
-    const cancelled = items.filter(
-      (item) => normalizeLower(item.status) === "cancelled"
-    ).length;
-
     return {
       total: items.length,
-      pending,
-      approved,
-      processing,
-      completed,
-      cancelled,
+      submitted: items.filter(
+        (item) => normalizeLower(item.status) === "submitted"
+      ).length,
+      reviewing: items.filter(
+        (item) => normalizeLower(item.status) === "reviewing"
+      ).length,
+      quoted: items.filter((item) => normalizeLower(item.status) === "quoted")
+        .length,
+      approved: items.filter(
+        (item) => normalizeLower(item.status) === "approved"
+      ).length,
+      processing: items.filter(
+        (item) => normalizeLower(item.status) === "processing"
+      ).length,
+      completed: items.filter(
+        (item) => normalizeLower(item.status) === "completed"
+      ).length,
+      cancelled: items.filter(
+        (item) => normalizeLower(item.status) === "cancelled"
+      ).length,
+      paid: items.filter((item) => normalizeLower(item.status) === "paid")
+        .length,
     };
   }, [items]);
 
@@ -195,6 +266,7 @@ export default function AdminOrdersPage() {
     try {
       setSavingId(orderId);
       setSuccessMessage("");
+      setErrorMessage("");
 
       const response = await fetch("/api/admin/orders/update-status", {
         method: "POST",
@@ -203,22 +275,28 @@ export default function AdminOrdersPage() {
         },
         body: JSON.stringify({
           orderId,
-          status: statusMap[orderId] || "pending",
+          status: statusMap[orderId] || "submitted",
         }),
       });
 
-      const data = await response.json();
+      const data = await readJsonResponse<ApiStatusResponse>(
+        response,
+        "Failed to update order status."
+      );
 
       if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to update order status.");
+        throw new Error(data.error || "Failed to update order status.");
       }
 
       setSuccessMessage(
-        `Order ${data?.order?.orderNumber || ""} updated successfully.`
+        `Order ${data.order?.orderNumber || ""} updated successfully.`
       );
+
       await loadOrders();
     } catch (error) {
-      alert(error instanceof Error ? error.message : "An unknown error occurred.");
+      setErrorMessage(
+        error instanceof Error ? error.message : "An unknown error occurred."
+      );
     } finally {
       setSavingId("");
     }
@@ -227,16 +305,20 @@ export default function AdminOrdersPage() {
   async function loadOrderItems(orderId: string) {
     try {
       setItemsLoadingId(orderId);
+      setErrorMessage("");
 
       const response = await fetch(
         `/api/admin/orders/items?orderId=${encodeURIComponent(orderId)}`,
         { cache: "no-store" }
       );
 
-      const data = await response.json();
+      const data = await readJsonResponse<ApiOrderItemsResponse>(
+        response,
+        "Failed to load order items."
+      );
 
       if (!response.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to load order items.");
+        throw new Error(data.error || "Failed to load order items.");
       }
 
       setOrderItemsMap((prev) => ({
@@ -244,7 +326,9 @@ export default function AdminOrdersPage() {
         [orderId]: Array.isArray(data.items) ? data.items : [],
       }));
     } catch (error) {
-      alert(error instanceof Error ? error.message : "An unknown error occurred.");
+      setErrorMessage(
+        error instanceof Error ? error.message : "An unknown error occurred."
+      );
     } finally {
       setItemsLoadingId("");
     }
@@ -264,167 +348,164 @@ export default function AdminOrdersPage() {
   }
 
   return (
-    <div style={{ display: "grid", gap: 24 }}>
+    <div style={pageStyle}>
       <div style={pageHeaderStyle}>
         <div>
           <h1 style={titleStyle}>Orders</h1>
           <p style={subtitleStyle}>
-            Review submitted B2B orders, filter by order status, inspect line
-            items, and update operational progress directly from the admin panel.
+            Review submitted B2B orders, filter by status, inspect line items,
+            and update progress.
           </p>
         </div>
 
         <div style={headerActionsStyle}>
-          <a href="/api/admin/orders/export?format=csv" style={secondaryButtonStyle}>
-            Export CSV
-          </a>
-          <a href="/api/admin/orders/export?format=json" style={secondaryButtonStyle}>
-            Export JSON
-          </a>
-          <a href="/api/admin/orders/export?format=xml" style={secondaryButtonStyle}>
-            Export XML
-          </a>
+          <div style={exportMenuWrapStyle}>
+            <button
+              type="button"
+              onClick={() => setExportMenuOpen((previous) => !previous)}
+              style={exportDropdownButtonStyle}
+            >
+              Export
+              <span style={exportChevronStyle}>▾</span>
+            </button>
+
+            {exportMenuOpen ? (
+              <div style={exportDropdownMenuStyle}>
+                {EXPORT_FORMAT_OPTIONS.map((format) => (
+                  <a
+                    key={format}
+                    href={`/api/admin/orders/export?format=${format}`}
+                    style={exportDropdownItemStyle}
+                    onClick={() => setExportMenuOpen(false)}
+                  >
+                    {format.toUpperCase()}
+                  </a>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      <div style={filterCardStyle}>
-        <div style={statsRowStyle}>
-          <div style={statBoxStyle}>
-            <div style={statLabelStyle}>Total Orders</div>
-            <div style={statValueStyle}>{stats.total}</div>
-          </div>
-
-          <div style={warningStatBoxStyle}>
-            <div style={statLabelStyle}>Pending</div>
-            <div style={warningStatValueStyle}>{stats.pending}</div>
-          </div>
-
-          <div style={statBoxStyle}>
-            <div style={statLabelStyle}>Approved</div>
-            <div style={statValueStyle}>{stats.approved}</div>
-          </div>
-
-          <div style={statBoxStyle}>
-            <div style={statLabelStyle}>Processing</div>
-            <div style={statValueStyle}>{stats.processing}</div>
-          </div>
-
-          <div style={statBoxStyle}>
-            <div style={statLabelStyle}>Completed</div>
-            <div style={statValueStyle}>{stats.completed}</div>
-          </div>
-
-          <div style={warningStatBoxStyle}>
-            <div style={statLabelStyle}>Cancelled</div>
-            <div style={warningStatValueStyle}>{stats.cancelled}</div>
-          </div>
+      <section style={toolbarStyle}>
+        <div style={statsBarStyle}>
+          <Metric label="Total" value={stats.total} />
+          <Metric label="Submitted" value={stats.submitted} warning />
+          <Metric label="Reviewing" value={stats.reviewing} />
+          <Metric label="Quoted" value={stats.quoted} />
+          <Metric label="Approved" value={stats.approved} />
+          <Metric label="Processing" value={stats.processing} />
+          <Metric label="Completed" value={stats.completed} />
+          <Metric label="Cancelled" value={stats.cancelled} warning />
+          <Metric label="Paid" value={stats.paid} />
         </div>
 
         <div style={filterGridStyle}>
-          <div>
-            <label style={labelStyle}>Search</label>
-            <input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search by order number, company, or customer ID"
-              style={inputStyle}
-            />
-          </div>
+          <input
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Search order number, company, customer ID, notes..."
+            style={inputStyle}
+          />
 
-          <div>
-            <label style={labelStyle}>Status</label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              style={inputStyle}
-            >
-              <option value="all">all</option>
-              {STATUS_OPTIONS.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </div>
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            style={selectStyle}
+          >
+            <option value="all">All statuses</option>
+            {STATUS_OPTIONS.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
         </div>
-      </div>
+      </section>
 
-      {successMessage ? <div style={successBoxStyle}>{successMessage}</div> : null}
+      {successMessage ? (
+        <div style={successBoxStyle}>{successMessage}</div>
+      ) : null}
 
-      {loading ? (
-        <div style={cardStyle}>Loading...</div>
-      ) : errorMessage ? (
-        <div style={errorBoxStyle}>{errorMessage}</div>
-      ) : filteredItems.length === 0 ? (
-        <div style={cardStyle}>No orders matched your current filters.</div>
-      ) : (
-        <div style={listGridStyle}>
-          {filteredItems.map((item) => {
+      {errorMessage ? <div style={errorBoxStyle}>{errorMessage}</div> : null}
+
+      <section style={tableWrapStyle}>
+        <div style={tableHeaderStyle}>
+          <div style={checkCellStyle}></div>
+          <div>Order</div>
+          <div>Customer</div>
+          <div>Total</div>
+          <div>Status</div>
+          <div>Created</div>
+          <div>Updated</div>
+          <div style={{ textAlign: "right" }}>Actions</div>
+        </div>
+
+        {loading ? (
+          <div style={emptyStateStyle}>Loading orders...</div>
+        ) : filteredItems.length === 0 ? (
+          <div style={emptyStateStyle}>No orders matched your filters.</div>
+        ) : (
+          filteredItems.map((item) => {
             const isExpanded = expandedOrderId === item.id;
             const orderLines = orderItemsMap[item.id] || [];
 
             return (
-              <div key={item.id || item.order_number} style={cardStyle}>
-                <div style={cardTopStyle}>
+              <div key={item.id || item.order_number}>
+                <div style={tableRowStyle}>
+                  <div style={checkCellStyle}>
+                    <input type="checkbox" />
+                  </div>
+
                   <div>
-                    <div style={orderTitleStyle}>{item.order_number || "-"}</div>
-                    <div style={contactStyle}>
-                      {item.company_name || "-"} • {item.customer_id || "-"}
+                    <div style={orderNumberStyle}>
+                      {item.order_number || "-"}
                     </div>
+
+                    {item.notes ? (
+                      <div style={noteInlineStyle}>Note: {item.notes}</div>
+                    ) : null}
                   </div>
 
-                  <div
-                    style={{
-                      ...statusPillStyle,
-                      ...getStatusStyle(item.status),
-                    }}
-                  >
-                    {item.status || "pending"}
-                  </div>
-                </div>
-
-                <div style={metaGridStyle}>
                   <div>
-                    <div style={metaLabelStyle}>Subtotal</div>
-                    <div style={metaValueStyle}>
+                    <div style={cellStrongStyle}>
+                      {item.company_name || "-"}
+                    </div>
+                    <div style={subTextStyle}>{item.customer_id || "-"}</div>
+                  </div>
+
+                  <div>
+                    <div style={cellStrongStyle}>
                       {formatMoney(item.subtotal, item.currency)}
                     </div>
+                    <div style={subTextStyle}>{item.currency || "USD"}</div>
                   </div>
 
                   <div>
-                    <div style={metaLabelStyle}>Currency</div>
-                    <div style={metaValueStyle}>{item.currency || "-"}</div>
+                    <span
+                      style={{
+                        ...statusPillStyle,
+                        ...getStatusStyle(item.status),
+                      }}
+                    >
+                      {item.status || "submitted"}
+                    </span>
                   </div>
 
-                  <div>
-                    <div style={metaLabelStyle}>Created</div>
-                    <div style={metaValueStyle}>{formatDate(item.created_at)}</div>
-                  </div>
+                  <div>{formatDate(item.created_at)}</div>
 
-                  <div>
-                    <div style={metaLabelStyle}>Updated</div>
-                    <div style={metaValueStyle}>{formatDate(item.updated_at)}</div>
-                  </div>
-                </div>
+                  <div>{formatDate(item.updated_at)}</div>
 
-                {item.notes ? (
-                  <div style={notesBoxStyle}>
-                    <strong>Notes:</strong> {item.notes}
-                  </div>
-                ) : null}
-
-                <div style={statusEditorWrapStyle}>
-                  <div style={{ minWidth: 220 }}>
-                    <div style={metaLabelStyle}>Update Status</div>
+                  <div style={rowActionsStyle}>
                     <select
-                      value={statusMap[item.id] || item.status || "pending"}
-                      onChange={(e) =>
+                      value={statusMap[item.id] || item.status || "submitted"}
+                      onChange={(event) =>
                         setStatusMap((prev) => ({
                           ...prev,
-                          [item.id]: e.target.value,
+                          [item.id]: event.target.value,
                         }))
                       }
-                      style={selectStyle}
+                      style={rowSelectStyle}
                     >
                       {STATUS_OPTIONS.map((status) => (
                         <option key={status} value={status}>
@@ -432,69 +513,64 @@ export default function AdminOrdersPage() {
                         </option>
                       ))}
                     </select>
-                  </div>
-
-                  <div style={actionsRowStyle}>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleItems(item.id)}
-                      style={secondaryButtonStyle}
-                    >
-                      {isExpanded ? "Hide Items" : "View Items"}
-                    </button>
 
                     <button
                       type="button"
                       onClick={() => handleUpdateStatus(item.id)}
                       disabled={savingId === item.id}
-                      style={primaryButtonStyle}
+                      style={compactPrimaryButtonStyle}
                     >
-                      {savingId === item.id ? "Saving..." : "Save Status"}
+                      {savingId === item.id ? "Saving" : "Save"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleItems(item.id)}
+                      style={compactButtonStyle}
+                    >
+                      {isExpanded ? "Hide" : "Items"}
                     </button>
                   </div>
                 </div>
 
                 {isExpanded ? (
-                  <div style={itemsPanelStyle}>
-                    <div style={itemsPanelTitleStyle}>Order Items</div>
-
+                  <div style={expandedRowStyle}>
                     {itemsLoadingId === item.id ? (
-                      <div style={emptyItemsStyle}>Loading order items...</div>
+                      <div style={lineEmptyStyle}>Loading order items...</div>
                     ) : orderLines.length === 0 ? (
-                      <div style={emptyItemsStyle}>
+                      <div style={lineEmptyStyle}>
                         No line items found for this order.
                       </div>
                     ) : (
-                      <div style={{ display: "grid", gap: 12 }}>
-                        {orderLines.map((line) => (
-                          <div key={line.id} style={lineItemCardStyle}>
-                            <div style={lineItemTopStyle}>
-                              <div>
-                                <div style={lineItemTitleStyle}>
-                                  {line.product_title || "-"}
-                                </div>
-                                <div style={lineItemMetaStyle}>
-                                  Variant: {line.variant_label || "-"}
-                                </div>
-                                <div style={lineItemMetaStyle}>
-                                  SKU: {line.sku || "-"}
-                                </div>
-                              </div>
+                      <div style={lineTableStyle}>
+                        <div style={lineHeaderStyle}>
+                          <div>Product</div>
+                          <div>Variant</div>
+                          <div>SKU</div>
+                          <div>Qty</div>
+                          <div>Unit</div>
+                          <div>Total</div>
+                        </div>
 
-                              <div style={{ textAlign: "right" }}>
-                                <div style={lineItemPriceStyle}>
-                                  {formatMoney(line.line_total, item.currency)}
-                                </div>
-                                <div style={lineItemMetaStyle}>
-                                  {line.quantity} ×{" "}
-                                  {formatMoney(line.unit_price, item.currency)}
-                                </div>
+                        {orderLines.map((line) => (
+                          <div key={line.id} style={lineRowStyle}>
+                            <div>
+                              <div style={cellStrongStyle}>
+                                {line.product_title || "-"}
+                              </div>
+                              <div style={subTextStyle}>
+                                {line.product_slug || "-"}
                               </div>
                             </div>
 
-                            <div style={lineItemBottomStyle}>
-                              <span>Product Slug: {line.product_slug || "-"}</span>
-                              <span>Created: {formatDate(line.created_at)}</span>
+                            <div>{line.variant_label || "-"}</div>
+                            <div>{line.sku || "-"}</div>
+                            <div>{line.quantity}</div>
+                            <div>
+                              {formatMoney(line.unit_price, item.currency)}
+                            </div>
+                            <div style={cellStrongStyle}>
+                              {formatMoney(line.line_total, item.currency)}
                             </div>
                           </div>
                         ))}
@@ -504,331 +580,351 @@ export default function AdminOrdersPage() {
                 ) : null}
               </div>
             );
-          })}
-        </div>
-      )}
+          })
+        )}
+      </section>
     </div>
   );
 }
+
+function Metric({
+  label,
+  value,
+  warning = false,
+}: {
+  label: string;
+  value: number;
+  warning?: boolean;
+}) {
+  return (
+    <div style={warning ? metricWarningStyle : metricStyle}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+const pageStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 14,
+};
 
 const pageHeaderStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "flex-start",
-  gap: 20,
-  flexWrap: "wrap",
-};
-
-const headerActionsStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 10,
+  gap: 16,
   flexWrap: "wrap",
 };
 
 const titleStyle: React.CSSProperties = {
-  fontSize: 42,
-  lineHeight: 1.1,
   margin: 0,
+  fontSize: 30,
+  lineHeight: 1.1,
   fontWeight: 800,
+  color: "#171717",
 };
 
 const subtitleStyle: React.CSSProperties = {
-  marginTop: 10,
-  marginBottom: 0,
+  margin: "6px 0 0",
   color: "#6f6559",
-  fontSize: 16,
-  maxWidth: 760,
-};
-
-const filterCardStyle: React.CSSProperties = {
-  background: "#fff",
-  border: "1px solid #ddd3c5",
-  borderRadius: 24,
-  padding: 24,
-  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
-};
-
-const statsRowStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 14,
-  flexWrap: "wrap",
-  marginBottom: 20,
-};
-
-const statBoxStyle: React.CSSProperties = {
-  minWidth: 180,
-  background: "#f8f5ef",
-  border: "1px solid #e3dbcf",
-  borderRadius: 18,
-  padding: 16,
-};
-
-const warningStatBoxStyle: React.CSSProperties = {
-  minWidth: 180,
-  background: "#fff7e8",
-  border: "1px solid #ecd8ad",
-  borderRadius: 18,
-  padding: 16,
-};
-
-const statLabelStyle: React.CSSProperties = {
   fontSize: 13,
-  color: "#7c7267",
-  marginBottom: 8,
+  lineHeight: 1.5,
+  maxWidth: 720,
+};
+
+const headerActionsStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const exportMenuWrapStyle: React.CSSProperties = {
+  position: "relative",
+  display: "inline-flex",
+};
+
+const exportDropdownButtonStyle: React.CSSProperties = {
+  minHeight: 36,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
+  borderRadius: 10,
+  border: "1px solid #d8cebf",
+  background: "#fff",
+  color: "#171717",
+  padding: "0 14px",
+  fontSize: 13,
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const exportChevronStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: "#756b60",
+  lineHeight: 1,
+};
+
+const exportDropdownMenuStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "calc(100% + 6px)",
+  right: 0,
+  width: 150,
+  background: "#fff",
+  border: "1px solid #d8cebf",
+  borderRadius: 12,
+  boxShadow: "0 14px 34px rgba(23,23,23,0.12)",
+  padding: 6,
+  zIndex: 20,
+};
+
+const exportDropdownItemStyle: React.CSSProperties = {
+  minHeight: 36,
+  display: "flex",
+  alignItems: "center",
+  borderRadius: 8,
+  padding: "0 10px",
+  color: "#171717",
+  textDecoration: "none",
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+const toolbarStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e2d8cb",
+  borderRadius: 14,
+  padding: 12,
+  display: "grid",
+  gap: 10,
+};
+
+const statsBarStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const metricStyle: React.CSSProperties = {
+  minHeight: 34,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "0 10px",
+  borderRadius: 999,
+  border: "1px solid #e2d8cb",
+  background: "#faf8f4",
+  color: "#5f554b",
+  fontSize: 12,
   fontWeight: 700,
 };
 
-const statValueStyle: React.CSSProperties = {
-  fontSize: 28,
-  fontWeight: 800,
-};
-
-const warningStatValueStyle: React.CSSProperties = {
-  fontSize: 28,
-  fontWeight: 800,
+const metricWarningStyle: React.CSSProperties = {
+  ...metricStyle,
+  background: "#fff7e8",
+  border: "1px solid #ecd8ad",
   color: "#8a6418",
 };
 
 const filterGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "2fr 1fr",
-  gap: 16,
-};
-
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  marginBottom: 8,
-  fontWeight: 800,
-  fontSize: 15,
+  gridTemplateColumns: "minmax(0, 1fr) 220px",
+  gap: 10,
 };
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  minHeight: 52,
-  padding: "14px 16px",
-  borderRadius: 16,
-  border: "1px solid #d9cfbf",
+  minHeight: 38,
+  border: "1px solid #d8cebf",
+  borderRadius: 10,
   background: "#fcfbf8",
+  padding: "0 12px",
   outline: "none",
-  fontSize: 15,
+  fontSize: 13,
 };
 
-const listGridStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 18,
+const selectStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 38,
+  border: "1px solid #d8cebf",
+  borderRadius: 10,
+  background: "#fcfbf8",
+  padding: "0 10px",
+  outline: "none",
+  fontSize: 13,
 };
 
-const cardStyle: React.CSSProperties = {
+const tableWrapStyle: React.CSSProperties = {
   background: "#fff",
-  border: "1px solid #ddd3c5",
-  borderRadius: 24,
-  padding: 24,
-  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
+  border: "1px solid #e2d8cb",
+  borderRadius: 14,
+  overflow: "hidden",
 };
 
-const cardTopStyle: React.CSSProperties = {
+const tableHeaderStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "34px 1.1fr 1.35fr 0.85fr 0.75fr 0.8fr 0.8fr 1.7fr",
+  gap: 10,
+  alignItems: "center",
+  minHeight: 40,
+  padding: "0 12px",
+  background: "#f8f5ef",
+  borderBottom: "1px solid #e2d8cb",
+  color: "#6f6559",
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const tableRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "34px 1.1fr 1.35fr 0.85fr 0.75fr 0.8fr 0.8fr 1.7fr",
+  gap: 10,
+  alignItems: "center",
+  minHeight: 56,
+  padding: "7px 12px",
+  borderBottom: "1px solid #f0e7da",
+  fontSize: 13,
+  color: "#171717",
+};
+
+const checkCellStyle: React.CSSProperties = {
   display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 16,
-  flexWrap: "wrap",
-  marginBottom: 18,
+  alignItems: "center",
+  justifyContent: "center",
 };
 
-const orderTitleStyle: React.CSSProperties = {
-  fontSize: 24,
-  lineHeight: 1.15,
+const orderNumberStyle: React.CSSProperties = {
+  fontWeight: 900,
+  color: "#171717",
+};
+
+const cellStrongStyle: React.CSSProperties = {
   fontWeight: 800,
   color: "#171717",
-  marginBottom: 6,
 };
 
-const contactStyle: React.CSSProperties = {
-  color: "#665d52",
-  lineHeight: 1.7,
-  fontSize: 14,
+const subTextStyle: React.CSSProperties = {
+  marginTop: 3,
+  color: "#756b60",
+  fontSize: 12,
+  lineHeight: 1.35,
+};
+
+const noteInlineStyle: React.CSSProperties = {
+  marginTop: 3,
+  color: "#756b60",
+  fontSize: 12,
+  lineHeight: 1.35,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  maxWidth: 220,
 };
 
 const statusPillStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  minHeight: 34,
-  padding: "0 12px",
+  minHeight: 24,
+  padding: "0 8px",
   borderRadius: 999,
-  fontSize: 13,
-  fontWeight: 800,
-};
-
-const metaGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-  gap: 14,
-};
-
-const metaLabelStyle: React.CSSProperties = {
   fontSize: 12,
-  textTransform: "uppercase",
-  letterSpacing: "0.08em",
-  color: "#7a7166",
   fontWeight: 800,
-  marginBottom: 6,
+  whiteSpace: "nowrap",
 };
 
-const metaValueStyle: React.CSSProperties = {
-  color: "#171717",
-  lineHeight: 1.7,
-  fontWeight: 700,
-  fontSize: 14,
-};
-
-const notesBoxStyle: React.CSSProperties = {
-  marginTop: 18,
-  padding: 14,
-  borderRadius: 16,
-  background: "#faf8f4",
-  border: "1px solid #e8dfd2",
-  color: "#665d52",
-  lineHeight: 1.8,
-  fontSize: 14,
-};
-
-const statusEditorWrapStyle: React.CSSProperties = {
-  marginTop: 18,
+const rowActionsStyle: React.CSSProperties = {
   display: "flex",
-  alignItems: "flex-end",
-  justifyContent: "space-between",
-  gap: 16,
-  flexWrap: "wrap",
-  paddingTop: 16,
-  borderTop: "1px solid #eee5d9",
-};
-
-const actionsRowStyle: React.CSSProperties = {
-  display: "flex",
+  justifyContent: "flex-end",
   alignItems: "center",
-  gap: 10,
-  flexWrap: "wrap",
+  gap: 6,
 };
 
-const selectStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 48,
-  padding: "0 14px",
-  borderRadius: 14,
-  border: "1px solid #d9cfbf",
+const rowSelectStyle: React.CSSProperties = {
+  width: 116,
+  minHeight: 32,
+  border: "1px solid #d8cebf",
+  borderRadius: 8,
   background: "#fcfbf8",
+  padding: "0 8px",
   outline: "none",
-  fontSize: 15,
+  fontSize: 12,
 };
 
-const primaryButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 48,
-  padding: "0 18px",
-  borderRadius: 14,
-  border: "1px solid #2f7d62",
-  background: "#2f7d62",
-  color: "#fff",
-  fontWeight: 800,
-  cursor: "pointer",
-  textDecoration: "none",
-};
-
-const secondaryButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 48,
-  padding: "0 18px",
-  borderRadius: 14,
-  border: "1px solid #d9cfbf",
+const compactButtonStyle: React.CSSProperties = {
+  minHeight: 32,
+  borderRadius: 8,
+  border: "1px solid #d8cebf",
   background: "#fff",
   color: "#171717",
+  padding: "0 10px",
+  fontSize: 12,
   fontWeight: 800,
   cursor: "pointer",
-  textDecoration: "none",
 };
 
-const itemsPanelStyle: React.CSSProperties = {
-  marginTop: 18,
-  paddingTop: 18,
-  borderTop: "1px solid #eee5d9",
+const compactPrimaryButtonStyle: React.CSSProperties = {
+  ...compactButtonStyle,
+  background: "#2f7d62",
+  border: "1px solid #2f7d62",
+  color: "#fff",
+};
+
+const expandedRowStyle: React.CSSProperties = {
+  background: "#fcfbf8",
+  borderBottom: "1px solid #f0e7da",
+  padding: "10px 46px 12px",
+};
+
+const lineTableStyle: React.CSSProperties = {
+  border: "1px solid #e2d8cb",
+  borderRadius: 12,
+  overflow: "hidden",
+  background: "#fff",
+};
+
+const lineHeaderStyle: React.CSSProperties = {
   display: "grid",
-  gap: 14,
-};
-
-const itemsPanelTitleStyle: React.CSSProperties = {
-  fontSize: 18,
-  lineHeight: 1.2,
+  gridTemplateColumns: "1.6fr 1fr 0.8fr 0.4fr 0.6fr 0.7fr",
+  gap: 10,
+  minHeight: 34,
+  alignItems: "center",
+  padding: "0 10px",
+  background: "#f8f5ef",
+  borderBottom: "1px solid #e2d8cb",
+  fontSize: 12,
   fontWeight: 800,
-  color: "#171717",
+  color: "#6f6559",
 };
 
-const emptyItemsStyle: React.CSSProperties = {
-  padding: 16,
-  borderRadius: 16,
-  background: "#faf8f4",
-  border: "1px solid #e8dfd2",
-  color: "#665d52",
+const lineRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.6fr 1fr 0.8fr 0.4fr 0.6fr 0.7fr",
+  gap: 10,
+  minHeight: 44,
+  alignItems: "center",
+  padding: "8px 10px",
+  borderBottom: "1px solid #f0e7da",
+  fontSize: 12,
+};
+
+const emptyStateStyle: React.CSSProperties = {
+  padding: 18,
+  color: "#756b60",
   fontWeight: 700,
 };
 
-const lineItemCardStyle: React.CSSProperties = {
-  borderRadius: 18,
-  border: "1px solid #e8dfd2",
-  background: "#fcfbf8",
-  padding: 16,
-  display: "grid",
-  gap: 12,
-};
-
-const lineItemTopStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 16,
-  flexWrap: "wrap",
-};
-
-const lineItemTitleStyle: React.CSSProperties = {
-  fontSize: 18,
-  lineHeight: 1.25,
-  fontWeight: 800,
-  color: "#171717",
-  marginBottom: 4,
-};
-
-const lineItemMetaStyle: React.CSSProperties = {
-  color: "#665d52",
-  fontSize: 14,
-  lineHeight: 1.7,
-};
-
-const lineItemPriceStyle: React.CSSProperties = {
-  fontSize: 18,
-  lineHeight: 1.2,
-  fontWeight: 800,
-  color: "#171717",
-  marginBottom: 4,
-};
-
-const lineItemBottomStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 12,
-  flexWrap: "wrap",
-  paddingTop: 10,
-  borderTop: "1px solid #eee5d9",
-  color: "#7a7166",
+const lineEmptyStyle: React.CSSProperties = {
+  padding: 12,
+  color: "#756b60",
+  fontWeight: 700,
   fontSize: 13,
-  lineHeight: 1.6,
 };
 
 const successBoxStyle: React.CSSProperties = {
-  padding: 18,
-  borderRadius: 16,
+  padding: 12,
+  borderRadius: 12,
   background: "#eef8f0",
   border: "1px solid #cfe7d8",
   color: "#1d6a43",
@@ -836,9 +932,10 @@ const successBoxStyle: React.CSSProperties = {
 };
 
 const errorBoxStyle: React.CSSProperties = {
-  padding: 18,
-  borderRadius: 16,
+  padding: 12,
+  borderRadius: 12,
   background: "#fff1f1",
   border: "1px solid #f0c9c9",
   color: "#8d2f2f",
+  fontWeight: 700,
 };

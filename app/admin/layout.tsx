@@ -4,7 +4,16 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 
-const NAV_ITEMS = [
+type NavItem = {
+  href: string;
+  label: string;
+  children?: {
+    href: string;
+    label: string;
+  }[];
+};
+
+const NAV_ITEMS: NavItem[] = [
   { href: "/admin", label: "Dashboard" },
   { href: "/admin/products", label: "Products" },
   { href: "/admin/collections", label: "Collections" },
@@ -12,8 +21,18 @@ const NAV_ITEMS = [
   { href: "/admin/media", label: "Media" },
   { href: "/admin/customer-applications", label: "Applications" },
   { href: "/admin/customers", label: "Customers" },
-  { href: "/admin/orders", label: "Orders" },
+  {
+    href: "/admin/orders",
+    label: "Orders",
+    children: [
+      { href: "/admin/orders", label: "All Orders" },
+      { href: "/admin/draft-orders", label: "Draft Orders" },
+      { href: "/admin/abandoned-checkouts", label: "Abandoned Checkouts" },
+      { href: "/admin/checkout-analytics", label: "Checkout Analytics" },
+    ],
+  },
   { href: "/admin/reports", label: "Reports" },
+  { href: "/admin/users", label: "Users & Roles" },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
@@ -123,13 +142,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               }}
             >
               {NAV_ITEMS.map((item) => (
-                <AdminNavLink
+                <AdminNavItem
                   key={item.href}
-                  href={item.href}
+                  item={item}
                   currentPath={pathname}
-                >
-                  {item.label}
-                </AdminNavLink>
+                />
               ))}
             </nav>
           </div>
@@ -276,11 +293,145 @@ function getPageTitle(pathname: string) {
   if (pathname.startsWith("/admin/media")) return "Media";
   if (pathname.startsWith("/admin/customer-applications")) return "Applications";
   if (pathname.startsWith("/admin/customers")) return "Customers";
+  if (pathname.startsWith("/admin/draft-orders")) return "Draft Orders";
+  if (pathname.startsWith("/admin/abandoned-checkouts")) {
+    return "Abandoned Checkouts";
+  }
+  if (pathname.startsWith("/admin/checkout-analytics")) {
+    return "Checkout Analytics";
+  }
   if (pathname.startsWith("/admin/orders")) return "Orders";
+  if (pathname.startsWith("/admin/reports")) return "Reports";
+  if (pathname.startsWith("/admin/users")) return "Users & Roles";
+  if (pathname.startsWith("/admin/roles")) return "Role Settings";
   return "Admin";
 }
 
+function isNavItemActive(item: NavItem, currentPath: string) {
+  if (item.href === "/admin") {
+    return currentPath === "/admin";
+  }
+
+  if (currentPath === item.href || currentPath.startsWith(`${item.href}/`)) {
+    return true;
+  }
+
+  return Boolean(
+    item.children?.some((child) => {
+      return (
+        currentPath === child.href || currentPath.startsWith(`${child.href}/`)
+      );
+    })
+  );
+}
+
+function AdminNavItem({
+  item,
+  currentPath,
+}: {
+  item: NavItem;
+  currentPath: string;
+}) {
+  const isActive = isNavItemActive(item, currentPath);
+  const isOpen = isActive && item.children && item.children.length > 0;
+
+  return (
+    <div style={{ display: "grid", gap: 4 }}>
+      <AdminNavLink href={item.href} currentPath={currentPath} isParent>
+        <span>{item.label}</span>
+        {item.children?.length ? (
+          <span style={chevronStyle}>{isOpen ? "▾" : "▸"}</span>
+        ) : null}
+      </AdminNavLink>
+
+      {isOpen ? (
+        <div style={subMenuStyle}>
+          {item.children?.map((child) => (
+            <AdminSubNavLink
+              key={child.href}
+              href={child.href}
+              currentPath={currentPath}
+            >
+              {child.label}
+            </AdminSubNavLink>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function AdminNavLink({
+  href,
+  currentPath,
+  children,
+  isParent = false,
+}: {
+  href: string;
+  currentPath: string;
+  children: ReactNode;
+  isParent?: boolean;
+}) {
+  const isActive =
+    href === "/admin"
+      ? currentPath === "/admin"
+      : currentPath === href || currentPath.startsWith(`${href}/`);
+
+  const isOrdersParent =
+    href === "/admin/orders" &&
+    (currentPath.startsWith("/admin/orders") ||
+      currentPath.startsWith("/admin/draft-orders") ||
+      currentPath.startsWith("/admin/abandoned-checkouts") ||
+      currentPath.startsWith("/admin/checkout-analytics"));
+
+  const finalActive = isActive || isOrdersParent;
+
+  return (
+    <Link
+      href={href}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: isParent ? "space-between" : "flex-start",
+        minHeight: 44,
+        padding: "0 14px",
+        borderRadius: 12,
+        textDecoration: "none",
+        background: finalActive ? "rgba(201,167,63,0.14)" : "transparent",
+        color: finalActive ? "#171717" : "#2e2a25",
+        fontWeight: finalActive ? 800 : 700,
+        border: finalActive
+          ? "1px solid rgba(201,167,63,0.28)"
+          : "1px solid transparent",
+        boxShadow: finalActive ? "0 6px 16px rgba(201,167,63,0.08)" : "none",
+        transition: "all 0.2s ease",
+      }}
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          minWidth: 0,
+        }}
+      >
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: finalActive ? "var(--primary)" : "transparent",
+            border: finalActive ? "none" : "1px solid #cfc4b5",
+            marginRight: 12,
+            flexShrink: 0,
+          }}
+        />
+        <span>{children}</span>
+      </span>
+    </Link>
+  );
+}
+
+function AdminSubNavLink({
   href,
   currentPath,
   children,
@@ -289,39 +440,34 @@ function AdminNavLink({
   currentPath: string;
   children: ReactNode;
 }) {
-  const isActive =
-    href === "/admin"
-      ? currentPath === "/admin"
-      : currentPath === href || currentPath.startsWith(`${href}/`);
+  const isActive = currentPath === href || currentPath.startsWith(`${href}/`);
 
   return (
     <Link
       href={href}
       style={{
+        minHeight: 36,
         display: "flex",
         alignItems: "center",
-        minHeight: 44,
-        padding: "0 14px",
-        borderRadius: 12,
+        padding: "0 12px 0 34px",
+        borderRadius: 10,
         textDecoration: "none",
-        background: isActive ? "rgba(201,167,63,0.14)" : "transparent",
-        color: isActive ? "#171717" : "#2e2a25",
+        fontSize: 13,
         fontWeight: isActive ? 800 : 700,
+        color: isActive ? "#171717" : "#6f6559",
+        background: isActive ? "rgba(255,255,255,0.72)" : "transparent",
         border: isActive
-          ? "1px solid rgba(201,167,63,0.28)"
+          ? "1px solid rgba(201,167,63,0.18)"
           : "1px solid transparent",
-        boxShadow: isActive ? "0 6px 16px rgba(201,167,63,0.08)" : "none",
-        transition: "all 0.2s ease",
       }}
     >
       <span
         style={{
-          width: 8,
-          height: 8,
+          width: 6,
+          height: 6,
           borderRadius: "50%",
-          background: isActive ? "var(--primary)" : "transparent",
-          border: isActive ? "none" : "1px solid #cfc4b5",
-          marginRight: 12,
+          background: isActive ? "var(--primary)" : "#cfc4b5",
+          marginRight: 10,
           flexShrink: 0,
         }}
       />
@@ -329,6 +475,21 @@ function AdminNavLink({
     </Link>
   );
 }
+
+const subMenuStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  marginLeft: 10,
+  paddingLeft: 8,
+  borderLeft: "1px solid #e5ddd1",
+};
+
+const chevronStyle: React.CSSProperties = {
+  color: "#8a7f72",
+  fontSize: 12,
+  fontWeight: 900,
+  marginLeft: 8,
+};
 
 const viewSiteButtonStyle: React.CSSProperties = {
   width: "100%",

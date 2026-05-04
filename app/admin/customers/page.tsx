@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import CustomerAnalyticsPanel from "../../../components/admin/CustomerAnalyticsPanel";
 
 type CustomerItem = {
   id: string;
@@ -31,9 +32,11 @@ type ResetResult = {
   companyName: string;
   email: string;
   temporaryPassword: string;
+  expiresAt?: string;
 };
 
 const STATUS_OPTIONS = ["active", "inactive"];
+
 const PRICE_TIER_OPTIONS = [
   "all",
   "standard",
@@ -100,7 +103,7 @@ Through your account, you can:
 - prepare and submit order requests
 - manage your account workflow more efficiently
 
-For security reasons, we recommend updating your password after your next login.
+For security reasons, you will be asked to update your password after your next login.
 
 If you need support regarding orders, custom developments, or hospitality project requirements, our team will be pleased to assist you.
 
@@ -151,6 +154,7 @@ export default function AdminCustomersPage() {
         nextStatusMap[item.id] =
           normalizeLower(item.status || "inactive") || "inactive";
       });
+
       setStatusMap(nextStatusMap);
     } catch (error) {
       setErrorMessage(
@@ -181,7 +185,9 @@ export default function AdminCustomersPage() {
         normalizeLower(item.customer_code).includes(query);
 
       const matchesStatus =
-        statusFilter === "all" ? true : itemStatus === normalizeLower(statusFilter);
+        statusFilter === "all"
+          ? true
+          : itemStatus === normalizeLower(statusFilter);
 
       const matchesTier =
         priceTierFilter === "all"
@@ -227,16 +233,19 @@ export default function AdminCustomersPage() {
 
       const nextEmail = data?.customer?.email || item.email;
       const nextPassword = data?.temporaryPassword || "";
+      const nextCompanyName = data?.customer?.companyName || item.company;
+      const nextContactName = data?.customer?.contactName || item.full_name;
 
       setResetResult({
         customerId: data?.customer?.id || item.id,
-        companyName: data?.customer?.companyName || item.company,
+        companyName: nextCompanyName,
         email: nextEmail,
         temporaryPassword: nextPassword,
+        expiresAt: data?.expiresAt || "",
       });
 
       setGeneratedEmail(
-        generateEmailTemplate(item.full_name, nextEmail, nextPassword)
+        generateEmailTemplate(nextContactName, nextEmail, nextPassword)
       );
 
       setSuccessMessage("Temporary password generated successfully.");
@@ -273,6 +282,7 @@ export default function AdminCustomersPage() {
       setSuccessMessage(
         `Customer ${item.company || item.email} updated successfully.`
       );
+
       await loadCustomers();
     } catch (error) {
       alert(error instanceof Error ? error.message : "An unknown error occurred.");
@@ -305,24 +315,30 @@ export default function AdminCustomersPage() {
         <div>
           <h1 style={titleStyle}>Customers</h1>
           <p style={subtitleStyle}>
-            Review customer portal accounts, update access, and generate temporary
-            passwords with a more compact and scalable layout.
+            Review customer portal accounts, update access, generate temporary
+            passwords, and inspect customer-level purchase analytics.
           </p>
         </div>
 
         <div style={headerActionsStyle}>
+          <a href="/admin/customers/new" style={primaryButtonStyle}>
+            + New Customer
+          </a>
+
           <a
             href="/api/admin/customers/export?format=csv"
             style={secondaryButtonStyle}
           >
             Export CSV
           </a>
+
           <a
             href="/api/admin/customers/export?format=json"
             style={secondaryButtonStyle}
           >
             Export JSON
           </a>
+
           <a
             href="/api/admin/customers/export?format=xml"
             style={secondaryButtonStyle}
@@ -403,6 +419,7 @@ export default function AdminCustomersPage() {
           <div style={{ fontWeight: 800, marginBottom: 8 }}>
             Temporary password generated
           </div>
+
           <div style={{ lineHeight: 1.8 }}>
             <div>
               <strong>Company:</strong> {resetResult.companyName}
@@ -411,8 +428,14 @@ export default function AdminCustomersPage() {
               <strong>Email:</strong> {resetResult.email}
             </div>
             <div>
-              <strong>Temporary Password:</strong> {resetResult.temporaryPassword}
+              <strong>Temporary Password:</strong>{" "}
+              {resetResult.temporaryPassword}
             </div>
+            {resetResult.expiresAt ? (
+              <div>
+                <strong>Expires:</strong> {formatDate(resetResult.expiresAt)}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -442,11 +465,7 @@ export default function AdminCustomersPage() {
               Copy Email Address
             </button>
 
-            <button
-              type="button"
-              onClick={handleCopyEmail}
-              style={primaryButtonStyle}
-            >
+            <button type="button" onClick={handleCopyEmail} style={primaryButtonStyle}>
               Copy Email
             </button>
           </div>
@@ -514,7 +533,9 @@ export default function AdminCustomersPage() {
                   </div>
 
                   <div style={cellStyle}>
-                    <div style={primaryTextStyle}>{formatDate(item.approved_at)}</div>
+                    <div style={primaryTextStyle}>
+                      {formatDate(item.approved_at)}
+                    </div>
                   </div>
 
                   <div style={actionsCellStyle}>
@@ -534,9 +555,16 @@ export default function AdminCustomersPage() {
                       type="button"
                       onClick={() => handleResetPassword(item)}
                       disabled={resetLoadingId === item.id}
-                      style={primaryButtonStyleCompact}
+                      style={{
+                        ...primaryButtonStyleCompact,
+                        opacity: resetLoadingId === item.id ? 0.7 : 1,
+                        cursor:
+                          resetLoadingId === item.id ? "not-allowed" : "pointer",
+                      }}
                     >
-                      {resetLoadingId === item.id ? "Generating..." : "Temp Password"}
+                      {resetLoadingId === item.id
+                        ? "Generating..."
+                        : "Temp Password"}
                     </button>
                   </div>
                 </div>
@@ -546,17 +574,23 @@ export default function AdminCustomersPage() {
                     <div style={detailsGridStyle}>
                       <div>
                         <div style={metaLabelStyle}>First Name</div>
-                        <div style={metaValueStyle}>{item.first_name || "-"}</div>
+                        <div style={metaValueStyle}>
+                          {item.first_name || "-"}
+                        </div>
                       </div>
 
                       <div>
                         <div style={metaLabelStyle}>Last Name</div>
-                        <div style={metaValueStyle}>{item.last_name || "-"}</div>
+                        <div style={metaValueStyle}>
+                          {item.last_name || "-"}
+                        </div>
                       </div>
 
                       <div>
                         <div style={metaLabelStyle}>Tax Exempt</div>
-                        <div style={metaValueStyle}>{item.tax_exempt || "-"}</div>
+                        <div style={metaValueStyle}>
+                          {item.tax_exempt || "-"}
+                        </div>
                       </div>
 
                       <div>
@@ -571,7 +605,9 @@ export default function AdminCustomersPage() {
 
                       <div>
                         <div style={metaLabelStyle}>Postal Code</div>
-                        <div style={metaValueStyle}>{item.postal_code || "-"}</div>
+                        <div style={metaValueStyle}>
+                          {item.postal_code || "-"}
+                        </div>
                       </div>
 
                       <div style={{ gridColumn: "1 / -1" }}>
@@ -591,12 +627,16 @@ export default function AdminCustomersPage() {
 
                       <div>
                         <div style={metaLabelStyle}>Created</div>
-                        <div style={metaValueStyle}>{formatDate(item.created_at)}</div>
+                        <div style={metaValueStyle}>
+                          {formatDate(item.created_at)}
+                        </div>
                       </div>
 
                       <div>
                         <div style={metaLabelStyle}>Updated</div>
-                        <div style={metaValueStyle}>{formatDate(item.updated_at)}</div>
+                        <div style={metaValueStyle}>
+                          {formatDate(item.updated_at)}
+                        </div>
                       </div>
 
                       <div>
@@ -605,6 +645,10 @@ export default function AdminCustomersPage() {
                           {formatDate(item.last_login_at)}
                         </div>
                       </div>
+                    </div>
+
+                    <div style={analyticsWrapStyle}>
+                      <CustomerAnalyticsPanel customerId={item.id} />
                     </div>
 
                     <div style={detailsActionsBarStyle}>
@@ -634,7 +678,14 @@ export default function AdminCustomersPage() {
                           type="button"
                           onClick={() => handleUpdateStatus(item)}
                           disabled={statusLoadingId === item.id}
-                          style={secondaryButtonStyleCompact}
+                          style={{
+                            ...secondaryButtonStyleCompact,
+                            opacity: statusLoadingId === item.id ? 0.7 : 1,
+                            cursor:
+                              statusLoadingId === item.id
+                                ? "not-allowed"
+                                : "pointer",
+                          }}
                         >
                           {statusLoadingId === item.id ? "Saving..." : "Save Status"}
                         </button>
@@ -678,6 +729,7 @@ const subtitleStyle: React.CSSProperties = {
   color: "#6f6559",
   fontSize: 16,
   maxWidth: 820,
+  lineHeight: 1.7,
 };
 
 const filterCardStyle: React.CSSProperties = {
@@ -807,6 +859,7 @@ const primaryTextStyle: React.CSSProperties = {
   fontWeight: 800,
   color: "#171717",
   lineHeight: 1.4,
+  wordBreak: "break-word",
 };
 
 const secondaryTextStyle: React.CSSProperties = {
@@ -814,6 +867,7 @@ const secondaryTextStyle: React.CSSProperties = {
   fontSize: 13,
   color: "#6f6559",
   lineHeight: 1.5,
+  wordBreak: "break-word",
 };
 
 const statusPillStyle: React.CSSProperties = {
@@ -848,6 +902,10 @@ const detailsGridStyle: React.CSSProperties = {
   paddingTop: 16,
 };
 
+const analyticsWrapStyle: React.CSSProperties = {
+  marginTop: 16,
+};
+
 const detailsActionsBarStyle: React.CSSProperties = {
   marginTop: 16,
   paddingTop: 14,
@@ -875,6 +933,7 @@ const metaValueStyle: React.CSSProperties = {
   lineHeight: 1.7,
   fontWeight: 700,
   fontSize: 14,
+  wordBreak: "break-word",
 };
 
 const compactSelectStyle: React.CSSProperties = {

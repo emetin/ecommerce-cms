@@ -10,6 +10,7 @@ export default function ForgotPasswordPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
     setMessage("");
     setError("");
     setIsSubmitting(true);
@@ -20,7 +21,9 @@ export default function ForgotPasswordPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+        }),
       });
 
       const data = (await response.json()) as {
@@ -40,176 +43,178 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: "32px 16px",
-        background: "#f7f7f7",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 460,
-          background: "#ffffff",
-          borderRadius: 20,
-          padding: 28,
-          border: "1px solid #e5e5e5",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 800,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: "#8a7f72",
-            marginBottom: 10,
-          }}
-        >
-          Customer Portal
-        </div>
+    <main style={mainStyle}>
+      <section style={cardStyle}>
+        <div style={kickerStyle}>Customer Portal</div>
 
-        <h1
-          style={{
-            fontSize: 28,
-            marginTop: 0,
-            marginBottom: 10,
-            color: "#171717",
-          }}
-        >
-          Forgot Password
-        </h1>
+        <h1 style={titleStyle}>Forgot Password</h1>
 
-        <p
-          style={{
-            fontSize: 14,
-            lineHeight: 1.7,
-            color: "#666",
-            marginTop: 0,
-            marginBottom: 20,
-          }}
-        >
+        <p style={subtitleStyle}>
           Enter your account email address and we will send you a secure password
           reset link.
         </p>
 
-        <form onSubmit={handleSubmit}>
-          <label
-            htmlFor="email"
-            style={{
-              display: "block",
-              marginBottom: 8,
-              fontWeight: 700,
-              fontSize: 14,
-              color: "#171717",
-            }}
-          >
-            Email
-          </label>
+        <form onSubmit={handleSubmit} style={formStyle}>
+          <div>
+            <label htmlFor="email" style={labelStyle}>
+              Email
+            </label>
 
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@company.com"
-            autoComplete="email"
-            required
-            style={{
-              width: "100%",
-              height: 48,
-              padding: "0 14px",
-              borderRadius: 12,
-              border: "1px solid #d9d9d9",
-              marginBottom: 14,
-              fontSize: 14,
-            }}
-          />
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@company.com"
+              autoComplete="email"
+              required
+              style={inputStyle}
+            />
+          </div>
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            style={{
-              width: "100%",
-              height: 48,
-              border: "none",
-              borderRadius: 12,
-              background: "#171717",
-              color: "#ffffff",
-              fontSize: 14,
-              fontWeight: 700,
-              cursor: isSubmitting ? "not-allowed" : "pointer",
-              opacity: isSubmitting ? 0.7 : 1,
-            }}
-          >
+          <button type="submit" disabled={isSubmitting} style={buttonStyle}>
             {isSubmitting ? "Sending..." : "Send Reset Link"}
           </button>
         </form>
 
-        {message ? (
-          <div
-            style={{
-              marginTop: 14,
-              padding: 12,
-              borderRadius: 12,
-              background: "#f6f8f7",
-              color: "#1f5133",
-              fontSize: 14,
-              lineHeight: 1.7,
-              border: "1px solid #dbe7df",
-            }}
-          >
-            {message}
-          </div>
-        ) : null}
+        {message ? <div style={successBoxStyle}>{message}</div> : null}
+        {error ? <div style={errorBoxStyle}>{error}</div> : null}
 
-        {error ? (
-          <div
-            style={{
-              marginTop: 14,
-              padding: 12,
-              borderRadius: 12,
-              background: "#fff4f4",
-              color: "#b42318",
-              fontSize: 14,
-              lineHeight: 1.7,
-              border: "1px solid #f1c9c9",
-            }}
-          >
-            {error}
-          </div>
-        ) : null}
-
-        <div
-          style={{
-            marginTop: 18,
-            paddingTop: 18,
-            borderTop: "1px solid #ece7de",
-          }}
-        >
-          <a
-            href="/login"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "100%",
-              minHeight: 48,
-              borderRadius: 12,
-              border: "1px solid #d9cfbf",
-              background: "#fff",
-              color: "#171717",
-              fontWeight: 700,
-              textDecoration: "none",
-            }}
-          >
-            Back to Login
+        <div style={footerStyle}>
+          <a href="/portal-login" style={secondaryButtonStyle}>
+            Back to Customer Login
           </a>
         </div>
-      </div>
+      </section>
     </main>
   );
 }
+
+const mainStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  display: "grid",
+  placeItems: "center",
+  padding: "32px 16px",
+  background: "#f7f4ee",
+};
+
+const cardStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 460,
+  background: "#ffffff",
+  borderRadius: 24,
+  padding: 28,
+  border: "1px solid #e6ddd0",
+  boxShadow: "0 10px 30px rgba(23,23,23,0.05)",
+};
+
+const kickerStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: "#8a7f72",
+  marginBottom: 10,
+};
+
+const titleStyle: React.CSSProperties = {
+  fontSize: 32,
+  lineHeight: 1.1,
+  marginTop: 0,
+  marginBottom: 10,
+  color: "#171717",
+  fontWeight: 800,
+};
+
+const subtitleStyle: React.CSSProperties = {
+  fontSize: 14,
+  lineHeight: 1.7,
+  color: "#665d52",
+  marginTop: 0,
+  marginBottom: 20,
+};
+
+const formStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 14,
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  marginBottom: 8,
+  fontWeight: 800,
+  fontSize: 14,
+  color: "#171717",
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  height: 50,
+  padding: "0 14px",
+  borderRadius: 14,
+  border: "1px solid #d9cfbf",
+  background: "#fcfbf8",
+  fontSize: 14,
+  outline: "none",
+};
+
+const buttonStyle: React.CSSProperties = {
+  width: "100%",
+  height: 50,
+  border: "1px solid #171717",
+  borderRadius: 999,
+  background: "#171717",
+  color: "#ffffff",
+  fontSize: 14,
+  fontWeight: 800,
+  cursor: isSubmittingCursor(),
+  opacity: 1,
+};
+
+function isSubmittingCursor() {
+  return "pointer";
+}
+
+const successBoxStyle: React.CSSProperties = {
+  marginTop: 14,
+  padding: 13,
+  borderRadius: 14,
+  background: "#eef8f0",
+  color: "#1d6a43",
+  fontSize: 14,
+  lineHeight: 1.7,
+  border: "1px solid #cfe7d8",
+  fontWeight: 700,
+};
+
+const errorBoxStyle: React.CSSProperties = {
+  marginTop: 14,
+  padding: 13,
+  borderRadius: 14,
+  background: "#fff1f1",
+  color: "#8d2f2f",
+  fontSize: 14,
+  lineHeight: 1.7,
+  border: "1px solid #f0c9c9",
+  fontWeight: 700,
+};
+
+const footerStyle: React.CSSProperties = {
+  marginTop: 18,
+  paddingTop: 18,
+  borderTop: "1px solid #ece7de",
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "100%",
+  minHeight: 50,
+  borderRadius: 999,
+  border: "1px solid #d9cfbf",
+  background: "#fff",
+  color: "#171717",
+  fontWeight: 800,
+  textDecoration: "none",
+};

@@ -40,11 +40,20 @@ const SHEET_TITLE_ALIASES: Record<string, string[]> = {
   products: ["products", "Products"],
   collections: ["collections", "Collections"],
   blog: ["blog", "Blog"],
+  media: ["media", "Media"],
   product_variants: ["product_variants", "Product_Variants", "Product Variants"],
   product_images: ["product_images", "Product_Images", "Product Images"],
   customers: ["customers", "Customers"],
-  collection_products: ["collection_products", "Collection_Products", "Collection Products"],
-  customer_applications: ["customer_applications", "Customer_Applications", "Customer Applications"],
+  collection_products: [
+    "collection_products",
+    "Collection_Products",
+    "Collection Products",
+  ],
+  customer_applications: [
+    "customer_applications",
+    "Customer_Applications",
+    "Customer Applications",
+  ],
   orders: ["orders", "Orders"],
   order_items: ["order_items", "Order_Items", "Order Items"],
   carts: ["carts", "Carts"],
@@ -58,6 +67,8 @@ const SHEET_RANGE_MAP: Record<string, string> = {
   Collections: "A:J",
   blog: "A:L",
   Blog: "A:L",
+  media: "A:J",
+  Media: "A:J",
   product_variants: "A:Z",
   Product_Variants: "A:Z",
   "Product Variants": "A:Z",
@@ -225,8 +236,12 @@ function clearSheetLocalCache(
   deleteCacheByPrefix(`sheet:headers:${mode}:${sheetName}:`);
   deleteCacheByPrefix(`sheet:objects:${mode}:${sheetName}:`);
   deleteCacheByPrefix(`sheet:rows:${mode}:${normalizeCellValueLower(sheetName)}:`);
-  deleteCacheByPrefix(`sheet:headers:${mode}:${normalizeCellValueLower(sheetName)}:`);
-  deleteCacheByPrefix(`sheet:objects:${mode}:${normalizeCellValueLower(sheetName)}:`);
+  deleteCacheByPrefix(
+    `sheet:headers:${mode}:${normalizeCellValueLower(sheetName)}:`
+  );
+  deleteCacheByPrefix(
+    `sheet:objects:${mode}:${normalizeCellValueLower(sheetName)}:`
+  );
 
   if (mode === "catalog") {
     deleteCacheByPrefix("sheet:meta:catalog:all:");
@@ -279,7 +294,9 @@ async function resolveActualSheetTitle(
   );
 
   const exactCandidate =
-    allMeta.find((item) => candidates.includes(normalizeCellValueLower(item.title))) ||
+    allMeta.find((item) =>
+      candidates.includes(normalizeCellValueLower(item.title))
+    ) ||
     allMeta.find((item) => normalizeCellValueLower(item.title) === requested);
 
   if (!exactCandidate) {
@@ -666,9 +683,12 @@ export async function getSheetMetaByTitle(
   );
 
   const sheet =
-    allMeta.find((item) => candidates.includes(normalizeCellValueLower(item.title))) ||
+    allMeta.find((item) =>
+      candidates.includes(normalizeCellValueLower(item.title))
+    ) ||
     allMeta.find(
-      (item) => normalizeCellValueLower(item.title) === normalizeCellValueLower(sheetName)
+      (item) =>
+        normalizeCellValueLower(item.title) === normalizeCellValueLower(sheetName)
     );
 
   if (!sheet) {

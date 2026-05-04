@@ -9,9 +9,11 @@ const NAV_ITEMS = [
   { href: "/admin/products", label: "Products" },
   { href: "/admin/collections", label: "Collections" },
   { href: "/admin/blog", label: "Blog" },
+  { href: "/admin/media", label: "Media" },
   { href: "/admin/customer-applications", label: "Applications" },
   { href: "/admin/customers", label: "Customers" },
   { href: "/admin/orders", label: "Orders" },
+  { href: "/admin/reports", label: "Reports" },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
@@ -271,6 +273,7 @@ function getPageTitle(pathname: string) {
   if (pathname.startsWith("/admin/products")) return "Products";
   if (pathname.startsWith("/admin/collections")) return "Collections";
   if (pathname.startsWith("/admin/blog")) return "Blog";
+  if (pathname.startsWith("/admin/media")) return "Media";
   if (pathname.startsWith("/admin/customer-applications")) return "Applications";
   if (pathname.startsWith("/admin/customers")) return "Customers";
   if (pathname.startsWith("/admin/orders")) return "Orders";

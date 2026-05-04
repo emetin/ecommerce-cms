@@ -1,95 +1,82 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
+import { deleteSheetRowsByField } from "../../../../lib/sheets";
 
-function normalizeText(value: unknown) {
-  return String(value ?? "").trim();
-}
+const SHEET_NAME = "media";
 
-function getUploadsBaseDir() {
-  return path.resolve(process.cwd(), "public", "uploads");
-}
-
-function isSafeUploadPath(fullPath: string) {
-  return path.resolve(fullPath).startsWith(getUploadsBaseDir());
-}
-
-function resolveLocalFilePath(params: {
-  imageUrl?: string;
-  imageFileId?: string;
-}) {
-  const imageUrl = normalizeText(params.imageUrl);
-  const imageFileId = path.basename(normalizeText(params.imageFileId));
-  const uploadsBaseDir = getUploadsBaseDir();
-
-  if (imageUrl.startsWith("/uploads/")) {
-    const relativePath = imageUrl.replace(/^\/+/, "");
-    const fullPath = path.resolve(process.cwd(), "public", relativePath);
-
-    if (isSafeUploadPath(fullPath)) {
-      return fullPath;
-    }
-  }
-
-  if (imageFileId) {
-    const possibleDirs = ["product", "collection", "blog"];
-
-    for (const dir of possibleDirs) {
-      const fullPath = path.resolve(uploadsBaseDir, dir, imageFileId);
-
-      if (isSafeUploadPath(fullPath) && fs.existsSync(fullPath)) {
-        return fullPath;
-      }
-    }
-  }
-
-  return null;
-}
+const APPS_SCRIPT_MEDIA_URL = process.env.GOOGLE_APPS_SCRIPT_MEDIA_URL;
+const APPS_SCRIPT_MEDIA_SECRET = process.env.GOOGLE_APPS_SCRIPT_MEDIA_SECRET;
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const fileId = normalizeText(body?.file_id);
-    const imageUrl = normalizeText(body?.image_url);
+    if (!APPS_SCRIPT_MEDIA_URL) {
+      throw new Error("Missing GOOGLE_APPS_SCRIPT_MEDIA_URL.");
+    }
 
-    if (!fileId && !imageUrl) {
+    if (!APPS_SCRIPT_MEDIA_SECRET) {
+      throw new Error("Missing GOOGLE_APPS_SCRIPT_MEDIA_SECRET.");
+    }
+
+    const body = await req.json();
+
+    const id = String(body?.id || "").trim();
+    const fileId = String(body?.file_id || "").trim();
+
+    if (!id) {
       return NextResponse.json(
         {
           ok: false,
-          error: "file_id or image_url is required.",
+          error: "Media ID is required.",
         },
         { status: 400 }
       );
     }
 
-    const localFilePath = resolveLocalFilePath({
-      imageUrl,
-      imageFileId: fileId,
-    });
-
-    if (!localFilePath) {
-      return NextResponse.json({
-        ok: true,
-        deleted: false,
-        message: "Local file not found.",
-      });
+    if (!fileId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "File ID is required.",
+        },
+        { status: 400 }
+      );
     }
 
-    fs.unlinkSync(localFilePath);
+    const scriptResponse = await fetch(APPS_SCRIPT_MEDIA_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8",
+      },
+      body: JSON.stringify({
+        action: "delete",
+        secret: APPS_SCRIPT_MEDIA_SECRET,
+        fileId,
+      }),
+    });
+
+    const scriptData = await scriptResponse.json();
+
+    if (!scriptResponse.ok || !scriptData.ok) {
+      throw new Error(
+        scriptData.message ||
+          scriptData.error ||
+          "Apps Script delete failed."
+      );
+    }
+
+    await deleteSheetRowsByField(SHEET_NAME, "id", id);
 
     return NextResponse.json({
       ok: true,
-      message: "Local file deleted successfully.",
-      file_id: fileId,
-      deleted: true,
-      deleted_file_path: localFilePath,
+      message: "Media deleted successfully.",
     });
   } catch (error) {
+    console.error("MEDIA_DELETE_ERROR:", error);
+
     return NextResponse.json(
       {
         ok: false,
         error:
-          error instanceof Error ? error.message : "Failed to delete local file.",
+          error instanceof Error ? error.message : "Failed to delete media.",
       },
       { status: 500 }
     );

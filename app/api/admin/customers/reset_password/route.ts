@@ -1,34 +1,25 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "crypto";
+import { verifyAdminSessionToken } from "../../../../../lib/admin-auth";
 import {
   getSheetRows,
   updateSheetRowByRowNumber,
 } from "../../../../../lib/sheets";
-import { verifyAdminSessionToken } from "../../../../../lib/admin-auth";
 
-type ResetPasswordBody = {
-  customerId?: string;
-};
+const CUSTOMERS_SHEET = "customers";
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
 function parseAdminTokenFromCookie(cookieHeader: string) {
   const match = cookieHeader.match(/ptx_admin_auth=([^;]+)/);
   return match ? decodeURIComponent(match[1]) : null;
-}
-
-function createTemporaryPassword(length = 10) {
-  const chars =
-    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  let result = "";
-
-  for (let i = 0; i < length; i += 1) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-
-  return result;
 }
 
 function buildRowObject(headers: string[], row: unknown[]) {
@@ -38,16 +29,16 @@ function buildRowObject(headers: string[], row: unknown[]) {
   }, {});
 }
 
-function buildCompanyName(customer: Record<string, string>) {
-  return normalizeText(customer.company) || normalizeText(customer.company_name);
+function generateTemporaryPassword() {
+  const partOne = randomBytes(4).toString("hex");
+  const partTwo = randomBytes(3).toString("hex");
+  return `Gtx-${partOne}-${partTwo}!`;
 }
 
-function buildContactName(customer: Record<string, string>) {
-  const first = normalizeText(customer.first_name);
-  const last = normalizeText(customer.last_name);
-  const full = [first, last].filter(Boolean).join(" ").trim();
-
-  return full || normalizeText(customer.contact_name);
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
 }
 
 export async function POST(req: Request) {
@@ -63,7 +54,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = (await req.json()) as ResetPasswordBody;
+    const body = await req.json();
     const customerId = normalizeText(body?.customerId);
 
     if (!customerId) {
@@ -73,9 +64,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const rows = await getSheetRows("customers");
+    const rows = await getSheetRows(CUSTOMERS_SHEET, {
+      forceFresh: true,
+      ttlSeconds: 0,
+    });
+
     const headers = Array.isArray(rows[0])
-      ? rows[0].map((cell) => String(cell || "").trim())
+      ? rows[0].map((cell) => normalizeText(cell))
       : [];
 
     if (!headers.length) {
@@ -101,35 +96,53 @@ export async function POST(req: Request) {
     const currentRow = rows[rowIndex] as unknown[];
     const customer = buildRowObject(headers, currentRow);
 
-    const temporaryPassword = createTemporaryPassword(10);
+    const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await bcrypt.hash(temporaryPassword, 10);
-    const now = new Date().toISOString();
+    const now = new Date();
+    const expiresAt = addDays(now, 7);
 
     const updatedRow = headers.map((header) => {
       switch (header) {
         case "password_hash":
           return passwordHash;
-        case "updated_at":
-          return now;
         case "must_change_password":
           return "true";
+        case "temporary_password_created_at":
+          return now.toISOString();
+        case "temporary_password_expires_at":
+          return expiresAt.toISOString();
+        case "reset_token":
+          return "";
+        case "reset_token_expires_at":
+          return "";
+        case "reset_requested_at":
+          return "";
+        case "updated_at":
+          return now.toISOString();
+        case "status":
+          return normalizeLower(customer.status || "active") || "active";
         default:
           return normalizeText(customer[header]);
       }
     });
 
-    await updateSheetRowByRowNumber("customers", rowIndex + 1, updatedRow);
+    await updateSheetRowByRowNumber(CUSTOMERS_SHEET, rowIndex + 1, updatedRow);
 
     return NextResponse.json({
       ok: true,
       message: "Temporary password generated successfully.",
+      temporaryPassword,
+      expiresAt: expiresAt.toISOString(),
       customer: {
         id: normalizeText(customer.id),
-        companyName: buildCompanyName(customer),
-        contactName: buildContactName(customer),
-        email: normalizeText(customer.email).toLowerCase(),
+        email: normalizeLower(customer.email),
+        companyName: normalizeText(customer.company || customer.company_name),
+        contactName:
+          [customer.first_name, customer.last_name]
+            .map(normalizeText)
+            .filter(Boolean)
+            .join(" ") || normalizeText(customer.contact_name),
       },
-      temporaryPassword,
     });
   } catch (error) {
     return NextResponse.json(
@@ -138,7 +151,7 @@ export async function POST(req: Request) {
         error:
           error instanceof Error
             ? error.message
-            : "Unknown error while resetting password.",
+            : "Failed to generate temporary password.",
       },
       { status: 500 }
     );

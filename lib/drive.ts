@@ -7,10 +7,19 @@ export type DriveUploadResult = {
   fileId: string;
   fileName: string;
   url: string;
+  previewUrl: string;
   alt: string;
   uploadedAt: string;
   entityType: DriveEntityType;
 };
+
+const ALLOWED_IMAGE_TYPES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+];
 
 function getClientEmail() {
   return process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "";
@@ -18,10 +27,6 @@ function getClientEmail() {
 
 function getPrivateKey() {
   return process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n") || "";
-}
-
-function getImpersonateUser() {
-  return process.env.GOOGLE_IMPERSONATE_USER || "";
 }
 
 function getDriveFolderIds(): Record<DriveEntityType, string | undefined> {
@@ -33,37 +38,30 @@ function getDriveFolderIds(): Record<DriveEntityType, string | undefined> {
 }
 
 function assertDriveEnv() {
-  const CLIENT_EMAIL = getClientEmail();
-  const PRIVATE_KEY = getPrivateKey();
-  const IMPERSONATE_USER = getImpersonateUser();
+  const clientEmail = getClientEmail();
+  const privateKey = getPrivateKey();
 
-  if (!CLIENT_EMAIL) {
+  if (!clientEmail) {
     throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL.");
   }
 
-  if (!PRIVATE_KEY) {
+  if (!privateKey) {
     throw new Error("Missing GOOGLE_PRIVATE_KEY.");
   }
 
-  if (!IMPERSONATE_USER) {
-    throw new Error("Missing GOOGLE_IMPERSONATE_USER.");
-  }
-
   return {
-    CLIENT_EMAIL,
-    PRIVATE_KEY,
-    IMPERSONATE_USER,
+    clientEmail,
+    privateKey,
   };
 }
 
 function getDriveAuth() {
-  const { CLIENT_EMAIL, PRIVATE_KEY, IMPERSONATE_USER } = assertDriveEnv();
+  const { clientEmail, privateKey } = assertDriveEnv();
 
   return new google.auth.JWT({
-    email: CLIENT_EMAIL,
-    key: PRIVATE_KEY,
+    email: clientEmail,
+    key: privateKey,
     scopes: ["https://www.googleapis.com/auth/drive"],
-    subject: IMPERSONATE_USER,
   });
 }
 
@@ -77,7 +75,7 @@ function getDriveClient() {
 }
 
 function sanitizeFileName(fileName: string) {
-  return String(fileName || "image")
+  const cleanName = String(fileName || "image")
     .toLowerCase()
     .trim()
     .replace(/ğ/g, "g")
@@ -89,6 +87,8 @@ function sanitizeFileName(fileName: string) {
     .replace(/[^a-z0-9.\-_]/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
+
+  return cleanName || "image";
 }
 
 function sanitizeAltText(value: string) {
@@ -113,10 +113,25 @@ function buildPublicUrl(fileId: string) {
   return `https://drive.google.com/uc?export=view&id=${fileId}`;
 }
 
+function buildPreviewUrl(fileId: string, size = "w300") {
+  return `https://drive.google.com/thumbnail?id=${fileId}&sz=${size}`;
+}
+
 function buildFileName(entityType: DriveEntityType, originalName: string) {
   const timestamp = Date.now();
   const safeFileName = sanitizeFileName(originalName || "image");
+
   return `${entityType}-${timestamp}-${safeFileName}`;
+}
+
+function assertValidImageFile(file: File) {
+  if (!(file instanceof File)) {
+    throw new Error("A valid file is required.");
+  }
+
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+    throw new Error("Unsupported file type. Please upload JPG, PNG, WEBP, or GIF.");
+  }
 }
 
 export async function uploadFileToDrive(
@@ -124,9 +139,7 @@ export async function uploadFileToDrive(
   entityType: DriveEntityType,
   alt?: string
 ): Promise<DriveUploadResult> {
-  if (!(file instanceof File)) {
-    throw new Error("A valid file is required.");
-  }
+  assertValidImageFile(file);
 
   const folderId = getFolderIdByEntityType(entityType);
   const drive = getDriveClient();
@@ -172,8 +185,9 @@ export async function uploadFileToDrive(
 
   return {
     fileId,
-    fileName: finalFileName,
+    fileName: createdFile.data.name || finalFileName,
     url: buildPublicUrl(fileId),
+    previewUrl: buildPreviewUrl(fileId),
     alt: sanitizeAltText(alt || file.name || entityType),
     uploadedAt,
     entityType,
@@ -228,4 +242,12 @@ export async function replaceFileOnDrive(params: {
 
 export async function uploadProductImageToDrive(file: File, alt?: string) {
   return uploadFileToDrive(file, "product", alt);
+}
+
+export async function uploadCollectionImageToDrive(file: File, alt?: string) {
+  return uploadFileToDrive(file, "collection", alt);
+}
+
+export async function uploadBlogImageToDrive(file: File, alt?: string) {
+  return uploadFileToDrive(file, "blog", alt);
 }

@@ -1,31 +1,69 @@
 import { NextResponse } from "next/server";
-import { ensureCartToken } from "../../../../lib/cart-cookie";
-import { getHydratedCartByToken, getOrCreateCart, syncCartTotals } from "../../../../lib/cart";
+import { getCartTokenFromCookies } from "../../../../lib/cart-cookie";
+import { getHydratedCartByToken, syncCartTotals } from "../../../../lib/cart";
+
+function jsonError(message: string, status: number) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    { status }
+  );
+}
+
+function createEmptyCartFallback() {
+  return {
+    cart: null,
+    items: [],
+    totals: {
+      subtotal: 0,
+      discount_total: 0,
+      shipping_total: 0,
+      tax_total: 0,
+      grand_total: 0,
+      item_count: 0,
+    },
+  };
+}
 
 export async function GET() {
   try {
-    const cartToken = await ensureCartToken();
-    const existing = await getHydratedCartByToken(cartToken);
+    const cartToken = await getCartTokenFromCookies();
 
-    if (existing) {
-      const synced = await syncCartTotals(existing.cart.id);
-      return NextResponse.json({ ok: true, cart: synced });
+    if (!cartToken) {
+      return NextResponse.json({
+        ok: true,
+        cart: createEmptyCartFallback(),
+      });
     }
 
-    const cart = await getOrCreateCart(cartToken);
-    const hydrated = await getHydratedCartByToken(cart.cart_token);
+    const hydrated = await getHydratedCartByToken(cartToken);
 
-    return NextResponse.json({
-      ok: true,
-      cart: hydrated,
-    });
+    if (!hydrated?.cart?.id) {
+      return NextResponse.json({
+        ok: true,
+        cart: createEmptyCartFallback(),
+      });
+    }
+
+    try {
+      const synced = await syncCartTotals(hydrated.cart.id);
+
+      return NextResponse.json({
+        ok: true,
+        cart: synced,
+      });
+    } catch {
+      return NextResponse.json({
+        ok: true,
+        cart: hydrated,
+      });
+    }
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to get cart.";
-
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error ? error.message : "Failed to get cart.",
+      500
     );
   }
 }

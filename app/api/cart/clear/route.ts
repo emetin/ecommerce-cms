@@ -1,31 +1,57 @@
 import { NextResponse } from "next/server";
-import { getCartTokenFromCookies } from "../../../../lib/cart-cookie";
-import { clearCartByToken } from "../../../../lib/cart";
+import { ensureCartToken } from "../../../../lib/cart-cookie";
+import {
+  clearCartByToken,
+  getOrCreateHydratedCartByToken,
+} from "../../../../lib/cart";
+import { getRateLimitKey, rateLimit } from "../../../../lib/rate-limit";
 
-export async function POST() {
+function jsonError(message: string, status: number) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    { status }
+  );
+}
+
+export async function POST(req: Request) {
   try {
-    const cartToken = await getCartTokenFromCookies();
+    const limited = rateLimit({
+      key: getRateLimitKey(req, "cart:clear"),
+      limit: 30,
+      windowMs: 60 * 1000,
+    });
 
-    if (!cartToken) {
+    if (!limited.ok) {
+      return jsonError(
+        "Too many cart clear requests. Please try again shortly.",
+        429
+      );
+    }
+
+    const cartToken = await ensureCartToken();
+
+    const clearedCart = await clearCartByToken(cartToken);
+
+    if (clearedCart) {
       return NextResponse.json({
         ok: true,
-        cart: null,
+        cart: clearedCart,
       });
     }
 
-    const cart = await clearCartByToken(cartToken);
+    const emptyCart = await getOrCreateHydratedCartByToken(cartToken);
 
     return NextResponse.json({
       ok: true,
-      cart,
+      cart: emptyCart,
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to clear cart.";
-
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error ? error.message : "Failed to clear cart.",
+      500
     );
   }
 }

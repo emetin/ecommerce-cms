@@ -18,6 +18,9 @@ const playfairDisplay = Playfair_Display({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL || "https://www.globaltexusa.com"
+  ),
   title: "Globaltex Fine Linens",
   description: "Luxury hospitality textiles and premium linen solutions.",
 };

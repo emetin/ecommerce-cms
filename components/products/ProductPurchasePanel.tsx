@@ -29,7 +29,9 @@ export type VariantItem = {
   image_id?: string;
   weight?: string;
   weight_unit?: string;
+  min_quantity?: string;
   box_quantity?: string;
+  case_quantity?: string;
   status?: string;
   created_at?: string;
   updated_at?: string;
@@ -180,7 +182,7 @@ function ProductPurchasePanelComponent({
   variants = [],
   onVariantChange,
 }: ProductPurchasePanelProps) {
-  const { handleAddToCart, isLoading } = useCart();
+  const { handleAddToCart, isAdding } = useCart();
 
   const [selectedOption1, setSelectedOption1] = useState("");
   const [selectedOption2, setSelectedOption2] = useState("");
@@ -274,7 +276,9 @@ function ProductPurchasePanelComponent({
     }
 
     setSelectedOption2((prev) =>
-      availableOption2Values.includes(prev) ? prev : availableOption2Values[0] || ""
+      availableOption2Values.includes(prev)
+        ? prev
+        : availableOption2Values[0] || ""
     );
   }, [option2.values.length, availableOption2Values]);
 
@@ -285,7 +289,9 @@ function ProductPurchasePanelComponent({
     }
 
     setSelectedOption3((prev) =>
-      availableOption3Values.includes(prev) ? prev : availableOption3Values[0] || ""
+      availableOption3Values.includes(prev)
+        ? prev
+        : availableOption3Values[0] || ""
     );
   }, [option3.values.length, availableOption3Values]);
 
@@ -315,9 +321,16 @@ function ProductPurchasePanelComponent({
     onVariantChange?.(selectedVariant);
   }, [selectedVariant, onVariantChange]);
 
+  useEffect(() => {
+    setQuantity(1);
+    setLocalError("");
+    setSuccessMessage("");
+  }, [selectedVariant?.id]);
+
   const price = parsePrice(selectedVariant?.price);
   const compareAtPrice = parsePrice(selectedVariant?.compare_at_price);
   const hasDiscount = compareAtPrice > price && price > 0;
+
   const discountPercent = hasDiscount
     ? Math.round(((compareAtPrice - price) / compareAtPrice) * 100)
     : 0;
@@ -331,6 +344,20 @@ function ProductPurchasePanelComponent({
     Boolean(selectedVariant?.id) &&
     price > 0 &&
     quantity >= 1;
+
+  function decreaseQuantity() {
+    setLocalError("");
+    setSuccessMessage("");
+
+    setQuantity((prev) => Math.max(1, prev - 1));
+  }
+
+  function increaseQuantity() {
+    setLocalError("");
+    setSuccessMessage("");
+
+    setQuantity((prev) => prev + 1);
+  }
 
   async function onAddToCart() {
     try {
@@ -358,7 +385,7 @@ function ProductPurchasePanelComponent({
         quantity,
       });
 
-      setSuccessMessage("Added to cart.");
+      setSuccessMessage("Added to quote cart.");
     } catch (error) {
       setLocalError(
         error instanceof Error ? error.message : "Failed to add this item to cart."
@@ -391,18 +418,32 @@ function ProductPurchasePanelComponent({
     <div style={panelStyle}>
       <div style={{ display: "grid", gap: 18 }}>
         <div>
-          <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "baseline",
+              flexWrap: "wrap",
+            }}
+          >
             <span style={priceStyle}>
               {price > 0 ? formatMoney(price) : "Request Quote"}
             </span>
 
             {hasDiscount ? (
               <>
-                <span style={comparePriceStyle}>{formatMoney(compareAtPrice)}</span>
+                <span style={comparePriceStyle}>
+                  {formatMoney(compareAtPrice)}
+                </span>
                 <span style={discountBadgeStyle}>Save {discountPercent}%</span>
               </>
             ) : null}
           </div>
+
+          <p style={priceNoteStyle}>
+            Estimated B2B unit price. Final pricing, freight, and payment terms
+            are reviewed after quote submission.
+          </p>
         </div>
 
         {option1.optionName ? (
@@ -410,7 +451,11 @@ function ProductPurchasePanelComponent({
             label={option1.optionName}
             values={option1.values}
             value={selectedOption1}
-            onChange={setSelectedOption1}
+            onChange={(value) => {
+              setSelectedOption1(value);
+              setLocalError("");
+              setSuccessMessage("");
+            }}
           />
         ) : null}
 
@@ -419,7 +464,11 @@ function ProductPurchasePanelComponent({
             label={option2.optionName}
             values={availableOption2Values}
             value={selectedOption2}
-            onChange={setSelectedOption2}
+            onChange={(value) => {
+              setSelectedOption2(value);
+              setLocalError("");
+              setSuccessMessage("");
+            }}
           />
         ) : null}
 
@@ -428,19 +477,27 @@ function ProductPurchasePanelComponent({
             label={option3.optionName}
             values={availableOption3Values}
             value={selectedOption3}
-            onChange={setSelectedOption3}
+            onChange={(value) => {
+              setSelectedOption3(value);
+              setLocalError("");
+              setSuccessMessage("");
+            }}
           />
         ) : null}
 
-        <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "grid", gap: 10 }}>
           <label style={labelStyle}>Quantity</label>
 
           <div style={qtyWrapperStyle}>
             <button
               type="button"
-              onClick={() => setQuantity((prev) => Math.max(1, prev - 1))}
-              disabled={isLoading}
-              style={qtyButtonStyle}
+              onClick={decreaseQuantity}
+              disabled={isAdding}
+              style={{
+                ...qtyButtonStyle,
+                cursor: isAdding ? "not-allowed" : "pointer",
+                opacity: isAdding ? 0.65 : 1,
+              }}
             >
               -
             </button>
@@ -449,9 +506,13 @@ function ProductPurchasePanelComponent({
 
             <button
               type="button"
-              onClick={() => setQuantity((prev) => prev + 1)}
-              disabled={isLoading}
-              style={qtyButtonStyle}
+              onClick={increaseQuantity}
+              disabled={isAdding}
+              style={{
+                ...qtyButtonStyle,
+                cursor: isAdding ? "not-allowed" : "pointer",
+                opacity: isAdding ? 0.65 : 1,
+              }}
             >
               +
             </button>
@@ -476,18 +537,18 @@ function ProductPurchasePanelComponent({
           <button
             type="button"
             onClick={onAddToCart}
-            disabled={isLoading || !canAddToCart}
+            disabled={isAdding || !canAddToCart}
             style={{
               ...primaryButtonStyle,
-              opacity: isLoading || !canAddToCart ? 0.65 : 1,
-              cursor: isLoading || !canAddToCart ? "not-allowed" : "pointer",
+              opacity: isAdding || !canAddToCart ? 0.65 : 1,
+              cursor: isAdding || !canAddToCart ? "not-allowed" : "pointer",
             }}
           >
-            {isLoading ? "Adding..." : "Add to Cart"}
+            {isAdding ? "Adding..." : "Add to Quote Cart"}
           </button>
 
           <Link href={inquiryHref} style={secondaryLinkStyle}>
-            Request Quote
+            Contact Sales
           </Link>
         </div>
       </div>
@@ -525,10 +586,10 @@ function VariantSelectBlock({
                 minHeight: 42,
                 padding: "0 16px",
                 borderRadius: 999,
-                border: active ? "1px solid #2f7d62" : "1px solid #ddd3c5",
-                background: active ? "#eef8f0" : "#fff",
+                border: active ? "1px solid #171717" : "1px solid #ddd3c5",
+                background: active ? "#f8f5ef" : "#fff",
                 color: "#171717",
-                fontWeight: 700,
+                fontWeight: 800,
                 cursor: "pointer",
               }}
             >
@@ -553,7 +614,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
       }}
     >
       <span style={{ color: "#7b7367", fontWeight: 700 }}>{label}</span>
-      <span style={{ color: "#171717", fontWeight: 800, textAlign: "right" }}>
+      <span style={{ color: "#171717", fontWeight: 850, textAlign: "right" }}>
         {value}
       </span>
     </div>
@@ -569,7 +630,7 @@ const panelStyle: React.CSSProperties = {
 
 const panelTitleStyle: React.CSSProperties = {
   fontSize: 24,
-  fontWeight: 800,
+  fontWeight: 850,
   color: "#171717",
   marginBottom: 8,
 };
@@ -584,8 +645,15 @@ const panelTextStyle: React.CSSProperties = {
 const priceStyle: React.CSSProperties = {
   fontSize: 32,
   lineHeight: 1,
-  fontWeight: 800,
+  fontWeight: 850,
   color: "#171717",
+};
+
+const priceNoteStyle: React.CSSProperties = {
+  margin: "10px 0 0",
+  color: "#6b6256",
+  fontSize: 13,
+  lineHeight: 1.7,
 };
 
 const comparePriceStyle: React.CSSProperties = {
@@ -603,13 +671,13 @@ const discountBadgeStyle: React.CSSProperties = {
   background: "#eef8f0",
   color: "#2f7d62",
   fontSize: 12,
-  fontWeight: 800,
+  fontWeight: 850,
 };
 
 const labelStyle: React.CSSProperties = {
   display: "block",
   fontSize: 13,
-  fontWeight: 800,
+  fontWeight: 850,
   color: "#5d554a",
   letterSpacing: "0.04em",
   textTransform: "uppercase",
@@ -622,20 +690,20 @@ const qtyWrapperStyle: React.CSSProperties = {
 };
 
 const qtyButtonStyle: React.CSSProperties = {
-  width: 40,
-  height: 40,
+  width: 42,
+  height: 42,
   borderRadius: 12,
   border: "1px solid #ddd3c5",
   background: "#fff",
   color: "#171717",
   fontSize: 18,
-  fontWeight: 700,
+  fontWeight: 800,
 };
 
 const qtyValueStyle: React.CSSProperties = {
-  minWidth: 28,
+  minWidth: 42,
   textAlign: "center",
-  fontWeight: 800,
+  fontWeight: 850,
   color: "#171717",
 };
 
@@ -674,7 +742,7 @@ const primaryButtonStyle: React.CSSProperties = {
   border: "1px solid #171717",
   background: "#171717",
   color: "#fff",
-  fontWeight: 800,
+  fontWeight: 850,
   fontSize: 15,
 };
 
@@ -687,7 +755,7 @@ const primaryLinkStyle: React.CSSProperties = {
   border: "1px solid #171717",
   background: "#171717",
   color: "#fff",
-  fontWeight: 800,
+  fontWeight: 850,
   cursor: "pointer",
   fontSize: 15,
   textDecoration: "none",
@@ -703,7 +771,7 @@ const secondaryLinkStyle: React.CSSProperties = {
   border: "1px solid #d8cebf",
   background: "#fff",
   color: "#171717",
-  fontWeight: 800,
+  fontWeight: 850,
   cursor: "pointer",
   fontSize: 15,
   textDecoration: "none",

@@ -58,12 +58,14 @@ export async function findCustomerByEmail(email: string) {
     return null;
   }
 
-  return findSheetItemByField<CustomerRow>(
+  const customerRaw = await findSheetItemByField(
     CUSTOMERS_SHEET,
     "email",
     normalizedEmail,
     { ttlSeconds: 60 }
   );
+
+  return (customerRaw as CustomerRow | null) || null;
 }
 
 export async function findCustomerById(id: string) {
@@ -73,9 +75,14 @@ export async function findCustomerById(id: string) {
     return null;
   }
 
-  return findSheetItemByField<CustomerRow>(CUSTOMERS_SHEET, "id", normalizedId, {
-    ttlSeconds: 60,
-  });
+  const customerRaw = await findSheetItemByField(
+    CUSTOMERS_SHEET,
+    "id",
+    normalizedId,
+    { ttlSeconds: 60 }
+  );
+
+  return (customerRaw as CustomerRow | null) || null;
 }
 
 export async function createCustomerAccount(input: {
@@ -155,7 +162,11 @@ export async function touchCustomerLogin(customerId: string) {
     return null;
   }
 
-  const rowNumber = await findRowNumberByField(CUSTOMERS_SHEET, "id", customerId);
+  const rowNumber = await findRowNumberByField(
+    CUSTOMERS_SHEET,
+    "id",
+    customerId
+  );
 
   if (!rowNumber) {
     return null;
@@ -194,7 +205,11 @@ export async function updateCustomerProfile(
     throw new Error("Customer not found.");
   }
 
-  const rowNumber = await findRowNumberByField(CUSTOMERS_SHEET, "id", customerId);
+  const rowNumber = await findRowNumberByField(
+    CUSTOMERS_SHEET,
+    "id",
+    customerId
+  );
 
   if (!rowNumber) {
     throw new Error("Customer row not found.");

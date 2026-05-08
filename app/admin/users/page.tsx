@@ -81,6 +81,16 @@ function getStatusStyle(status: string): CSSProperties {
   };
 }
 
+function getDefaultRoleKey(roles: AdminRole[]) {
+  return (
+    roles.find(
+      (role) => role.status === "active" && role.roleKey === "super_admin"
+    )?.roleKey ||
+    roles.find((role) => role.status === "active")?.roleKey ||
+    "viewer"
+  );
+}
+
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<AdminRole[]>([]);
@@ -102,7 +112,7 @@ export default function AdminUsersPage() {
     email: "",
     name: "",
     password: "",
-    roleKey: "viewer",
+    roleKey: "",
     status: "active",
     mustChangePassword: true,
   });
@@ -147,12 +157,11 @@ export default function AdminUsersPage() {
     const nextRoles = Array.isArray(data.items) ? data.items : [];
     setRoles(nextRoles);
 
-    const firstActiveRole =
-      nextRoles.find((role) => role.status === "active")?.roleKey || "viewer";
+    const defaultRoleKey = getDefaultRoleKey(nextRoles);
 
     setNewUser((prev) => ({
       ...prev,
-      roleKey: prev.roleKey || firstActiveRole,
+      roleKey: prev.roleKey || defaultRoleKey,
     }));
   }
 
@@ -265,12 +274,29 @@ export default function AdminUsersPage() {
       setErrorMessage("");
       setSuccessMessage("");
 
+      if (!activeRoles.length) {
+        throw new Error(
+          "No active admin roles found. Please create or activate a role first."
+        );
+      }
+
+      const safeRoleKey = activeRoles.some(
+        (role) => role.roleKey === newUser.roleKey
+      )
+        ? newUser.roleKey
+        : activeRoles.find((role) => role.roleKey === "super_admin")?.roleKey ||
+          activeRoles[0]?.roleKey ||
+          "viewer";
+
       const response = await fetch("/api/admin/users", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(newUser),
+        body: JSON.stringify({
+          ...newUser,
+          roleKey: safeRoleKey,
+        }),
       });
 
       const data = await response.json();
@@ -280,11 +306,12 @@ export default function AdminUsersPage() {
       }
 
       setSuccessMessage("Admin user created successfully.");
+
       setNewUser({
         email: "",
         name: "",
         password: "",
-        roleKey: activeRoles[0]?.roleKey || "viewer",
+        roleKey: getDefaultRoleKey(activeRoles),
         status: "active",
         mustChangePassword: true,
       });
@@ -359,6 +386,7 @@ export default function AdminUsersPage() {
 
       setSuccessMessage("Password updated successfully.");
       setPasswordUserId("");
+
       setPasswordForm({
         password: "",
         mustChangePassword: true,
@@ -368,6 +396,54 @@ export default function AdminUsersPage() {
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Unknown password error."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteUser(user: AdminUser) {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${user.email}? This action cannot be undone.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setErrorMessage("");
+      setSuccessMessage("");
+
+      const response = await fetch(
+        `/api/admin/users/${encodeURIComponent(user.id)}`,
+        {
+          method: "DELETE",
+          cache: "no-store",
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Failed to delete admin user.");
+      }
+
+      setSuccessMessage("Admin user deleted successfully.");
+
+      if (editingId === user.id) {
+        setEditingId("");
+      }
+
+      if (passwordUserId === user.id) {
+        setPasswordUserId("");
+      }
+
+      await loadUsers();
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unknown delete error."
       );
     } finally {
       setSaving(false);
@@ -395,6 +471,7 @@ export default function AdminUsersPage() {
       </div>
 
       {errorMessage ? <div style={errorBoxStyle}>{errorMessage}</div> : null}
+
       {successMessage ? (
         <div style={successBoxStyle}>{successMessage}</div>
       ) : null}
@@ -468,11 +545,15 @@ export default function AdminUsersPage() {
               }
               style={inputStyle}
             >
-              {activeRoles.map((role) => (
-                <option key={role.id} value={role.roleKey}>
-                  {role.name} ({role.roleKey})
-                </option>
-              ))}
+              {activeRoles.length === 0 ? (
+                <option value="">No active roles found</option>
+              ) : (
+                activeRoles.map((role) => (
+                  <option key={role.id} value={role.roleKey}>
+                    {role.name} ({role.roleKey})
+                  </option>
+                ))
+              )}
             </select>
           </Field>
 
@@ -604,6 +685,15 @@ export default function AdminUsersPage() {
                         style={secondaryButtonStyle}
                       >
                         Password
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteUser(user)}
+                        disabled={saving}
+                        style={dangerSmallButtonStyle}
+                      >
+                        Delete
                       </button>
                     </div>
                   </div>
@@ -1024,6 +1114,17 @@ const dangerButtonStyle: CSSProperties = {
   color: "#fff",
   padding: "0 16px",
   fontWeight: 900,
+  cursor: "pointer",
+};
+
+const dangerSmallButtonStyle: CSSProperties = {
+  minHeight: 36,
+  borderRadius: 10,
+  border: "1px solid #a54a3f",
+  background: "#fff",
+  color: "#a54a3f",
+  padding: "0 12px",
+  fontWeight: 800,
   cursor: "pointer",
 };
 

@@ -38,7 +38,9 @@ export default function PortalAdminLoginPage() {
         }
       } catch {
         if (isMounted) {
-          setError("Security validation could not be loaded. Please refresh the page.");
+          setError(
+            "Security validation could not be loaded. Please refresh the page."
+          );
         }
       } finally {
         if (isMounted) {
@@ -82,6 +84,7 @@ export default function PortalAdminLoginPage() {
       const data = (await response.json()) as {
         ok?: boolean;
         error?: string;
+        nextPath?: string;
       };
 
       if (!response.ok || !data?.ok) {
@@ -89,7 +92,7 @@ export default function PortalAdminLoginPage() {
         return;
       }
 
-      router.replace("/admin");
+      router.replace(data.nextPath || "/admin");
       router.refresh();
     } catch {
       setError("A connection error occurred during login.");
@@ -112,23 +115,23 @@ export default function PortalAdminLoginPage() {
       <div
         style={{
           width: "100%",
-          maxWidth: 480,
+          maxWidth: 460,
           background: "rgba(255,255,255,0.96)",
-          borderRadius: 24,
-          padding: 32,
-          boxShadow: "0 24px 80px rgba(0,0,0,0.10)",
+          borderRadius: 18,
+          padding: 28,
+          boxShadow: "0 20px 70px rgba(0,0,0,0.10)",
           border: "1px solid #e6ddd0",
         }}
       >
-        <div style={{ marginBottom: 24 }}>
+        <div style={{ marginBottom: 22 }}>
           <div
             style={{
-              fontSize: 12,
+              fontSize: 11,
               fontWeight: 800,
               letterSpacing: "0.14em",
               textTransform: "uppercase",
               color: "#8a7f72",
-              marginBottom: 10,
+              marginBottom: 9,
             }}
           >
             Globaltex Fine Linens
@@ -136,7 +139,7 @@ export default function PortalAdminLoginPage() {
 
           <h1
             style={{
-              fontSize: 32,
+              fontSize: 30,
               lineHeight: 1.12,
               margin: 0,
               color: "#171717",
@@ -148,15 +151,14 @@ export default function PortalAdminLoginPage() {
 
           <p
             style={{
-              marginTop: 12,
+              marginTop: 10,
               marginBottom: 0,
-              fontSize: 15,
-              lineHeight: 1.75,
+              fontSize: 14,
+              lineHeight: 1.65,
               color: "#5f564c",
             }}
           >
-            Access the internal management panel for hospitality collections,
-            customer applications, B2B orders, and account operations.
+            Access the internal management panel for B2B hospitality operations.
           </p>
         </div>
 
@@ -165,31 +167,31 @@ export default function PortalAdminLoginPage() {
             htmlFor="username"
             style={{
               display: "block",
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: 700,
               color: "#171717",
-              marginBottom: 8,
+              marginBottom: 7,
             }}
           >
-            Username
+            Email
           </label>
 
           <input
             id="username"
             name="username"
-            type="text"
+            type="email"
             autoComplete="username"
             value={username}
             onChange={(event) => setUsername(event.target.value)}
-            placeholder="admin"
+            placeholder="admin@globaltexusa.com"
             style={{
               width: "100%",
-              height: 50,
-              borderRadius: 14,
+              height: 44,
+              borderRadius: 12,
               border: "1px solid #d9cfbf",
-              padding: "0 14px",
-              fontSize: 15,
-              marginBottom: 16,
+              padding: "0 13px",
+              fontSize: 14,
+              marginBottom: 14,
               outline: "none",
               background: "#fcfbf8",
             }}
@@ -199,10 +201,10 @@ export default function PortalAdminLoginPage() {
             htmlFor="password"
             style={{
               display: "block",
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: 700,
               color: "#171717",
-              marginBottom: 8,
+              marginBottom: 7,
             }}
           >
             Password
@@ -218,12 +220,12 @@ export default function PortalAdminLoginPage() {
             placeholder="••••••••"
             style={{
               width: "100%",
-              height: 50,
-              borderRadius: 14,
+              height: 44,
+              borderRadius: 12,
               border: "1px solid #d9cfbf",
-              padding: "0 14px",
-              fontSize: 15,
-              marginBottom: 16,
+              padding: "0 13px",
+              fontSize: 14,
+              marginBottom: 14,
               outline: "none",
               background: "#fcfbf8",
             }}
@@ -232,13 +234,13 @@ export default function PortalAdminLoginPage() {
           {error ? (
             <div
               style={{
-                marginBottom: 16,
-                borderRadius: 14,
-                padding: "12px 14px",
+                marginBottom: 14,
+                borderRadius: 12,
+                padding: "10px 12px",
                 background: "#fff1f1",
                 color: "#b42318",
-                fontSize: 14,
-                lineHeight: 1.7,
+                fontSize: 13,
+                lineHeight: 1.6,
                 border: "1px solid #f0c9c9",
               }}
             >
@@ -251,12 +253,12 @@ export default function PortalAdminLoginPage() {
             disabled={isSubmitting || isLoadingCsrf}
             style={{
               width: "100%",
-              height: 52,
+              height: 46,
               border: "none",
-              borderRadius: 14,
+              borderRadius: 12,
               background: "#171717",
               color: "#ffffff",
-              fontSize: 15,
+              fontSize: 14,
               fontWeight: 800,
               cursor:
                 isSubmitting || isLoadingCsrf ? "not-allowed" : "pointer",
@@ -273,19 +275,17 @@ export default function PortalAdminLoginPage() {
 
         <div
           style={{
-            marginTop: 16,
-            fontSize: 13,
-            lineHeight: 1.7,
+            marginTop: 14,
+            fontSize: 12,
+            lineHeight: 1.6,
             color: "#6b6258",
             background: "#f8f5ef",
             border: "1px solid #e8dfd2",
-            borderRadius: 14,
-            padding: "12px 14px",
+            borderRadius: 12,
+            padding: "10px 12px",
           }}
         >
-          Password recovery is intentionally disabled for security.
-          Admin password changes must be performed securely by updating the
-          server environment variables.
+          First-time users may be asked to set a new password after login.
         </div>
       </div>
     </main>

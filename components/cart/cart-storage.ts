@@ -12,6 +12,21 @@ async function parseJsonSafe(response: Response) {
   }
 }
 
+function createEmptyCartFallback() {
+  return {
+    cart: null,
+    items: [],
+    totals: {
+      subtotal: 0,
+      discount_total: 0,
+      shipping_total: 0,
+      tax_total: 0,
+      grand_total: 0,
+      item_count: 0,
+    },
+  };
+}
+
 async function requestCart<TPayload = unknown>(
   url: string,
   options?: {
@@ -43,7 +58,7 @@ async function requestCart<TPayload = unknown>(
     throw new Error(data?.error || "Cart request failed.");
   }
 
-  return data.cart;
+  return data.cart || createEmptyCartFallback();
 }
 
 export async function fetchCart(signal?: AbortSignal) {
@@ -56,11 +71,11 @@ export async function fetchCart(signal?: AbortSignal) {
 export async function addToCart(payload: {
   product_slug: string;
   variant_id?: string;
-  product_title: string;
+  product_title?: string;
   variant_title?: string;
   sku?: string;
   image?: string;
-  unit_price: number | string;
+  unit_price?: number | string;
   compare_at_price?: number | string;
   quantity?: number;
 }) {

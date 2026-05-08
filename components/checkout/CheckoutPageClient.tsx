@@ -32,6 +32,17 @@ type CustomerProfileResponse = {
   } | null;
 };
 
+type CartItem = {
+  id: string;
+  product_title?: string;
+  variant_title?: string;
+  image?: string;
+  quantity?: number | string;
+  unit_price?: number | string;
+  line_total?: number | string;
+  sku?: string;
+};
+
 async function parseJsonSafe(response: Response) {
   try {
     return await response.json();
@@ -40,8 +51,28 @@ async function parseJsonSafe(response: Response) {
   }
 }
 
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function normalizeEmail(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
+function isTechnicalCartError(message: string) {
+  const normalized = String(message || "").toLowerCase();
+
+  return (
+    normalized.includes("cart not found") ||
+    normalized.includes("cart token not found") ||
+    normalized.includes("cart row could not be found")
+  );
+}
+
 export default function CheckoutPageClient() {
-  const { cart, isLoading } = useCart();
+  const { cart, isBootstrapping, error: cartError, refreshCart } = useCart();
+
+  const [cartRequested, setCartRequested] = useState(false);
 
   const [form, setForm] = useState({
     email: "",
@@ -54,22 +85,45 @@ export default function CheckoutPageClient() {
     address_line_1: "",
     address_line_2: "",
     postal_code: "",
-    billing_same_as_shipping: true,
-    payment_method: "order_request",
-    cardholder_name: "",
     note: "",
   });
 
   const [autofillApplied, setAutofillApplied] = useState(false);
   const [loadingCustomer, setLoadingCustomer] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [startingPayment, setStartingPayment] = useState(false);
   const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
 
-  const items = cart?.items || [];
+  const items = useMemo(() => {
+    return Array.isArray(cart?.items) ? (cart.items as CartItem[]) : [];
+  }, [cart]);
+
   const subtotal = Number(cart?.totals?.subtotal || 0);
   const itemCount = Number(cart?.totals?.item_count || 0);
+
+  const visibleCartError =
+    cartError && !isTechnicalCartError(cartError) ? cartError : "";
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCart() {
+      try {
+        await refreshCart();
+      } catch {
+        // Cart errors are already handled by CartContext.
+      } finally {
+        if (active) {
+          setCartRequested(true);
+        }
+      }
+    }
+
+    void loadCart();
+
+    return () => {
+      active = false;
+    };
+  }, [refreshCart]);
 
   useEffect(() => {
     let active = true;
@@ -106,16 +160,11 @@ export default function CheckoutPageClient() {
           address_line_1: prev.address_line_1 || customer.address_line_1 || "",
           address_line_2: prev.address_line_2 || customer.address_line_2 || "",
           postal_code: prev.postal_code || customer.postal_code || "",
-          cardholder_name:
-            prev.cardholder_name ||
-            [customer.first_name, customer.last_name]
-              .filter(Boolean)
-              .join(" "),
         }));
 
         setAutofillApplied(true);
       } catch {
-        // no-op
+        // Customer profile is optional for guest quote requests.
       } finally {
         if (active) {
           setLoadingCustomer(false);
@@ -130,46 +179,47 @@ export default function CheckoutPageClient() {
     };
   }, []);
 
-  const canContinue = useMemo(() => {
+  const canSubmit = useMemo(() => {
     return (
       items.length > 0 &&
-      Boolean(form.email.trim()) &&
-      Boolean(form.first_name.trim()) &&
-      Boolean(form.last_name.trim()) &&
-      Boolean(form.address_line_1.trim()) &&
-      Boolean(form.country.trim()) &&
-      Boolean(form.city.trim())
+      Boolean(normalizeEmail(form.email)) &&
+      Boolean(normalizeText(form.first_name)) &&
+      Boolean(normalizeText(form.last_name)) &&
+      Boolean(normalizeText(form.company)) &&
+      Boolean(normalizeText(form.phone)) &&
+      Boolean(normalizeText(form.country)) &&
+      Boolean(normalizeText(form.city)) &&
+      Boolean(normalizeText(form.address_line_1))
     );
   }, [items.length, form]);
 
-  const isPayNow = form.payment_method === "pay_now";
-
-  async function submitOrderRequest() {
+  async function submitQuoteRequest() {
     const response = await fetch("/api/orders/create", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       credentials: "include",
+      cache: "no-store",
       body: JSON.stringify({
-        email: form.email,
-        first_name: form.first_name,
-        last_name: form.last_name,
-        company: form.company,
-        phone: form.phone,
-        country: form.country,
-        city: form.city,
-        address_line_1: form.address_line_1,
-        address_line_2: form.address_line_2,
-        postal_code: form.postal_code,
-        note: form.note,
+        email: normalizeEmail(form.email),
+        first_name: normalizeText(form.first_name),
+        last_name: normalizeText(form.last_name),
+        company: normalizeText(form.company),
+        phone: normalizeText(form.phone),
+        country: normalizeText(form.country),
+        city: normalizeText(form.city),
+        address_line_1: normalizeText(form.address_line_1),
+        address_line_2: normalizeText(form.address_line_2),
+        postal_code: normalizeText(form.postal_code),
+        note: normalizeText(form.note),
       }),
     });
 
     const data = (await parseJsonSafe(response)) as OrderCreateApiResponse | null;
 
     if (!response.ok || !data?.ok) {
-      throw new Error(data?.error || "Failed to create order.");
+      throw new Error(data?.error || "Failed to submit quote request.");
     }
 
     return data;
@@ -178,37 +228,28 @@ export default function CheckoutPageClient() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    setInfo("");
 
-    if (!canContinue) {
-      setError("Please complete the required checkout fields.");
+    if (isBootstrapping || !cartRequested) {
+      setError("Quote cart is still loading. Please try again in a moment.");
       return;
     }
 
-    if (isPayNow) {
-      try {
-        setStartingPayment(true);
+    if (!items.length) {
+      setError("Your quote cart is empty.");
+      return;
+    }
 
-        setInfo(
-          "Online payment will be connected next. For now, please use Submit Order."
-        );
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to initialize online payment."
-        );
-      } finally {
-        setStartingPayment(false);
-      }
-
+    if (!canSubmit) {
+      setError("Please complete all required B2B quote request fields.");
       return;
     }
 
     try {
       setSubmitting(true);
 
-      const data = await submitOrderRequest();
+      const data = await submitQuoteRequest();
+
+      await refreshCart().catch(() => undefined);
 
       const nextPath =
         data?.next_path ||
@@ -218,48 +259,47 @@ export default function CheckoutPageClient() {
 
       window.location.href = nextPath;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create order.");
+      setError(
+        err instanceof Error ? err.message : "Failed to submit quote request."
+      );
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function onClickPayNow() {
-    setError("");
-    setInfo("");
-
-    if (!canContinue) {
-      setError("Please complete the required checkout fields.");
-      return;
-    }
-
-    try {
-      setStartingPayment(true);
-      setForm((prev) => ({ ...prev, payment_method: "pay_now" }));
-
-      setInfo(
-        "Online payment is not connected yet. Stripe or another provider can be added next."
-      );
-    } finally {
-      setStartingPayment(false);
-    }
-  }
-
-  async function onClickSubmitOrder() {
-    setError("");
-    setInfo("");
-    setForm((prev) => ({ ...prev, payment_method: "order_request" }));
-  }
-
-  if (!items.length && !isLoading) {
+  if (!cartRequested || isBootstrapping) {
     return (
       <div style={pageStyle}>
         <div style={emptyBoxStyle}>
-          <h1 style={titleStyle}>Checkout</h1>
-          <p style={textStyle}>Your cart is empty.</p>
-          <Link href="/collections" style={primaryLinkStyle}>
-            Continue Shopping
-          </Link>
+          <h1 style={titleStyle}>Submit Quote Request</h1>
+          <p style={textStyle}>Loading your quote cart...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!items.length) {
+    return (
+      <div style={pageStyle}>
+        <div style={emptyBoxStyle}>
+          <div style={eyebrowStyle}>B2B Quote Request</div>
+
+          <h1 style={titleStyle}>Your Quote Cart Is Empty</h1>
+
+          <p style={textStyle}>
+            Add products to your quote cart before submitting a wholesale
+            request.
+          </p>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Link href="/collections" style={primaryLinkStyle}>
+              Browse Collections
+            </Link>
+
+            <Link href="/cart" style={secondaryLinkStyle}>
+              Back to Quote Cart
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -268,24 +308,31 @@ export default function CheckoutPageClient() {
   return (
     <div style={pageStyle}>
       <div style={headerStyle}>
-        <h1 style={titleStyle}>Checkout</h1>
+        <div style={eyebrowStyle}>B2B Quote Request</div>
+
+        <h1 style={titleStyle}>Submit Quote Request</h1>
+
         <p style={textStyle}>
-          Complete your billing and shipping details to submit your order
-          securely.
+          Complete your company and shipping details. This is not an online
+          payment checkout. Your request will be reviewed by the Globaltex Fine
+          Linens sales team for final pricing, availability, freight, and payment
+          terms.
         </p>
 
         {!loadingCustomer && autofillApplied ? (
           <div style={autofillNoticeStyle}>
-            Your saved profile and address details were loaded automatically.
+            Saved profile details were loaded automatically.
           </div>
         ) : null}
       </div>
 
-      <div style={responsiveLayoutStyle}>
+      {visibleCartError ? <div style={errorStyle}>{visibleCartError}</div> : null}
+
+      <div className="checkout-layout" style={responsiveLayoutStyle}>
         <form onSubmit={onSubmit} style={formCardStyle}>
           <div style={sectionTitleStyle}>Contact Information</div>
 
-          <div style={responsiveGridTwoStyle}>
+          <div className="checkout-grid-two" style={responsiveGridTwoStyle}>
             <Field
               label="First Name"
               required
@@ -294,6 +341,7 @@ export default function CheckoutPageClient() {
                 setForm((prev) => ({ ...prev, first_name: value }))
               }
             />
+
             <Field
               label="Last Name"
               required
@@ -304,17 +352,20 @@ export default function CheckoutPageClient() {
             />
           </div>
 
-          <div style={responsiveGridTwoStyle}>
+          <div className="checkout-grid-two" style={responsiveGridTwoStyle}>
             <Field
               label="Email"
               required
+              type="email"
               value={form.email}
               onChange={(value) =>
                 setForm((prev) => ({ ...prev, email: value }))
               }
             />
+
             <Field
               label="Phone"
+              required
               value={form.phone}
               onChange={(value) =>
                 setForm((prev) => ({ ...prev, phone: value }))
@@ -325,6 +376,7 @@ export default function CheckoutPageClient() {
           <div style={gridOneStyle}>
             <Field
               label="Company"
+              required
               value={form.company}
               onChange={(value) =>
                 setForm((prev) => ({ ...prev, company: value }))
@@ -334,7 +386,7 @@ export default function CheckoutPageClient() {
 
           <div style={sectionTitleStyle}>Shipping Address</div>
 
-          <div style={responsiveGridTwoStyle}>
+          <div className="checkout-grid-two" style={responsiveGridTwoStyle}>
             <Field
               label="Country"
               required
@@ -343,6 +395,7 @@ export default function CheckoutPageClient() {
                 setForm((prev) => ({ ...prev, country: value }))
               }
             />
+
             <Field
               label="City"
               required
@@ -364,7 +417,7 @@ export default function CheckoutPageClient() {
             />
           </div>
 
-          <div style={responsiveGridTwoStyle}>
+          <div className="checkout-grid-two" style={responsiveGridTwoStyle}>
             <Field
               label="Address Line 2"
               value={form.address_line_2}
@@ -372,6 +425,7 @@ export default function CheckoutPageClient() {
                 setForm((prev) => ({ ...prev, address_line_2: value }))
               }
             />
+
             <Field
               label="Postal Code"
               value={form.postal_code}
@@ -381,124 +435,97 @@ export default function CheckoutPageClient() {
             />
           </div>
 
-          <div style={sectionTitleStyle}>Order Note</div>
+          <div style={sectionTitleStyle}>Request Note</div>
 
           <div style={gridOneStyle}>
             <label style={labelStyle}>Note</label>
+
             <textarea
               value={form.note}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, note: e.target.value }))
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, note: event.target.value }))
               }
               rows={4}
               style={textareaStyle}
-              placeholder="Add any delivery, hospitality, or order note here."
+              placeholder="Add any hotel, hospitality, delivery, deadline, or project detail here."
             />
           </div>
 
-          <div style={sectionTitleStyle}>Checkout Method</div>
-
-          <div style={paymentPanelStyle}>
-            <div style={checkoutMethodWrapStyle}>
-              <button
-                type="button"
-                onClick={onClickSubmitOrder}
-                style={{
-                  ...methodButtonStyle,
-                  ...(form.payment_method === "order_request"
-                    ? methodButtonActiveStyle
-                    : {}),
-                }}
-              >
-                <div style={methodTitleStyle}>Submit Order</div>
-                <div style={methodTextStyle}>
-                  Best for hotels and wholesale buyers. Submit now, finalize
-                  payment later by invoice, bank transfer, or direct approval.
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={onClickPayNow}
-                style={{
-                  ...methodButtonStyle,
-                  ...(form.payment_method === "pay_now"
-                    ? methodButtonActiveStyle
-                    : {}),
-                }}
-              >
-                <div style={methodTitleStyle}>Pay Now</div>
-                <div style={methodTextStyle}>
-                  Online payment option. Stripe or another payment gateway can
-                  be connected next.
-                </div>
-              </button>
-            </div>
-
-            <div style={paymentNoticeStyle}>
-              {form.payment_method === "order_request"
-                ? "Your order will be submitted to our system immediately. Payment processing can be completed later without changing the checkout form."
-                : "Pay Now mode is selected. The UI is ready, but the online payment provider is not connected yet."}
-            </div>
+          <div style={quoteNoticeStyle}>
+            By submitting this form, you are sending a quote request. No online
+            payment will be collected at this stage.
           </div>
 
           {error ? <div style={errorStyle}>{error}</div> : null}
-          {info ? <div style={infoStyle}>{info}</div> : null}
 
           <div style={submitActionsStyle}>
             <button
               type="submit"
-              disabled={!canContinue || submitting || startingPayment}
+              disabled={!canSubmit || submitting}
               style={{
                 ...submitButtonStyle,
-                opacity:
-                  !canContinue || submitting || startingPayment ? 0.65 : 1,
-                cursor:
-                  !canContinue || submitting || startingPayment
-                    ? "not-allowed"
-                    : "pointer",
+                opacity: !canSubmit || submitting ? 0.65 : 1,
+                cursor: !canSubmit || submitting ? "not-allowed" : "pointer",
               }}
             >
-              {form.payment_method === "pay_now"
-                ? startingPayment
-                  ? "Preparing Payment..."
-                  : "Pay Now"
-                : submitting
-                ? "Placing Order..."
-                : "Place Order"}
+              {submitting ? "Submitting Request..." : "Submit Quote Request"}
             </button>
+
+            <Link href="/cart" style={secondaryLinkStyle}>
+              Back to Quote Cart
+            </Link>
           </div>
         </form>
 
         <aside style={summaryCardStyle}>
-          <div style={sectionTitleStyle}>Order Summary</div>
+          <div style={sectionTitleStyle}>Quote Summary</div>
 
           <div style={{ display: "grid", gap: 16, marginBottom: 20 }}>
-            {items.map((item: any) => (
-              <div key={item.id} style={summaryItemStyle}>
-                <div style={summaryImageWrapStyle}>
-                  {item.image ? (
-                    <img
-                      src={item.image}
-                      alt={item.product_title}
-                      style={summaryImageStyle}
-                    />
-                  ) : null}
-                </div>
+            {items.map((item) => {
+              const quantity = Number(item.quantity || 1);
+              const unitPrice = Number(item.unit_price || 0);
+              const lineTotal = Number(
+                item.line_total || unitPrice * quantity || 0
+              );
 
-                <div style={{ minWidth: 0 }}>
-                  <div style={summaryTitleStyle}>{item.product_title}</div>
+              return (
+                <div key={item.id} style={summaryItemStyle}>
+                  <div style={summaryImageWrapStyle}>
+                    {item.image ? (
+                      <img
+                        src={item.image}
+                        alt={item.product_title || "Product"}
+                        loading="lazy"
+                        decoding="async"
+                        style={summaryImageStyle}
+                      />
+                    ) : (
+                      <div style={summaryPlaceholderStyle}>No Image</div>
+                    )}
+                  </div>
 
-                  {item.variant_title ? (
-                    <div style={summaryVariantStyle}>{item.variant_title}</div>
-                  ) : null}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={summaryTitleStyle}>
+                      {item.product_title || "Product"}
+                    </div>
 
-                  <div style={summaryMetaStyle}>
-                    Qty: {item.quantity} • {formatMoney(item.line_total)}
+                    {item.variant_title ? (
+                      <div style={summaryVariantStyle}>
+                        {item.variant_title}
+                      </div>
+                    ) : null}
+
+                    {item.sku ? (
+                      <div style={summaryVariantStyle}>SKU: {item.sku}</div>
+                    ) : null}
+
+                    <div style={summaryMetaStyle}>
+                      Qty: {quantity} · {formatMoney(lineTotal)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div style={totalsWrapStyle}>
@@ -508,27 +535,36 @@ export default function CheckoutPageClient() {
             </div>
 
             <div style={totalRowStyle}>
-              <span>Subtotal</span>
+              <span>Estimated Subtotal</span>
               <span>{formatMoney(subtotal)}</span>
             </div>
 
             <div style={grandTotalRowStyle}>
-              <span>Total</span>
+              <span>Estimated Total</span>
               <span>{formatMoney(subtotal)}</span>
             </div>
           </div>
 
-          <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
-            <Link href="/cart" style={secondaryLinkStyle}>
-              Back to Cart
-            </Link>
-
-            <Link href="/order-request" style={secondaryLinkStyle}>
-              Request Quote Instead
-            </Link>
+          <div style={summaryNoticeStyle}>
+            Final quote may change based on availability, freight, lead time,
+            payment terms, and approved wholesale pricing.
           </div>
         </aside>
       </div>
+
+      <style jsx>{`
+        @media (max-width: 980px) {
+          .checkout-layout {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+        @media (max-width: 720px) {
+          .checkout-grid-two {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -537,11 +573,13 @@ function Field({
   label,
   value,
   required,
+  type = "text",
   onChange,
 }: {
   label: string;
   value: string;
   required?: boolean;
+  type?: string;
   onChange: (value: string) => void;
 }) {
   return (
@@ -550,9 +588,11 @@ function Field({
         {label}
         {required ? " *" : ""}
       </label>
+
       <input
+        type={type}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         required={required}
         style={inputStyle}
       />
@@ -570,9 +610,23 @@ const headerStyle: React.CSSProperties = {
   marginBottom: 28,
 };
 
+const eyebrowStyle: React.CSSProperties = {
+  width: "fit-content",
+  padding: "7px 12px",
+  borderRadius: 999,
+  background: "#f8f5ef",
+  border: "1px solid #ece3d7",
+  color: "#6b6256",
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  marginBottom: 12,
+};
+
 const responsiveLayoutStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 380px",
+  gridTemplateColumns: "minmax(0, 1fr) 390px",
   gap: 24,
   alignItems: "start",
 };
@@ -608,16 +662,16 @@ const titleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: "clamp(2rem, 3vw, 3rem)",
   lineHeight: 1.05,
-  fontWeight: 800,
+  fontWeight: 850,
   color: "#171717",
 };
 
 const textStyle: React.CSSProperties = {
-  margin: 0,
+  margin: "12px 0 0",
   color: "#5d554a",
   lineHeight: 1.8,
   fontSize: 15,
-  maxWidth: 820,
+  maxWidth: 840,
 };
 
 const autofillNoticeStyle: React.CSSProperties = {
@@ -636,7 +690,7 @@ const autofillNoticeStyle: React.CSSProperties = {
 
 const sectionTitleStyle: React.CSSProperties = {
   fontSize: 18,
-  fontWeight: 800,
+  fontWeight: 850,
   color: "#171717",
   marginTop: 4,
 };
@@ -660,7 +714,7 @@ const fieldWrapStyle: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = {
   fontSize: 13,
-  fontWeight: 800,
+  fontWeight: 850,
   color: "#5d554a",
   letterSpacing: "0.04em",
   textTransform: "uppercase",
@@ -681,7 +735,7 @@ const textareaStyle: React.CSSProperties = {
   width: "100%",
   borderRadius: 14,
   border: "1px solid #ddd3c5",
-  padding: "14px",
+  padding: 14,
   fontSize: 15,
   color: "#171717",
   background: "#fff",
@@ -689,56 +743,14 @@ const textareaStyle: React.CSSProperties = {
   minHeight: 120,
 };
 
-const paymentPanelStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 14,
-  padding: 18,
-  borderRadius: 18,
-  border: "1px solid #eee5d9",
-  background: "#fcfbf8",
-};
-
-const checkoutMethodWrapStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 12,
-};
-
-const methodButtonStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 8,
-  textAlign: "left",
-  padding: 16,
+const quoteNoticeStyle: React.CSSProperties = {
+  padding: "13px 14px",
   borderRadius: 16,
-  border: "1px solid #ddd3c5",
-  background: "#fff",
-  cursor: "pointer",
-};
-
-const methodButtonActiveStyle: React.CSSProperties = {
-  border: "1px solid #171717",
-  background: "#f8f5ef",
-};
-
-const methodTitleStyle: React.CSSProperties = {
-  fontSize: 15,
-  fontWeight: 800,
-  color: "#171717",
-};
-
-const methodTextStyle: React.CSSProperties = {
-  fontSize: 13,
-  lineHeight: 1.6,
-  color: "#6b6256",
-};
-
-const paymentNoticeStyle: React.CSSProperties = {
-  padding: "12px 14px",
-  borderRadius: 14,
-  border: "1px solid #e7ddcf",
-  background: "#fff",
-  color: "#6b6256",
+  border: "1px solid #eadbb5",
+  background: "#fff8e7",
+  color: "#6b5530",
   fontSize: 14,
+  lineHeight: 1.7,
 };
 
 const submitActionsStyle: React.CSSProperties = {
@@ -754,7 +766,7 @@ const submitButtonStyle: React.CSSProperties = {
   background: "#171717",
   color: "#fff",
   fontSize: 15,
-  fontWeight: 800,
+  fontWeight: 850,
 };
 
 const primaryLinkStyle: React.CSSProperties = {
@@ -767,7 +779,7 @@ const primaryLinkStyle: React.CSSProperties = {
   background: "#171717",
   color: "#fff",
   textDecoration: "none",
-  fontWeight: 800,
+  fontWeight: 850,
   border: "1px solid #171717",
 };
 
@@ -807,10 +819,21 @@ const summaryImageStyle: React.CSSProperties = {
   display: "block",
 };
 
+const summaryPlaceholderStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  display: "grid",
+  placeItems: "center",
+  color: "#9b9288",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
 const summaryTitleStyle: React.CSSProperties = {
   fontSize: 15,
-  fontWeight: 700,
+  fontWeight: 800,
   color: "#171717",
+  lineHeight: 1.35,
 };
 
 const summaryVariantStyle: React.CSSProperties = {
@@ -846,8 +869,19 @@ const grandTotalRowStyle: React.CSSProperties = {
   gap: 12,
   color: "#171717",
   fontSize: 18,
-  fontWeight: 800,
+  fontWeight: 850,
   paddingTop: 8,
+};
+
+const summaryNoticeStyle: React.CSSProperties = {
+  marginTop: 18,
+  padding: "13px 14px",
+  borderRadius: 16,
+  background: "#f8f5ef",
+  border: "1px solid #eee5d9",
+  color: "#6b6256",
+  fontSize: 13,
+  lineHeight: 1.7,
 };
 
 const errorStyle: React.CSSProperties = {
@@ -857,15 +891,6 @@ const errorStyle: React.CSSProperties = {
   background: "#fff4f4",
   color: "#9b2c2c",
   fontSize: 14,
-  fontWeight: 600,
-};
-
-const infoStyle: React.CSSProperties = {
-  padding: "12px 14px",
-  borderRadius: 14,
-  border: "1px solid #d9d7a8",
-  background: "#f8f5cf",
-  color: "#5e5722",
-  fontSize: 14,
-  fontWeight: 600,
+  fontWeight: 700,
+  lineHeight: 1.6,
 };

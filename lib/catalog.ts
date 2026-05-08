@@ -39,22 +39,56 @@ export type CatalogVariant = {
   compare_at_price?: string;
   variant_image?: string;
   image_id?: string;
+  min_quantity?: string;
+  box_quantity?: string;
+  case_quantity?: string;
+  step_quantity?: string;
   status?: string;
 };
 
-function normalize(value?: string) {
-  return String(value || "").trim();
+export type ResolvedCartCatalogItem = {
+  product: CatalogProduct;
+  variant: CatalogVariant | null;
+  productTitle: string;
+  variantTitle: string;
+  sku: string;
+  image: string;
+  unitPrice: number;
+  compareAtPrice: number;
+  minQuantity: number;
+  boxQuantity: number;
+  caseQuantity: number;
+  stepQuantity: number;
+};
+
+function normalize(value?: string | number | null) {
+  return String(value ?? "").trim();
 }
 
-function normalizeLower(value?: string) {
+function normalizeLower(value?: string | number | null) {
   return normalize(value).toLowerCase();
+}
+
+function toPositiveInteger(value: unknown, fallback: number) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const floored = Math.floor(parsed);
+
+  return floored > 0 ? floored : fallback;
 }
 
 function buildVariantTitle(variant: CatalogVariant | null) {
   if (!variant) return "";
 
   const directTitle = normalize(variant.title || variant.name);
-  if (directTitle) return directTitle;
+
+  if (directTitle) {
+    return directTitle;
+  }
 
   const values = [
     normalize(variant.option1_value),
@@ -69,10 +103,30 @@ function buildVariantTitle(variant: CatalogVariant | null) {
   return normalize(variant.sku) || "Default";
 }
 
+function getVariantQuantityRules(variant: CatalogVariant | null) {
+  const minQuantity = toPositiveInteger(variant?.min_quantity, 1);
+  const boxQuantity = toPositiveInteger(variant?.box_quantity, 0);
+  const caseQuantity = toPositiveInteger(variant?.case_quantity, 0);
+
+  const stepQuantity =
+    toPositiveInteger(variant?.step_quantity, 0) ||
+    caseQuantity ||
+    boxQuantity ||
+    minQuantity ||
+    1;
+
+  return {
+    minQuantity,
+    boxQuantity,
+    caseQuantity,
+    stepQuantity,
+  };
+}
+
 export async function resolveCartCatalogItem(
   productSlug: string,
   variantId?: string
-) {
+): Promise<ResolvedCartCatalogItem> {
   const normalizedProductSlug = normalizeLower(productSlug);
   const normalizedVariantId = normalize(variantId);
 
@@ -80,12 +134,14 @@ export async function resolveCartCatalogItem(
     throw new Error("product_slug is required.");
   }
 
-  const product = await findSheetItemByField<CatalogProduct>(
+  const productRaw = await findSheetItemByField(
     "products",
     "slug",
     normalizedProductSlug,
     { forceFresh: true, ttlSeconds: 0 }
   );
+
+  const product = productRaw as CatalogProduct | null;
 
   if (!product) {
     throw new Error("Product not found.");
@@ -95,14 +151,14 @@ export async function resolveCartCatalogItem(
     throw new Error("Product is not available.");
   }
 
-  const variantsRaw = await findSheetItemsByField<Record<string, string>>(
+  const variantsRaw = await findSheetItemsByField(
     "product_variants",
     "product_slug",
     normalizedProductSlug,
     { forceFresh: true, ttlSeconds: 0 }
   );
 
-  const variants = variantsRaw as CatalogVariant[];
+  const variants = (variantsRaw as CatalogVariant[]) || [];
 
   const activeVariants = variants.filter((variant) =>
     ["", "published", "active"].includes(normalizeLower(variant.status))
@@ -125,6 +181,7 @@ export async function resolveCartCatalogItem(
 
   const unitPrice = toNumber(selectedVariant?.price ?? "0");
   const compareAtPrice = toNumber(selectedVariant?.compare_at_price ?? "0");
+  const quantityRules = getVariantQuantityRules(selectedVariant);
 
   return {
     product,
@@ -138,5 +195,9 @@ export async function resolveCartCatalogItem(
       normalize(product.image),
     unitPrice,
     compareAtPrice,
+    minQuantity: quantityRules.minQuantity,
+    boxQuantity: quantityRules.boxQuantity,
+    caseQuantity: quantityRules.caseQuantity,
+    stepQuantity: quantityRules.stepQuantity,
   };
 }

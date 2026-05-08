@@ -1,26 +1,56 @@
 import { NextResponse } from "next/server";
-import { getCartTokenFromCookies } from "../../../../lib/cart-cookie";
-import { removeCartItem } from "../../../../lib/cart";
+import { ensureCartToken } from "../../../../lib/cart-cookie";
+import {
+  getOrCreateHydratedCartByToken,
+  removeCartItem,
+} from "../../../../lib/cart";
+import { getRateLimitKey, rateLimit } from "../../../../lib/rate-limit";
+
+function jsonError(message: string, status: number) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    { status }
+  );
+}
+
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
 
 export async function POST(req: Request) {
   try {
-    const cartToken = await getCartTokenFromCookies();
+    const limited = rateLimit({
+      key: getRateLimitKey(req, "cart:remove"),
+      limit: 60,
+      windowMs: 60 * 1000,
+    });
 
-    if (!cartToken) {
-      return NextResponse.json(
-        { ok: false, error: "Cart token not found." },
-        { status: 400 }
+    if (!limited.ok) {
+      return jsonError(
+        "Too many cart remove requests. Please try again shortly.",
+        429
       );
     }
 
-    const body = await req.json();
-    const itemId = String(body?.item_id || "").trim();
+    const cartToken = await ensureCartToken();
+    const body = await req.json().catch(() => ({}));
+    const itemId = normalizeText(body?.item_id);
 
     if (!itemId) {
-      return NextResponse.json(
-        { ok: false, error: "item_id is required." },
-        { status: 400 }
-      );
+      return jsonError("item_id is required.", 400);
+    }
+
+    const currentCart = await getOrCreateHydratedCartByToken(cartToken);
+    const currentItem = currentCart.items.find((item) => item.id === itemId);
+
+    if (!currentItem) {
+      return NextResponse.json({
+        ok: true,
+        cart: currentCart,
+      });
     }
 
     const cart = await removeCartItem(cartToken, itemId);
@@ -30,12 +60,9 @@ export async function POST(req: Request) {
       cart,
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to remove cart item.";
-
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error ? error.message : "Failed to remove cart item.",
+      500
     );
   }
 }

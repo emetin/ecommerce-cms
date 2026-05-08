@@ -5,11 +5,31 @@ import { useEffect, useMemo, useState } from "react";
 type OrderItem = {
   id: string;
   order_number: string;
+  cart_id?: string;
   customer_id: string;
+
+  email?: string;
+  first_name?: string;
+  last_name?: string;
   company_name: string;
+  phone?: string;
+
+  country?: string;
+  city?: string;
+  address_line_1?: string;
+  address_line_2?: string;
+  postal_code?: string;
+
   status: string;
-  subtotal: number;
   currency: string;
+
+  subtotal: number;
+  discount_total?: number;
+  shipping_total?: number;
+  tax_total?: number;
+  grand_total?: number;
+  item_count?: number;
+
   notes: string;
   created_at: string;
   updated_at: string;
@@ -32,6 +52,7 @@ type OrderLineItem = {
 type ApiListResponse = {
   ok?: boolean;
   error?: string;
+  total?: number;
   items?: OrderItem[];
 };
 
@@ -68,6 +89,10 @@ function normalizeText(value?: string) {
 
 function normalizeLower(value?: string) {
   return normalizeText(value).toLowerCase();
+}
+
+function getContactName(item: OrderItem) {
+  return [item.first_name, item.last_name].filter(Boolean).join(" ").trim();
 }
 
 function formatMoney(value: number, currency = "USD") {
@@ -182,11 +207,11 @@ export default function AdminOrdersPage() {
 
       const data = await readJsonResponse<ApiListResponse>(
         response,
-        "Failed to load orders."
+        "Failed to load quote requests."
       );
 
       if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Failed to load orders.");
+        throw new Error(data.error || "Failed to load quote requests.");
       }
 
       const nextItems = Array.isArray(data.items) ? data.items : [];
@@ -217,11 +242,18 @@ export default function AdminOrdersPage() {
     const query = normalizeLower(searchInput);
 
     return items.filter((item) => {
+      const contactName = getContactName(item);
+
       const matchesSearch =
         !query ||
         normalizeLower(item.order_number).includes(query) ||
         normalizeLower(item.company_name).includes(query) ||
+        normalizeLower(contactName).includes(query) ||
         normalizeLower(item.customer_id).includes(query) ||
+        normalizeLower(item.email).includes(query) ||
+        normalizeLower(item.phone).includes(query) ||
+        normalizeLower(item.city).includes(query) ||
+        normalizeLower(item.country).includes(query) ||
         normalizeLower(item.status).includes(query) ||
         normalizeLower(item.notes).includes(query);
 
@@ -281,15 +313,15 @@ export default function AdminOrdersPage() {
 
       const data = await readJsonResponse<ApiStatusResponse>(
         response,
-        "Failed to update order status."
+        "Failed to update quote request status."
       );
 
       if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Failed to update order status.");
+        throw new Error(data.error || "Failed to update quote request status.");
       }
 
       setSuccessMessage(
-        `Order ${data.order?.orderNumber || ""} updated successfully.`
+        `Quote request ${data.order?.orderNumber || ""} updated successfully.`
       );
 
       await loadOrders();
@@ -314,11 +346,11 @@ export default function AdminOrdersPage() {
 
       const data = await readJsonResponse<ApiOrderItemsResponse>(
         response,
-        "Failed to load order items."
+        "Failed to load quote request items."
       );
 
       if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Failed to load order items.");
+        throw new Error(data.error || "Failed to load quote request items.");
       }
 
       setOrderItemsMap((prev) => ({
@@ -351,10 +383,10 @@ export default function AdminOrdersPage() {
     <div style={pageStyle}>
       <div style={pageHeaderStyle}>
         <div>
-          <h1 style={titleStyle}>Orders</h1>
+          <h1 style={titleStyle}>Quote Requests</h1>
           <p style={subtitleStyle}>
-            Review submitted B2B orders, filter by status, inspect line items,
-            and update progress.
+            Review submitted B2B quote requests, inspect buyer contact details,
+            open line items, and update the sales review status.
           </p>
         </div>
 
@@ -404,7 +436,7 @@ export default function AdminOrdersPage() {
           <input
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Search order number, company, customer ID, notes..."
+            placeholder="Search quote number, company, email, phone, city, country, notes..."
             style={inputStyle}
           />
 
@@ -432,23 +464,25 @@ export default function AdminOrdersPage() {
       <section style={tableWrapStyle}>
         <div style={tableHeaderStyle}>
           <div style={checkCellStyle}></div>
-          <div>Order</div>
-          <div>Customer</div>
+          <div>Request</div>
+          <div>Buyer</div>
+          <div>Location</div>
           <div>Total</div>
           <div>Status</div>
           <div>Created</div>
-          <div>Updated</div>
           <div style={{ textAlign: "right" }}>Actions</div>
         </div>
 
         {loading ? (
-          <div style={emptyStateStyle}>Loading orders...</div>
+          <div style={emptyStateStyle}>Loading quote requests...</div>
         ) : filteredItems.length === 0 ? (
-          <div style={emptyStateStyle}>No orders matched your filters.</div>
+          <div style={emptyStateStyle}>No quote requests matched your filters.</div>
         ) : (
           filteredItems.map((item) => {
             const isExpanded = expandedOrderId === item.id;
             const orderLines = orderItemsMap[item.id] || [];
+            const contactName = getContactName(item);
+            const grandTotal = Number(item.grand_total ?? item.subtotal ?? 0);
 
             return (
               <div key={item.id || item.order_number}>
@@ -462,6 +496,10 @@ export default function AdminOrdersPage() {
                       {item.order_number || "-"}
                     </div>
 
+                    <div style={subTextStyle}>
+                      {Number(item.item_count || 0)} items
+                    </div>
+
                     {item.notes ? (
                       <div style={noteInlineStyle}>Note: {item.notes}</div>
                     ) : null}
@@ -471,12 +509,32 @@ export default function AdminOrdersPage() {
                     <div style={cellStrongStyle}>
                       {item.company_name || "-"}
                     </div>
-                    <div style={subTextStyle}>{item.customer_id || "-"}</div>
+
+                    <div style={subTextStyle}>{contactName || "-"}</div>
+
+                    <div style={subTextStyle}>{item.email || "-"}</div>
+
+                    <div style={subTextStyle}>{item.phone || "-"}</div>
                   </div>
 
                   <div>
                     <div style={cellStrongStyle}>
-                      {formatMoney(item.subtotal, item.currency)}
+                      {[item.city, item.country].filter(Boolean).join(", ") ||
+                        "-"}
+                    </div>
+
+                    <div style={subTextStyle}>
+                      {item.address_line_1 || "-"}
+                    </div>
+
+                    {item.postal_code ? (
+                      <div style={subTextStyle}>{item.postal_code}</div>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <div style={cellStrongStyle}>
+                      {formatMoney(grandTotal, item.currency)}
                     </div>
                     <div style={subTextStyle}>{item.currency || "USD"}</div>
                   </div>
@@ -492,9 +550,12 @@ export default function AdminOrdersPage() {
                     </span>
                   </div>
 
-                  <div>{formatDate(item.created_at)}</div>
-
-                  <div>{formatDate(item.updated_at)}</div>
+                  <div>
+                    <div>{formatDate(item.created_at)}</div>
+                    <div style={subTextStyle}>
+                      Updated: {formatDate(item.updated_at)}
+                    </div>
+                  </div>
 
                   <div style={rowActionsStyle}>
                     <select
@@ -518,7 +579,12 @@ export default function AdminOrdersPage() {
                       type="button"
                       onClick={() => handleUpdateStatus(item.id)}
                       disabled={savingId === item.id}
-                      style={compactPrimaryButtonStyle}
+                      style={{
+                        ...compactPrimaryButtonStyle,
+                        opacity: savingId === item.id ? 0.7 : 1,
+                        cursor:
+                          savingId === item.id ? "not-allowed" : "pointer",
+                      }}
                     >
                       {savingId === item.id ? "Saving" : "Save"}
                     </button>
@@ -535,11 +601,48 @@ export default function AdminOrdersPage() {
 
                 {isExpanded ? (
                   <div style={expandedRowStyle}>
+                    <div style={detailsGridStyle}>
+                      <div style={detailCardStyle}>
+                        <div style={detailTitleStyle}>Contact</div>
+                        <div style={detailTextStyle}>
+                          Company: {item.company_name || "-"}
+                        </div>
+                        <div style={detailTextStyle}>
+                          Contact: {contactName || "-"}
+                        </div>
+                        <div style={detailTextStyle}>
+                          Email: {item.email || "-"}
+                        </div>
+                        <div style={detailTextStyle}>
+                          Phone: {item.phone || "-"}
+                        </div>
+                      </div>
+
+                      <div style={detailCardStyle}>
+                        <div style={detailTitleStyle}>Shipping</div>
+                        <div style={detailTextStyle}>
+                          Country: {item.country || "-"}
+                        </div>
+                        <div style={detailTextStyle}>City: {item.city || "-"}</div>
+                        <div style={detailTextStyle}>
+                          Address: {item.address_line_1 || "-"}
+                        </div>
+                        <div style={detailTextStyle}>
+                          Postal Code: {item.postal_code || "-"}
+                        </div>
+                      </div>
+
+                      <div style={detailCardStyle}>
+                        <div style={detailTitleStyle}>Request Note</div>
+                        <div style={detailTextStyle}>{item.notes || "-"}</div>
+                      </div>
+                    </div>
+
                     {itemsLoadingId === item.id ? (
-                      <div style={lineEmptyStyle}>Loading order items...</div>
+                      <div style={lineEmptyStyle}>Loading quote items...</div>
                     ) : orderLines.length === 0 ? (
                       <div style={lineEmptyStyle}>
-                        No line items found for this order.
+                        No line items found for this quote request.
                       </div>
                     ) : (
                       <div style={lineTableStyle}>
@@ -630,7 +733,7 @@ const subtitleStyle: React.CSSProperties = {
   color: "#6f6559",
   fontSize: 13,
   lineHeight: 1.5,
-  maxWidth: 720,
+  maxWidth: 760,
 };
 
 const headerActionsStyle: React.CSSProperties = {
@@ -765,7 +868,7 @@ const tableWrapStyle: React.CSSProperties = {
 
 const tableHeaderStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "34px 1.1fr 1.35fr 0.85fr 0.75fr 0.8fr 0.8fr 1.7fr",
+  gridTemplateColumns: "34px 1fr 1.45fr 1.1fr 0.75fr 0.75fr 0.8fr 1.7fr",
   gap: 10,
   alignItems: "center",
   minHeight: 40,
@@ -779,11 +882,11 @@ const tableHeaderStyle: React.CSSProperties = {
 
 const tableRowStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "34px 1.1fr 1.35fr 0.85fr 0.75fr 0.8fr 0.8fr 1.7fr",
+  gridTemplateColumns: "34px 1fr 1.45fr 1.1fr 0.75fr 0.75fr 0.8fr 1.7fr",
   gap: 10,
   alignItems: "center",
-  minHeight: 56,
-  padding: "7px 12px",
+  minHeight: 66,
+  padding: "8px 12px",
   borderBottom: "1px solid #f0e7da",
   fontSize: 13,
   color: "#171717",
@@ -874,7 +977,37 @@ const compactPrimaryButtonStyle: React.CSSProperties = {
 const expandedRowStyle: React.CSSProperties = {
   background: "#fcfbf8",
   borderBottom: "1px solid #f0e7da",
-  padding: "10px 46px 12px",
+  padding: "12px 46px 14px",
+  display: "grid",
+  gap: 12,
+};
+
+const detailsGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 10,
+};
+
+const detailCardStyle: React.CSSProperties = {
+  border: "1px solid #e2d8cb",
+  borderRadius: 12,
+  background: "#fff",
+  padding: 12,
+  display: "grid",
+  gap: 5,
+};
+
+const detailTitleStyle: React.CSSProperties = {
+  color: "#171717",
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+const detailTextStyle: React.CSSProperties = {
+  color: "#5f554b",
+  fontSize: 12,
+  lineHeight: 1.45,
+  wordBreak: "break-word",
 };
 
 const lineTableStyle: React.CSSProperties = {

@@ -9,14 +9,18 @@ type Order = {
   order_number: string;
   status: string;
   grand_total: number;
+  subtotal?: number;
   item_count: number;
   currency: string;
+  company?: string;
   created_at: string;
+  updated_at?: string;
 };
 
 type OrdersApiResponse = {
   ok: boolean;
   error?: string;
+  total?: number;
   orders?: Order[];
 };
 
@@ -32,7 +36,10 @@ function formatDate(value: string) {
   if (!value) return "-";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
 
   return date.toLocaleDateString("en-US", {
     year: "numeric",
@@ -60,7 +67,12 @@ function getStatusStyles(status: string): React.CSSProperties {
     };
   }
 
-  if (normalized === "processing" || normalized === "shipped") {
+  if (
+    normalized === "processing" ||
+    normalized === "shipped" ||
+    normalized === "approved" ||
+    normalized === "quoted"
+  ) {
     return {
       background: "#eff6ff",
       color: "#1d4ed8",
@@ -68,11 +80,36 @@ function getStatusStyles(status: string): React.CSSProperties {
     };
   }
 
+  if (normalized === "reviewing" || normalized === "submitted") {
+    return {
+      background: "#fff8e8",
+      color: "#8a5a00",
+      border: "1px solid #f5deb0",
+    };
+  }
+
   return {
-    background: "#fff8e8",
-    color: "#8a5a00",
-    border: "1px solid #f5deb0",
+    background: "#f8f5ef",
+    color: "#6a6156",
+    border: "1px solid #e5ddd2",
   };
+}
+
+function getStatusLabel(status: string) {
+  const normalized = String(status || "submitted").toLowerCase();
+
+  const labels: Record<string, string> = {
+    submitted: "Submitted",
+    reviewing: "Under Review",
+    quoted: "Quoted",
+    approved: "Approved",
+    processing: "Processing",
+    completed: "Completed",
+    cancelled: "Cancelled",
+    paid: "Paid",
+  };
+
+  return labels[normalized] || normalized;
 }
 
 export default function AccountOrdersPage() {
@@ -85,6 +122,9 @@ export default function AccountOrdersPage() {
 
     async function loadOrders() {
       try {
+        setLoading(true);
+        setError("");
+
         const response = await fetch("/api/account/orders", {
           method: "GET",
           credentials: "include",
@@ -96,13 +136,18 @@ export default function AccountOrdersPage() {
         if (!active) return;
 
         if (!response.ok || !data?.ok) {
-          throw new Error(data?.error || "Failed to load orders.");
+          throw new Error(data?.error || "Failed to load quote requests.");
         }
 
         setOrders(data.orders || []);
       } catch (err) {
         if (!active) return;
-        setError(err instanceof Error ? err.message : "Failed to load orders.");
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load quote requests."
+        );
       } finally {
         if (active) {
           setLoading(false);
@@ -122,9 +167,12 @@ export default function AccountOrdersPage() {
       <div style={headerStyle}>
         <div>
           <p style={eyebrowStyle}>Customer Account</p>
-          <h1 style={titleStyle}>My Orders</h1>
+
+          <h1 style={titleStyle}>My Quote Requests</h1>
+
           <p style={subtitleStyle}>
-            Review your submitted orders, status, and order details.
+            Review your submitted B2B quote requests, request status, estimated
+            totals, and item details.
           </p>
         </div>
 
@@ -134,52 +182,77 @@ export default function AccountOrdersPage() {
       </div>
 
       {loading ? (
-        <div style={cardStyle}>Loading orders...</div>
+        <div style={cardStyle}>Loading quote requests...</div>
       ) : error ? (
         <div style={errorStyle}>{error}</div>
       ) : !orders.length ? (
         <div style={cardStyle}>
-          <h3 style={{ marginTop: 0 }}>No orders yet</h3>
-          <p style={{ marginBottom: 18, color: "#6b6256" }}>
-            Once you place an order, it will appear here.
+          <h3 style={emptyTitleStyle}>No quote requests yet</h3>
+
+          <p style={emptyTextStyle}>
+            Once you submit a quote request, it will appear here with its latest
+            review status.
           </p>
+
           <Link href="/collections" style={primaryButtonStyle}>
-            Start Shopping
+            Browse Collections
           </Link>
         </div>
       ) : (
         <div style={listWrapStyle}>
-          {orders.map((order) => (
-            <Link
-              key={order.id}
-              href={`/account/orders/${encodeURIComponent(order.order_number)}`}
-              style={orderCardStyle}
-            >
-              <div style={orderTopStyle}>
-                <div>
-                  <div style={orderNumberStyle}>{order.order_number}</div>
-                  <div style={orderMetaStyle}>
-                    {formatDate(order.created_at)} • {order.item_count} item
-                    {order.item_count === 1 ? "" : "s"}
+          {orders.map((order) => {
+            const estimatedTotal = Number(order.grand_total || order.subtotal || 0);
+
+            return (
+              <Link
+                key={order.id}
+                href={`/account/orders/${encodeURIComponent(
+                  order.order_number
+                )}`}
+                style={orderCardStyle}
+              >
+                <div style={orderTopStyle}>
+                  <div>
+                    <div style={orderNumberStyle}>{order.order_number}</div>
+
+                    <div style={orderMetaStyle}>
+                      {formatDate(order.created_at)} · {order.item_count} item
+                      {order.item_count === 1 ? "" : "s"}
+                    </div>
+
+                    {order.company ? (
+                      <div style={companyStyle}>{order.company}</div>
+                    ) : null}
                   </div>
+
+                  <span
+                    style={{
+                      ...statusBadgeStyle,
+                      ...getStatusStyles(order.status),
+                    }}
+                  >
+                    {getStatusLabel(order.status)}
+                  </span>
                 </div>
 
-                <span
-                  style={{
-                    ...statusBadgeStyle,
-                    ...getStatusStyles(order.status),
-                  }}
-                >
-                  {order.status || "submitted"}
-                </span>
-              </div>
+                <div style={noticeStyle}>
+                  Final pricing, freight, availability, and payment terms are
+                  reviewed by the Globaltex Fine Linens sales team.
+                </div>
 
-              <div style={orderBottomStyle}>
-                <div style={orderTotalStyle}>{formatMoney(order.grand_total)}</div>
-                <div style={viewDetailsStyle}>View Details →</div>
-              </div>
-            </Link>
-          ))}
+                <div style={orderBottomStyle}>
+                  <div>
+                    <div style={totalLabelStyle}>Estimated Total</div>
+                    <div style={orderTotalStyle}>
+                      {formatMoney(estimatedTotal)}
+                    </div>
+                  </div>
+
+                  <div style={viewDetailsStyle}>View Details →</div>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>
@@ -224,6 +297,7 @@ const subtitleStyle: React.CSSProperties = {
   color: "#6b6256",
   fontSize: 15,
   lineHeight: 1.8,
+  maxWidth: 760,
 };
 
 const cardStyle: React.CSSProperties = {
@@ -240,6 +314,20 @@ const errorStyle: React.CSSProperties = {
   color: "#9b2c2c",
   padding: 18,
   fontWeight: 600,
+};
+
+const emptyTitleStyle: React.CSSProperties = {
+  margin: "0 0 8px",
+  color: "#171717",
+  fontSize: 22,
+  fontWeight: 800,
+};
+
+const emptyTextStyle: React.CSSProperties = {
+  margin: "0 0 18px",
+  color: "#6b6256",
+  fontSize: 15,
+  lineHeight: 1.8,
 };
 
 const listWrapStyle: React.CSSProperties = {
@@ -279,6 +367,13 @@ const orderMetaStyle: React.CSSProperties = {
   color: "#756b5f",
 };
 
+const companyStyle: React.CSSProperties = {
+  marginTop: 4,
+  fontSize: 13,
+  color: "#8c8378",
+  fontWeight: 700,
+};
+
 const statusBadgeStyle: React.CSSProperties = {
   minHeight: 34,
   padding: "0 12px",
@@ -292,11 +387,30 @@ const statusBadgeStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+const noticeStyle: React.CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 16,
+  background: "#f8f5ef",
+  border: "1px solid #eee5d9",
+  color: "#6b6256",
+  fontSize: 13,
+  lineHeight: 1.7,
+};
+
 const orderBottomStyle: React.CSSProperties = {
   display: "flex",
-  alignItems: "center",
+  alignItems: "flex-end",
   justifyContent: "space-between",
   gap: 12,
+};
+
+const totalLabelStyle: React.CSSProperties = {
+  color: "#756b5f",
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+  marginBottom: 5,
 };
 
 const orderTotalStyle: React.CSSProperties = {
@@ -309,6 +423,7 @@ const viewDetailsStyle: React.CSSProperties = {
   fontSize: 14,
   fontWeight: 700,
   color: "#b7962e",
+  whiteSpace: "nowrap",
 };
 
 const primaryButtonStyle: React.CSSProperties = {

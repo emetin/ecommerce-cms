@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type ProductListResponse = {
   ok?: boolean;
+  error?: string;
   total?: number;
   items?: Array<{
     id?: string;
@@ -46,6 +47,13 @@ type OrderItem = {
   updated_at: string;
 };
 
+type SafeApiResult<T> = {
+  ok: boolean;
+  status: number;
+  data: T | null;
+  error: string;
+};
+
 function normalizeText(value?: string) {
   return String(value || "").trim();
 }
@@ -74,6 +82,50 @@ function formatMoney(value: number, currency = "USD") {
   }).format(value || 0);
 }
 
+async function readJsonResponse<T>(
+  response: Response,
+  fallbackMessage: string
+): Promise<SafeApiResult<T>> {
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+
+  if (!contentType.includes("application/json")) {
+    return {
+      ok: false,
+      status: response.status,
+      data: null,
+      error:
+        response.status === 401 || response.status === 403
+          ? "Admin session expired. Please log in again."
+          : `${fallbackMessage} Endpoint returned HTML instead of JSON. Status: ${response.status}`,
+    };
+  }
+
+  try {
+    const data = JSON.parse(text) as T & {
+      ok?: boolean;
+      error?: string;
+    };
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      data,
+      error:
+        !response.ok && typeof data?.error === "string"
+          ? String(data.error)
+          : "",
+    };
+  } catch {
+    return {
+      ok: false,
+      status: response.status,
+      data: null,
+      error: `${fallbackMessage} Invalid JSON response.`,
+    };
+  }
+}
+
 function getStatusPillStyle(value?: string): React.CSSProperties {
   const raw = normalizeLower(value);
 
@@ -93,11 +145,19 @@ function getStatusPillStyle(value?: string): React.CSSProperties {
     };
   }
 
-  if (raw === "pending") {
+  if (raw === "pending" || raw === "submitted" || raw === "reviewing") {
     return {
       background: "#fff7e8",
       color: "#8a6418",
       border: "1px solid #ecd8ad",
+    };
+  }
+
+  if (raw === "quoted" || raw === "approved") {
+    return {
+      background: "#eef4fb",
+      color: "#315f95",
+      border: "1px solid rgba(49,95,149,0.16)",
     };
   }
 
@@ -132,46 +192,97 @@ export default function AdminDashboardPage() {
 
       const [productsRes, applicationsRes, customersRes, ordersRes] =
         await Promise.all([
-          fetch("/api/products/list?page=1&limit=1", { cache: "no-store" }),
-          fetch("/api/admin/customer-applications/list", { cache: "no-store" }),
-          fetch("/api/admin/customers/list", { cache: "no-store" }),
-          fetch("/api/admin/orders/list", { cache: "no-store" }),
+          fetch("/api/products/list?page=1&limit=1", {
+            cache: "no-store",
+            credentials: "same-origin",
+          }),
+          fetch("/api/admin/customer-applications/list", {
+            cache: "no-store",
+            credentials: "same-origin",
+          }),
+          fetch("/api/admin/customers/list", {
+            cache: "no-store",
+            credentials: "same-origin",
+          }),
+          fetch("/api/admin/orders/list", {
+            cache: "no-store",
+            credentials: "same-origin",
+          }),
         ]);
 
-      const [
-        productsData,
-        applicationsData,
-        customersData,
-        ordersData,
-      ] = await Promise.all([
-        productsRes.json() as Promise<ProductListResponse>,
-        applicationsRes.json(),
-        customersRes.json(),
-        ordersRes.json(),
-      ]);
+      const [productsResult, applicationsResult, customersResult, ordersResult] =
+        await Promise.all([
+          readJsonResponse<ProductListResponse>(
+            productsRes,
+            "Failed to load product summary."
+          ),
+          readJsonResponse<{
+            ok?: boolean;
+            error?: string;
+            items?: ApplicationItem[];
+          }>(applicationsRes, "Failed to load applications."),
+          readJsonResponse<{
+            ok?: boolean;
+            error?: string;
+            items?: CustomerItem[];
+          }>(customersRes, "Failed to load customers."),
+          readJsonResponse<{
+            ok?: boolean;
+            error?: string;
+            items?: OrderItem[];
+          }>(ordersRes, "Failed to load orders."),
+        ]);
 
-      if (!productsRes.ok || !productsData?.ok) {
-        throw new Error(productsData?.ok === false ? "Failed to load product summary." : "Failed to load products.");
+      if (!productsResult.ok || !productsResult.data?.ok) {
+        throw new Error(
+          productsResult.error ||
+            (productsResult.data?.ok === false
+              ? productsResult.data.error || "Failed to load product summary."
+              : "Failed to load products.")
+        );
       }
 
-      if (!applicationsRes.ok || !applicationsData?.ok) {
-        throw new Error(applicationsData?.error || "Failed to load applications.");
+      if (!applicationsResult.ok || !applicationsResult.data?.ok) {
+        throw new Error(
+          applicationsResult.error ||
+            applicationsResult.data?.error ||
+            "Failed to load applications."
+        );
       }
 
-      if (!customersRes.ok || !customersData?.ok) {
-        throw new Error(customersData?.error || "Failed to load customers.");
+      if (!customersResult.ok || !customersResult.data?.ok) {
+        throw new Error(
+          customersResult.error ||
+            customersResult.data?.error ||
+            "Failed to load customers."
+        );
       }
 
-      if (!ordersRes.ok || !ordersData?.ok) {
-        throw new Error(ordersData?.error || "Failed to load orders.");
+      if (!ordersResult.ok || !ordersResult.data?.ok) {
+        throw new Error(
+          ordersResult.error ||
+            ordersResult.data?.error ||
+            "Failed to load orders."
+        );
       }
 
-      setProductTotal(Number(productsData.total || 0));
+      setProductTotal(Number(productsResult.data.total || 0));
+
       setApplications(
-        Array.isArray(applicationsData.items) ? applicationsData.items : []
+        Array.isArray(applicationsResult.data.items)
+          ? applicationsResult.data.items
+          : []
       );
-      setCustomers(Array.isArray(customersData.items) ? customersData.items : []);
-      setOrders(Array.isArray(ordersData.items) ? ordersData.items : []);
+
+      setCustomers(
+        Array.isArray(customersResult.data.items)
+          ? customersResult.data.items
+          : []
+      );
+
+      setOrders(
+        Array.isArray(ordersResult.data.items) ? ordersResult.data.items : []
+      );
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -202,12 +313,14 @@ export default function AdminDashboardPage() {
       (item) => normalizeLower(item.status) !== "active"
     ).length;
 
-    const pendingOrders = orders.filter(
-      (item) => normalizeLower(item.status) === "pending"
+    const pendingOrders = orders.filter((item) =>
+      ["pending", "submitted", "reviewing"].includes(
+        normalizeLower(item.status)
+      )
     ).length;
 
-    const processingOrders = orders.filter(
-      (item) => ["approved", "processing"].includes(normalizeLower(item.status))
+    const processingOrders = orders.filter((item) =>
+      ["approved", "processing", "quoted"].includes(normalizeLower(item.status))
     ).length;
 
     const completedOrders = orders.filter(
@@ -267,7 +380,13 @@ export default function AdminDashboardPage() {
   }
 
   if (errorMessage) {
-    return <div style={errorBoxStyle}>{errorMessage}</div>;
+    return (
+      <div style={errorBoxStyle}>
+        <strong>Dashboard could not be loaded.</strong>
+        <br />
+        {errorMessage}
+      </div>
+    );
   }
 
   return (
@@ -310,7 +429,7 @@ export default function AdminDashboardPage() {
           helper={`${stats.inactiveCustomers} inactive accounts`}
         />
         <StatCard
-          label="Pending Orders"
+          label="Pending Quote Requests"
           value={String(stats.pendingOrders)}
           helper={`${stats.processingOrders} in progress`}
           warning
@@ -321,9 +440,9 @@ export default function AdminDashboardPage() {
           helper="Operationally finalized orders"
         />
         <StatCard
-          label="Order Volume"
+          label="Quote Volume"
           value={formatMoney(stats.orderVolume, "USD")}
-          helper="Combined subtotal of listed orders"
+          helper="Combined subtotal of listed quote requests"
         />
       </section>
 
@@ -347,10 +466,10 @@ export default function AdminDashboardPage() {
           cta="Open Customers"
         />
         <QuickLinkCard
-          title="Orders"
-          text="Track order progress and inspect submitted line items."
+          title="Quote Requests"
+          text="Track quote request progress and inspect submitted line items."
           href="/admin/orders"
-          cta="Open Orders"
+          cta="Open Requests"
         />
       </section>
 
@@ -358,7 +477,7 @@ export default function AdminDashboardPage() {
         <section style={cardStyle}>
           <div style={sectionHeaderStyle}>
             <div>
-              <div style={sectionKickerStyle}>Recent Orders</div>
+              <div style={sectionKickerStyle}>Recent Quote Requests</div>
               <div style={sectionTitleStyle}>Latest B2B activity</div>
             </div>
 
@@ -368,7 +487,7 @@ export default function AdminDashboardPage() {
           </div>
 
           {recentOrders.length === 0 ? (
-            <div style={emptyStateStyle}>No recent orders found.</div>
+            <div style={emptyStateStyle}>No recent quote requests found.</div>
           ) : (
             <div style={{ display: "grid", gap: 12 }}>
               {recentOrders.map((item) => (
@@ -376,7 +495,7 @@ export default function AdminDashboardPage() {
                   <div style={listItemTopStyle}>
                     <div>
                       <div style={listItemTitleStyle}>
-                        {item.order_number || "Order"}
+                        {item.order_number || "Quote Request"}
                       </div>
                       <div style={listItemMetaStyle}>
                         {item.company_name || "-"} • {item.customer_id || "-"}
@@ -389,7 +508,7 @@ export default function AdminDashboardPage() {
                         ...getStatusPillStyle(item.status),
                       }}
                     >
-                      {item.status || "pending"}
+                      {item.status || "submitted"}
                     </div>
                   </div>
 
@@ -881,4 +1000,5 @@ const errorBoxStyle: React.CSSProperties = {
   background: "#fff1f1",
   border: "1px solid #f0c9c9",
   color: "#8d2f2f",
+  lineHeight: 1.7,
 };

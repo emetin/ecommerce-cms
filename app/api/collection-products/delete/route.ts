@@ -7,7 +7,7 @@ function normalizeText(value: unknown) {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const id = normalizeText(body?.id);
 
     if (!id) {
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      deleted: result.deleted || 0,
+      deleted: result.deletedCount || 0,
       message: "Collection product link deleted successfully.",
     });
   } catch (error) {

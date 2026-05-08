@@ -1,115 +1,122 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "../cart/CartContext";
 
-type ReorderItem = {
-  id?: string;
-  product_slug?: string;
-  variant_id?: string;
-  product_title?: string;
-  variant_title?: string;
-  sku?: string;
-  image?: string;
-  quantity?: string | number;
-};
-
 type ReorderButtonProps = {
-  items: ReorderItem[];
+  orderNumber: string;
   variant?: "dark" | "ghost";
   label?: string;
   goToCart?: boolean;
   style?: React.CSSProperties;
 };
 
+type ReorderApiResponse = {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+  added_count?: number;
+  skipped_count?: number;
+  next_path?: string;
+};
+
+async function parseJsonSafe(response: Response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
-function normalizeQuantity(value: unknown) {
-  const quantity = Number(value || 1);
-
-  if (!Number.isFinite(quantity) || quantity <= 0) {
-    return 1;
-  }
-
-  return Math.floor(quantity);
-}
-
 export default function ReorderButton({
-  items,
+  orderNumber,
   variant = "dark",
-  label = "Re-order",
+  label = "Reorder to Quote Cart",
   goToCart = true,
   style,
 }: ReorderButtonProps) {
   const router = useRouter();
-  const { handleAddToCart, refreshCart } = useCart();
+  const { refreshCart } = useCart();
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  const validItems = useMemo(() => {
-    return (items || []).filter((item) => normalizeText(item.product_slug));
-  }, [items]);
+  const normalizedOrderNumber = normalizeText(orderNumber);
 
   async function handleReorder() {
-    if (!validItems.length || isSubmitting) {
+    if (!normalizedOrderNumber || isSubmitting) {
       return;
     }
 
     try {
       setIsSubmitting(true);
       setError("");
+      setSuccessMessage("");
 
-      for (const item of validItems) {
-        await handleAddToCart({
-          product_slug: normalizeText(item.product_slug),
-          variant_id: normalizeText(item.variant_id),
-          product_title: normalizeText(item.product_title),
-          variant_title: normalizeText(item.variant_title),
-          sku: normalizeText(item.sku),
-          image: normalizeText(item.image),
-          unit_price: 0,
-          quantity: normalizeQuantity(item.quantity),
-        });
+      const response = await fetch("/api/account/reorder", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          order_number: normalizedOrderNumber,
+        }),
+      });
+
+      const data = (await parseJsonSafe(response)) as ReorderApiResponse | null;
+
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || "Unable to reorder this request.");
       }
 
       await refreshCart();
 
+      setSuccessMessage(
+        data.message ||
+          `Added ${data.added_count || 0} item(s) to your quote cart.`
+      );
+
       if (goToCart) {
-        router.push("/cart");
+        router.push(data.next_path || "/cart");
       }
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : "Unable to re-order these items right now."
+          : "Unable to reorder this request right now."
       );
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  const buttonStyle =
-    variant === "ghost" ? ghostButtonStyle : darkButtonStyle;
+  const buttonStyle = variant === "ghost" ? ghostButtonStyle : darkButtonStyle;
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <button
         type="button"
         onClick={handleReorder}
-        disabled={isSubmitting || !validItems.length}
+        disabled={isSubmitting || !normalizedOrderNumber}
         style={{
           ...buttonStyle,
-          ...(isSubmitting || !validItems.length ? disabledStyle : null),
+          ...(isSubmitting || !normalizedOrderNumber ? disabledStyle : null),
           ...style,
         }}
       >
-        {isSubmitting ? "Re-ordering..." : label}
+        {isSubmitting ? "Adding to Quote Cart..." : label}
       </button>
 
       {error ? <div style={errorStyle}>{error}</div> : null}
+      {successMessage ? <div style={successStyle}>{successMessage}</div> : null}
     </div>
   );
 }
@@ -118,10 +125,10 @@ const baseButtonStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 38,
-  padding: "0 14px",
+  minHeight: 42,
+  padding: "0 16px",
   borderRadius: 999,
-  fontWeight: 700,
+  fontWeight: 800,
   fontSize: 13,
   whiteSpace: "nowrap",
   cursor: "pointer",
@@ -151,4 +158,12 @@ const errorStyle: React.CSSProperties = {
   fontSize: 12,
   color: "#b42318",
   lineHeight: 1.4,
+  fontWeight: 700,
+};
+
+const successStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: "#1d6a43",
+  lineHeight: 1.4,
+  fontWeight: 700,
 };

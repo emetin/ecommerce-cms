@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  deleteAdminUser,
   findAdminUserById,
   updateAdminUser,
 } from "../../../../../lib/admin-users";
@@ -107,6 +108,39 @@ export async function PATCH(req: Request, context: RouteContext) {
       {
         ok: false,
         error: getAdminApiErrorMessage(error, "Failed to update admin user."),
+      },
+      { status: getAdminApiErrorStatus(error) }
+    );
+  }
+}
+
+export async function DELETE(req: Request, context: RouteContext) {
+  try {
+    const session = await requireAdminPermission(req, "users:write");
+
+    const { id } = await context.params;
+
+    if (session.adminUserId === id) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "You cannot delete your own admin account while logged in.",
+        },
+        { status: 400 }
+      );
+    }
+
+    await deleteAdminUser(id);
+
+    return NextResponse.json({
+      ok: true,
+      message: "Admin user deleted successfully.",
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: getAdminApiErrorMessage(error, "Failed to delete admin user."),
       },
       { status: getAdminApiErrorStatus(error) }
     );

@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import {
   appendSheetRow,
+  deleteSheetRowByField,
   findRowNumberByField,
   findSheetItemByField,
   getSheetData,
@@ -62,6 +63,10 @@ function nowIso() {
 
 function createId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isBcryptHash(value: string) {
+  return /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(value);
 }
 
 function mapUser(row: Partial<AdminUserRecord>): AdminUser {
@@ -274,7 +279,8 @@ export async function updateAdminUser(
     role_key: normalizeLower(input.roleKey ?? currentRecord.role_key) || "viewer",
     status: normalizeLower(input.status ?? currentRecord.status) || "active",
     must_change_password: booleanToSheetValue(
-      input.mustChangePassword ?? normalizeBoolean(currentRecord.must_change_password)
+      input.mustChangePassword ??
+        normalizeBoolean(currentRecord.must_change_password)
     ),
     last_login_at: normalizeText(currentRecord.last_login_at),
     created_at: normalizeText(currentRecord.created_at),
@@ -290,7 +296,7 @@ export async function updateAdminUser(
 export async function updateAdminUserPassword(
   userId: string,
   password: string,
-  mustChangePassword = true
+  mustChangePassword = false
 ) {
   const normalizedUserId = normalizeText(userId);
 
@@ -334,6 +340,25 @@ export async function updateAdminUserPassword(
   return mapUser(updatedRecord);
 }
 
+async function verifyPasswordAgainstHash(password: string, passwordHash: string) {
+  const normalizedPassword = String(password || "");
+  const normalizedHash = normalizeText(passwordHash);
+
+  if (!normalizedPassword || !normalizedHash) {
+    return false;
+  }
+
+  if (!isBcryptHash(normalizedHash)) {
+    console.error(
+      "Invalid admin password hash format. The password_hash field must contain a bcrypt hash."
+    );
+
+    return false;
+  }
+
+  return bcrypt.compare(normalizedPassword, normalizedHash);
+}
+
 export async function verifyAdminUserCredentials(email: string, password: string) {
   const normalizedEmail = normalizeLower(email);
   const normalizedPassword = String(password || "");
@@ -354,11 +379,10 @@ export async function verifyAdminUserCredentials(email: string, password: string
 
   const passwordHash = normalizeText(record.password_hash);
 
-  if (!passwordHash) {
-    return null;
-  }
-
-  const isValid = await bcrypt.compare(normalizedPassword, passwordHash);
+  const isValid = await verifyPasswordAgainstHash(
+    normalizedPassword,
+    passwordHash
+  );
 
   if (!isValid) {
     return null;
@@ -392,4 +416,20 @@ export async function updateAdminUserLastLogin(userId: string) {
     status: user.status,
     mustChangePassword: user.mustChangePassword,
   });
+}
+
+export async function deleteAdminUser(userId: string) {
+  const normalizedUserId = normalizeText(userId);
+
+  if (!normalizedUserId) {
+    throw new Error("userId is required.");
+  }
+
+  const existing = await findAdminUserById(normalizedUserId);
+
+  if (!existing) {
+    throw new Error("Admin user not found.");
+  }
+
+  return deleteSheetRowByField(ADMIN_USERS_SHEET, "id", normalizedUserId);
 }

@@ -36,6 +36,8 @@ export const ADMIN_PERMISSIONS = [
   "roles:read",
   "roles:write",
 
+  "account:password_change",
+
   "settings:manage",
 ] as const;
 
@@ -46,86 +48,130 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, AdminPermission[]> = {
 
   admin: [
     "dashboard:read",
+
     "products:read",
     "products:write",
+
     "collections:read",
     "collections:write",
+
     "blog:read",
     "blog:write",
+
     "media:read",
     "media:write",
+
     "customers:read",
     "customers:write",
+
     "customer_applications:read",
     "customer_applications:write",
+
     "orders:read",
     "orders:write",
+
     "draft_orders:read",
     "draft_orders:write",
+
     "abandoned_carts:read",
     "checkout_analytics:read",
+
     "reports:read",
+
+    "account:password_change",
   ],
 
   sales_manager: [
     "dashboard:read",
+
     "customers:read",
     "customers:write",
+
     "customer_applications:read",
     "customer_applications:write",
+
     "orders:read",
     "orders:write",
+
     "draft_orders:read",
     "draft_orders:write",
+
     "abandoned_carts:read",
     "checkout_analytics:read",
+
     "reports:read",
+
+    "account:password_change",
   ],
 
   sales_staff: [
     "dashboard:read",
+
     "customers:read",
     "customer_applications:read",
+
     "orders:read",
     "draft_orders:read",
+
     "abandoned_carts:read",
     "reports:read",
+
+    "account:password_change",
   ],
 
   catalog_manager: [
     "dashboard:read",
+
     "products:read",
     "products:write",
+
     "collections:read",
     "collections:write",
+
     "blog:read",
     "blog:write",
+
     "media:read",
     "media:write",
+
+    "account:password_change",
   ],
 
   order_manager: [
     "dashboard:read",
+
     "customers:read",
+
     "orders:read",
     "orders:write",
+
     "draft_orders:read",
     "draft_orders:write",
+
     "abandoned_carts:read",
     "checkout_analytics:read",
+
     "reports:read",
+
+    "account:password_change",
   ],
 
   viewer: [
     "dashboard:read",
+
     "products:read",
     "collections:read",
     "blog:read",
     "media:read",
+
     "customers:read",
     "customer_applications:read",
+
     "orders:read",
+
     "reports:read",
+
+    "account:password_change",
   ],
 };
 

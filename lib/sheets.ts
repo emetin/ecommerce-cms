@@ -25,6 +25,7 @@ if (!PRIVATE_KEY) {
 }
 
 export type SheetObject = Record<string, string>;
+
 type SpreadsheetMode = "catalog" | "forms";
 
 type SheetMeta = {
@@ -41,71 +42,140 @@ const SHEET_TITLE_ALIASES: Record<string, string[]> = {
   collections: ["collections", "Collections"],
   blog: ["blog", "Blog"],
   media: ["media", "Media"],
-  product_variants: ["product_variants", "Product_Variants", "Product Variants"],
+
+  product_variants: [
+    "product_variants",
+    "Product_Variants",
+    "Product Variants",
+  ],
+
   product_images: ["product_images", "Product_Images", "Product Images"],
+
   customers: ["customers", "Customers"],
+
   collection_products: [
     "collection_products",
     "Collection_Products",
     "Collection Products",
   ],
+
   customer_applications: [
     "customer_applications",
     "Customer_Applications",
     "Customer Applications",
   ],
+
+  price_lists: ["price_lists", "Price_Lists", "Price Lists"],
+
+  price_list_items: [
+    "price_list_items",
+    "Price_List_Items",
+    "Price List Items",
+  ],
+
+  customer_sessions: [
+    "customer_sessions",
+    "Customer_Sessions",
+    "Customer Sessions",
+  ],
+
+  customer_price_list_history: [
+    "customer_price_list_history",
+    "Customer_Price_List_History",
+    "Customer Price List History",
+  ],
+
   orders: ["orders", "Orders"],
   order_items: ["order_items", "Order_Items", "Order Items"],
   carts: ["carts", "Carts"],
   cart_items: ["cart_items", "Cart_Items", "Cart Items"],
+
   admin_users: ["admin_users", "Admin_Users", "Admin Users"],
   admin_roles: ["admin_roles", "Admin_Roles", "Admin Roles"],
+
   draft_orders: ["draft_orders", "Draft_Orders", "Draft Orders"],
-  draft_order_items: ["draft_order_items", "Draft_Order_Items", "Draft Order Items"],
+
+  draft_order_items: [
+    "draft_order_items",
+    "Draft_Order_Items",
+    "Draft Order Items",
+  ],
 };
 
 const SHEET_RANGE_MAP: Record<string, string> = {
   products: "A:R",
   Products: "A:R",
+
   collections: "A:J",
   Collections: "A:J",
+
   blog: "A:L",
   Blog: "A:L",
+
   media: "A:J",
   Media: "A:J",
-  product_variants: "A:Z",
-  Product_Variants: "A:Z",
-  "Product Variants": "A:Z",
-  product_images: "A:J",
-  Product_Images: "A:J",
-  "Product Images": "A:J",
+
+  product_variants: "A:ZZ",
+  Product_Variants: "A:ZZ",
+  "Product Variants": "A:ZZ",
+
+  product_images: "A:ZZ",
+  Product_Images: "A:ZZ",
+  "Product Images": "A:ZZ",
+
   customers: "A:ZZ",
   Customers: "A:ZZ",
+
   collection_products: "A:ZZ",
   Collection_Products: "A:ZZ",
   "Collection Products": "A:ZZ",
+
   customer_applications: "A:ZZ",
   Customer_Applications: "A:ZZ",
   "Customer Applications": "A:ZZ",
+
+  price_lists: "A:ZZ",
+  Price_Lists: "A:ZZ",
+  "Price Lists": "A:ZZ",
+
+  price_list_items: "A:ZZ",
+  Price_List_Items: "A:ZZ",
+  "Price List Items": "A:ZZ",
+
+  customer_sessions: "A:ZZ",
+  Customer_Sessions: "A:ZZ",
+  "Customer Sessions": "A:ZZ",
+
+  customer_price_list_history: "A:ZZ",
+  Customer_Price_List_History: "A:ZZ",
+  "Customer Price List History": "A:ZZ",
+
   orders: "A:ZZ",
   Orders: "A:ZZ",
+
   order_items: "A:ZZ",
   Order_Items: "A:ZZ",
   "Order Items": "A:ZZ",
+
   carts: "A:ZZ",
   Carts: "A:ZZ",
+
   cart_items: "A:ZZ",
   Cart_Items: "A:ZZ",
   "Cart Items": "A:ZZ",
+
   admin_users: "A:ZZ",
   Admin_Users: "A:ZZ",
   "Admin Users": "A:ZZ",
+
   admin_roles: "A:ZZ",
   Admin_Roles: "A:ZZ",
   "Admin Roles": "A:ZZ",
+
   draft_orders: "A:ZZ",
   Draft_Orders: "A:ZZ",
   "Draft Orders": "A:ZZ",
+
   draft_order_items: "A:ZZ",
   Draft_Order_Items: "A:ZZ",
   "Draft Order Items": "A:ZZ",
@@ -251,7 +321,9 @@ function clearSheetLocalCache(
   deleteCacheByPrefix(`sheet:rows:${mode}:${sheetName}:`);
   deleteCacheByPrefix(`sheet:headers:${mode}:${sheetName}:`);
   deleteCacheByPrefix(`sheet:objects:${mode}:${sheetName}:`);
-  deleteCacheByPrefix(`sheet:rows:${mode}:${normalizeCellValueLower(sheetName)}:`);
+  deleteCacheByPrefix(
+    `sheet:rows:${mode}:${normalizeCellValueLower(sheetName)}:`
+  );
   deleteCacheByPrefix(
     `sheet:headers:${mode}:${normalizeCellValueLower(sheetName)}:`
   );
@@ -347,7 +419,12 @@ function getCachedSheetRowsLoader(
 ) {
   return unstable_cache(
     async () => fetchSheetRowsUncached(sheetName, mode),
-    ["google-sheet-rows", mode, normalizeCellValueLower(sheetName), String(ttlSeconds)],
+    [
+      "google-sheet-rows",
+      mode,
+      normalizeCellValueLower(sheetName),
+      String(ttlSeconds),
+    ],
     {
       revalidate: ttlSeconds,
       tags: [getSheetTag(sheetName, mode)],
@@ -704,7 +781,8 @@ export async function getSheetMetaByTitle(
     ) ||
     allMeta.find(
       (item) =>
-        normalizeCellValueLower(item.title) === normalizeCellValueLower(sheetName)
+        normalizeCellValueLower(item.title) ===
+        normalizeCellValueLower(sheetName)
     );
 
   if (!sheet) {
@@ -867,10 +945,6 @@ export async function replaceSheetRows(sheetName: string, rows: string[][]) {
   return { ok: true };
 }
 
-/**
- * Compatibility exports for older project files
- */
-
 export async function findSheetItemsByField(
   sheetName: string,
   fieldName: string,
@@ -916,4 +990,67 @@ export async function findSheetItemByField(
   );
 
   return items[0] || null;
+}
+
+export async function appendFormSheetRow(sheetName: string, row: string[]) {
+  const sheets = getSheetsClient("forms");
+  const actualSheetTitle = await resolveActualSheetTitle(sheetName, "forms");
+
+  await withRetry(async () => {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: getSpreadsheetId("forms"),
+      range: `${actualSheetTitle}!A:ZZ`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: [row],
+      },
+    });
+  });
+
+  invalidateSheet(sheetName, "forms");
+
+  return { ok: true };
+}
+
+export async function getFormSheetData(sheetName: string) {
+  return getSheetData(sheetName, {
+    forceFresh: true,
+    ttlSeconds: 0,
+    mode: "forms",
+  });
+}
+
+export async function getSheetRowNumberMapByField(
+  sheetName: string,
+  fieldName: string
+) {
+  const rows = await getSheetRows(sheetName, {
+    forceFresh: true,
+    ttlSeconds: 0,
+    mode: "catalog",
+  });
+
+  const map = new Map<string, number>();
+
+  if (!rows.length) {
+    return map;
+  }
+
+  const headers = rowsToHeaders(rows);
+  const fieldIndex = headers.findIndex((header) => header === fieldName);
+
+  if (fieldIndex === -1) {
+    throw new Error(`Field "${fieldName}" was not found in "${sheetName}".`);
+  }
+
+  for (let i = 1; i < rows.length; i += 1) {
+    const value = String(rows[i]?.[fieldIndex] || "").trim();
+
+    if (value) {
+      map.set(value, i + 1);
+      map.set(value.toLowerCase(), i + 1);
+    }
+  }
+
+  return map;
 }

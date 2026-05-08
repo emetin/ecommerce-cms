@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 type NavItem = {
   href: string;
@@ -37,29 +37,44 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/admin-auth/logout", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+      });
+    } finally {
+      router.replace("/portal-ptx-admin");
+      router.refresh();
+    }
+  }
 
   return (
     <div
       style={{
         minHeight: "100vh",
         height: "100vh",
-        background: "#f6f3ee",
-        color: "#171717",
+        background: "#f7f5f1",
+        color: "#1f1f1f",
         overflow: "hidden",
+        fontSize: 13,
       }}
     >
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "280px minmax(0, 1fr)",
+          gridTemplateColumns: "238px minmax(0, 1fr)",
           height: "100vh",
         }}
       >
         <aside
           style={{
             height: "100vh",
-            borderRight: "1px solid #e5ddd1",
-            background: "linear-gradient(180deg, #f8f5ef 0%, #f4efe7 100%)",
+            borderRight: "1px solid #e6ded2",
+            background: "#fbfaf7",
             display: "grid",
             gridTemplateRows: "auto minmax(0, 1fr) auto",
             overflow: "hidden",
@@ -67,25 +82,24 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         >
           <div
             style={{
-              padding: "26px 20px 18px",
-              borderBottom: "1px solid #ece3d7",
+              padding: "20px 16px 16px",
+              borderBottom: "1px solid #ebe4da",
             }}
           >
             <div
               style={{
-                width: 46,
-                height: 46,
-                borderRadius: 14,
-                background:
-                  "linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)",
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                background: "var(--primary)",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
                 color: "#fff",
-                fontWeight: 900,
-                fontSize: 16,
+                fontWeight: 800,
+                fontSize: 13,
                 letterSpacing: "0.04em",
-                marginBottom: 16,
+                marginBottom: 12,
               }}
             >
               GF
@@ -93,11 +107,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
             <div
               style={{
-                fontSize: 12,
-                letterSpacing: "0.18em",
+                fontSize: 10,
+                letterSpacing: "0.14em",
                 textTransform: "uppercase",
-                color: "#8a7f72",
-                marginBottom: 8,
+                color: "#8a8177",
+                marginBottom: 6,
                 fontWeight: 800,
               }}
             >
@@ -106,7 +120,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
             <div
               style={{
-                fontSize: 30,
+                fontSize: 24,
                 fontWeight: 800,
                 lineHeight: 1,
                 fontFamily: "var(--font-heading)",
@@ -118,13 +132,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
             <div
               style={{
-                marginTop: 10,
-                fontSize: 13,
-                color: "#6f6559",
-                lineHeight: 1.6,
+                marginTop: 8,
+                fontSize: 12,
+                color: "#70675f",
+                lineHeight: 1.5,
               }}
             >
-              Hospitality B2B Management Panel
+              B2B Management Panel
             </div>
           </div>
 
@@ -132,13 +146,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             style={{
               minHeight: 0,
               overflowY: "auto",
-              padding: "18px 14px",
+              padding: "12px 10px",
             }}
           >
             <nav
               style={{
                 display: "grid",
-                gap: 6,
+                gap: 3,
               }}
             >
               {NAV_ITEMS.map((item) => (
@@ -153,27 +167,24 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
           <div
             style={{
-              padding: "16px 14px 18px",
-              borderTop: "1px solid #ece3d7",
-              background: "rgba(248,245,239,0.96)",
-              backdropFilter: "blur(8px)",
+              padding: "12px 10px 14px",
+              borderTop: "1px solid #ebe4da",
+              background: "#fbfaf7",
               display: "grid",
-              gap: 10,
+              gap: 7,
             }}
           >
-            <Link href="/" style={viewSiteButtonStyle}>
+            <Link href="/" style={primaryFooterButtonStyle}>
               View Public Site
             </Link>
 
-            <form
-              method="POST"
-              action="/api/admin-auth/logout"
-              style={{ margin: 0 }}
-            >
-              <button type="submit" style={logoutButtonStyle}>
-                Logout
-              </button>
-            </form>
+            <Link href="/admin/change-password" style={footerButtonStyle}>
+              Change Password
+            </Link>
+
+            <button type="button" onClick={handleLogout} style={footerButtonStyle}>
+              Logout
+            </button>
           </div>
         </aside>
 
@@ -188,14 +199,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         >
           <header
             style={{
-              background: "rgba(246, 243, 238, 0.92)",
+              background: "rgba(247,245,241,0.94)",
               backdropFilter: "blur(12px)",
-              borderBottom: "1px solid #e3dbcf",
+              borderBottom: "1px solid #e6ded2",
             }}
           >
             <div
               style={{
-                padding: "22px 28px",
+                minHeight: 74,
+                padding: "16px 24px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
@@ -206,12 +218,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               <div>
                 <div
                   style={{
-                    fontSize: 12,
+                    fontSize: 10,
                     textTransform: "uppercase",
-                    letterSpacing: "0.14em",
-                    color: "#8a7f72",
+                    letterSpacing: "0.13em",
+                    color: "#8a8177",
                     fontWeight: 800,
-                    marginBottom: 6,
+                    marginBottom: 5,
                   }}
                 >
                   Admin Workspace
@@ -219,7 +231,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
                 <div
                   style={{
-                    fontSize: 28,
+                    fontSize: 24,
                     fontWeight: 800,
                     lineHeight: 1.1,
                     fontFamily: "var(--font-heading)",
@@ -234,26 +246,26 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 10,
-                  padding: "8px 12px",
+                  gap: 8,
+                  padding: "6px 10px",
                   borderRadius: 999,
                   background: "#fff",
-                  border: "1px solid #ddd3c5",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+                  border: "1px solid #ded5c8",
                 }}
               >
                 <span
                   style={{
-                    width: 10,
-                    height: 10,
+                    width: 7,
+                    height: 7,
                     borderRadius: "50%",
                     background: "#63b66d",
                     display: "inline-block",
                   }}
                 />
+
                 <span
                   style={{
-                    fontSize: 13,
+                    fontSize: 12,
                     fontWeight: 700,
                     color: "#5d554a",
                   }}
@@ -272,7 +284,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           >
             <main
               style={{
-                padding: "28px",
+                padding: "22px 24px",
                 minWidth: 0,
               }}
             >
@@ -294,16 +306,21 @@ function getPageTitle(pathname: string) {
   if (pathname.startsWith("/admin/customer-applications")) return "Applications";
   if (pathname.startsWith("/admin/customers")) return "Customers";
   if (pathname.startsWith("/admin/draft-orders")) return "Draft Orders";
+
   if (pathname.startsWith("/admin/abandoned-checkouts")) {
     return "Abandoned Checkouts";
   }
+
   if (pathname.startsWith("/admin/checkout-analytics")) {
     return "Checkout Analytics";
   }
+
   if (pathname.startsWith("/admin/orders")) return "Orders";
   if (pathname.startsWith("/admin/reports")) return "Reports";
   if (pathname.startsWith("/admin/users")) return "Users & Roles";
   if (pathname.startsWith("/admin/roles")) return "Role Settings";
+  if (pathname.startsWith("/admin/change-password")) return "Change Password";
+
   return "Admin";
 }
 
@@ -336,7 +353,7 @@ function AdminNavItem({
   const isOpen = isActive && item.children && item.children.length > 0;
 
   return (
-    <div style={{ display: "grid", gap: 4 }}>
+    <div style={{ display: "grid", gap: 3 }}>
       <AdminNavLink href={item.href} currentPath={currentPath} isParent>
         <span>{item.label}</span>
         {item.children?.length ? (
@@ -393,18 +410,17 @@ function AdminNavLink({
         display: "flex",
         alignItems: "center",
         justifyContent: isParent ? "space-between" : "flex-start",
-        minHeight: 44,
-        padding: "0 14px",
-        borderRadius: 12,
+        minHeight: 36,
+        padding: "0 10px",
+        borderRadius: 9,
         textDecoration: "none",
-        background: finalActive ? "rgba(201,167,63,0.14)" : "transparent",
-        color: finalActive ? "#171717" : "#2e2a25",
-        fontWeight: finalActive ? 800 : 700,
+        background: finalActive ? "rgba(201,167,63,0.13)" : "transparent",
+        color: finalActive ? "#171717" : "#34302b",
+        fontWeight: finalActive ? 800 : 650,
+        fontSize: 13,
         border: finalActive
-          ? "1px solid rgba(201,167,63,0.28)"
+          ? "1px solid rgba(201,167,63,0.25)"
           : "1px solid transparent",
-        boxShadow: finalActive ? "0 6px 16px rgba(201,167,63,0.08)" : "none",
-        transition: "all 0.2s ease",
       }}
     >
       <span
@@ -416,15 +432,16 @@ function AdminNavLink({
       >
         <span
           style={{
-            width: 8,
-            height: 8,
+            width: 6,
+            height: 6,
             borderRadius: "50%",
             background: finalActive ? "var(--primary)" : "transparent",
             border: finalActive ? "none" : "1px solid #cfc4b5",
-            marginRight: 12,
+            marginRight: 9,
             flexShrink: 0,
           }}
         />
+
         <span>{children}</span>
       </span>
     </Link>
@@ -446,31 +463,32 @@ function AdminSubNavLink({
     <Link
       href={href}
       style={{
-        minHeight: 36,
+        minHeight: 30,
         display: "flex",
         alignItems: "center",
-        padding: "0 12px 0 34px",
-        borderRadius: 10,
+        padding: "0 10px 0 26px",
+        borderRadius: 8,
         textDecoration: "none",
-        fontSize: 13,
-        fontWeight: isActive ? 800 : 700,
-        color: isActive ? "#171717" : "#6f6559",
-        background: isActive ? "rgba(255,255,255,0.72)" : "transparent",
+        fontSize: 12,
+        fontWeight: isActive ? 800 : 650,
+        color: isActive ? "#171717" : "#70675f",
+        background: isActive ? "#fff" : "transparent",
         border: isActive
-          ? "1px solid rgba(201,167,63,0.18)"
+          ? "1px solid rgba(201,167,63,0.16)"
           : "1px solid transparent",
       }}
     >
       <span
         style={{
-          width: 6,
-          height: 6,
+          width: 5,
+          height: 5,
           borderRadius: "50%",
           background: isActive ? "var(--primary)" : "#cfc4b5",
-          marginRight: 10,
+          marginRight: 8,
           flexShrink: 0,
         }}
       />
+
       <span>{children}</span>
     </Link>
   );
@@ -478,46 +496,48 @@ function AdminSubNavLink({
 
 const subMenuStyle: React.CSSProperties = {
   display: "grid",
-  gap: 4,
-  marginLeft: 10,
-  paddingLeft: 8,
+  gap: 3,
+  marginLeft: 9,
+  paddingLeft: 6,
   borderLeft: "1px solid #e5ddd1",
 };
 
 const chevronStyle: React.CSSProperties = {
   color: "#8a7f72",
-  fontSize: 12,
+  fontSize: 11,
   fontWeight: 900,
   marginLeft: 8,
 };
 
-const viewSiteButtonStyle: React.CSSProperties = {
+const primaryFooterButtonStyle: React.CSSProperties = {
   width: "100%",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 46,
-  padding: "0 18px",
-  borderRadius: 14,
+  minHeight: 38,
+  padding: "0 14px",
+  borderRadius: 10,
   textDecoration: "none",
   background: "var(--primary)",
   color: "#fff",
+  fontSize: 13,
   fontWeight: 800,
   border: "1px solid var(--primary)",
-  boxShadow: "0 8px 18px rgba(201,167,63,0.16)",
 };
 
-const logoutButtonStyle: React.CSSProperties = {
+const footerButtonStyle: React.CSSProperties = {
   width: "100%",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 46,
-  padding: "0 18px",
-  borderRadius: 14,
+  minHeight: 36,
+  padding: "0 14px",
+  borderRadius: 10,
+  textDecoration: "none",
   background: "#fff",
   color: "#171717",
-  fontWeight: 800,
+  fontSize: 13,
+  fontWeight: 750,
   border: "1px solid #ddd3c5",
   cursor: "pointer",
 };

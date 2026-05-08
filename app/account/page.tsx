@@ -6,12 +6,12 @@ import {
 } from "../../lib/customer-auth";
 import {
   findCustomerById,
-  getOrdersForCustomer,
   sanitizeCustomer,
 } from "../../lib/customer-account";
+import { getOrdersForCustomer } from "../../lib/account-orders";
 import ReorderButton from "../../components/account/ReorderButton";
 
-function formatMoney(value: string, currency: string) {
+function formatMoney(value: string | number, currency: string) {
   const amount = Number(value || 0);
 
   if (!Number.isFinite(amount)) {
@@ -63,7 +63,11 @@ function getStatusStyle(status: string): React.CSSProperties {
     };
   }
 
-  if (normalized === "processing" || normalized === "shipped") {
+  if (
+    normalized === "processing" ||
+    normalized === "approved" ||
+    normalized === "quoted"
+  ) {
     return {
       background: "#eff6ff",
       color: "#1d4ed8",
@@ -76,6 +80,44 @@ function getStatusStyle(status: string): React.CSSProperties {
     color: "#8a5a00",
     border: "1px solid #f5deb0",
   };
+}
+
+function getStatusLabel(status: string) {
+  const normalized = String(status || "submitted").toLowerCase();
+
+  const labels: Record<string, string> = {
+    submitted: "Submitted",
+    reviewing: "Under Review",
+    quoted: "Quoted",
+    approved: "Approved",
+    processing: "Processing",
+    completed: "Completed",
+    cancelled: "Cancelled",
+    paid: "Paid",
+  };
+
+  return labels[normalized] || normalized;
+}
+
+function getSafeTotal(order: {
+  grand_total?: string | number;
+  subtotal?: string | number;
+}) {
+  const grandTotal = Number(order.grand_total || 0);
+  const subtotal = Number(order.subtotal || 0);
+
+  if (Number.isFinite(grandTotal) && grandTotal > 0) {
+    return grandTotal;
+  }
+
+  return Number.isFinite(subtotal) ? subtotal : 0;
+}
+
+function getSafeItemCount(order: {
+  item_count?: string | number;
+}) {
+  const itemCount = Number(order.item_count || 0);
+  return Number.isFinite(itemCount) ? itemCount : 0;
 }
 
 export default async function AccountPage() {
@@ -109,98 +151,23 @@ export default async function AccountPage() {
     .join(" ");
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "#f7f4ee",
-        padding: "40px 20px 70px",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: 1220,
-          margin: "0 auto",
-          display: "grid",
-          gap: 24,
-        }}
-      >
-        <section
-          style={{
-            background: "#fff",
-            border: "1px solid #e6ddd0",
-            borderRadius: 28,
-            padding: 28,
-            boxShadow: "0 10px 30px rgba(23,23,23,0.05)",
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 20,
-            flexWrap: "wrap",
-            alignItems: "flex-start",
-          }}
-        >
+    <main style={mainStyle}>
+      <div style={pageWrapStyle}>
+        <section style={heroCardStyle}>
           <div>
-            <div
-              style={{
-                fontSize: 12,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: "#7a7166",
-                fontWeight: 800,
-                marginBottom: 10,
-              }}
-            >
-              Customer Account
-            </div>
+            <div style={eyebrowStyle}>Customer Account</div>
 
-            <h1
-              style={{
-                margin: 0,
-                fontSize: 36,
-                lineHeight: 1.1,
-                color: "#171717",
-                fontFamily: "var(--font-heading)",
-              }}
-            >
-              {fullName || safeCustomer.email}
-            </h1>
+            <h1 style={heroTitleStyle}>{fullName || safeCustomer.email}</h1>
 
-            <p style={{ margin: "10px 0 0", color: "#665d52", fontSize: 15 }}>
+            <p style={customerMetaStyle}>
               {safeCustomer.company || "No company information"}
             </p>
-            <p style={{ margin: "6px 0 0", color: "#665d52", fontSize: 15 }}>
-              {safeCustomer.email}
-            </p>
+
+            <p style={customerMetaStyle}>{safeCustomer.email}</p>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 12,
-              flexWrap: "wrap",
-              justifyContent: "flex-end",
-              alignItems: "center",
-            }}
-          >
-            <a
-              href="/account/profile"
-              style={{
-                height: 50,
-                padding: "0 22px",
-                borderRadius: 999,
-                border: "1px solid #d8cebf",
-                background: "#fff",
-                color: "#171717",
-                fontWeight: 800,
-                cursor: "pointer",
-                textDecoration: "none",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                whiteSpace: "nowrap",
-                lineHeight: 1,
-                flex: "0 0 auto",
-              }}
-            >
+          <div style={heroActionsStyle}>
+            <a href="/account/profile" style={secondaryButtonStyle}>
               Edit Profile
             </a>
 
@@ -209,56 +176,16 @@ export default async function AccountPage() {
               method="post"
               style={{ margin: 0 }}
             >
-              <button
-                type="submit"
-                style={{
-                  height: 50,
-                  padding: "0 22px",
-                  borderRadius: 999,
-                  border: "1px solid #171717",
-                  background: "#171717",
-                  color: "#fff",
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  lineHeight: 1,
-                }}
-              >
+              <button type="submit" style={darkButtonStyle}>
                 Sign Out
               </button>
             </form>
           </div>
         </section>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "320px minmax(0, 1fr)",
-            gap: 24,
-            alignItems: "start",
-          }}
-        >
-          <aside
-            style={{
-              background: "#fff",
-              border: "1px solid #e6ddd0",
-              borderRadius: 28,
-              padding: 24,
-              boxShadow: "0 10px 30px rgba(23,23,23,0.05)",
-              alignSelf: "start",
-            }}
-          >
-            <h2
-              style={{
-                marginTop: 0,
-                marginBottom: 18,
-                color: "#171717",
-                fontFamily: "var(--font-heading)",
-                fontSize: 24,
-              }}
-            >
-              Account Details
-            </h2>
+        <div style={layoutStyle}>
+          <aside style={sideCardStyle}>
+            <h2 style={sideTitleStyle}>Account Details</h2>
 
             <div style={{ display: "grid", gap: 18 }}>
               <InfoRow label="Name" value={fullName || "-"} />
@@ -282,163 +209,81 @@ export default async function AccountPage() {
             </div>
           </aside>
 
-          <section
-            style={{
-              background: "#fff",
-              border: "1px solid #e6ddd0",
-              borderRadius: 28,
-              padding: 24,
-              boxShadow: "0 10px 30px rgba(23,23,23,0.05)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 16,
-                alignItems: "center",
-                flexWrap: "wrap",
-                marginBottom: 20,
-              }}
-            >
+          <section style={contentCardStyle}>
+            <div style={sectionHeaderStyle}>
               <div>
-                <h2
-                  style={{
-                    margin: 0,
-                    color: "#171717",
-                    fontFamily: "var(--font-heading)",
-                    fontSize: 24,
-                  }}
-                >
-                  Previous Orders
-                </h2>
-                <p style={{ margin: "8px 0 0", color: "#665d52" }}>
-                  Access your past orders and quickly start a new purchase from
-                  the same selections.
+                <h2 style={sectionTitleStyle}>Previous Quote Requests</h2>
+
+                <p style={sectionSubtitleStyle}>
+                  Access your submitted quote requests and quickly start a new
+                  request from the same selections.
                 </p>
               </div>
 
-              <div
-                style={{
-                  minWidth: 110,
-                  textAlign: "center",
-                  padding: "10px 14px",
-                  borderRadius: 999,
-                  background: "#f4efe7",
-                  color: "#171717",
-                  fontWeight: 800,
-                }}
-              >
-                {orders.length} Orders
-              </div>
+              <div style={countBadgeStyle}>{orders.length} Requests</div>
             </div>
 
             {orders.length === 0 ? (
-              <div
-                style={{
-                  border: "1px dashed #d9cfbf",
-                  borderRadius: 20,
-                  padding: 28,
-                  color: "#665d52",
-                }}
-              >
-                No orders found for this account yet.
+              <div style={emptyStateStyle}>
+                No quote requests found for this account yet.
               </div>
             ) : (
               <div style={{ display: "grid", gap: 12 }}>
-                {orders.map((order) => (
-                  <div
-                    key={order.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "minmax(0, 1.45fr) 0.95fr 0.95fr 0.9fr auto",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: "16px 18px",
-                      borderRadius: 18,
-                      border: "1px solid #eadfce",
-                      background: "#fff",
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontWeight: 800,
-                          color: "#171717",
-                          fontSize: 16,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          marginBottom: 4,
-                        }}
-                      >
-                        {order.order_number}
+                {orders.map((order) => {
+                  const itemCount = getSafeItemCount(order);
+                  const estimatedTotal = getSafeTotal(order);
+                  const currency = String(order.currency || "USD");
+
+                  return (
+                    <div key={order.id} style={requestRowStyle}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={requestNumberStyle}>
+                          {order.order_number}
+                        </div>
+
+                        <div style={requestMetaStyle}>
+                          {itemCount} item{itemCount === 1 ? "" : "s"}
+                        </div>
                       </div>
-                      <div style={{ color: "#7a7166", fontSize: 13 }}>
-                        {order.items?.length || 0} item
-                        {Number(order.items?.length || 0) === 1 ? "" : "s"}
+
+                      <div style={dateTextStyle}>
+                        {formatDate(String(order.created_at || ""))}
+                      </div>
+
+                      <div style={totalTextStyle}>
+                        {formatMoney(estimatedTotal, currency)}
+                      </div>
+
+                      <div>
+                        <span
+                          style={{
+                            ...statusPillStyle,
+                            ...getStatusStyle(String(order.status || "")),
+                          }}
+                        >
+                          {getStatusLabel(String(order.status || "submitted"))}
+                        </span>
+                      </div>
+
+                      <div style={rowActionsStyle}>
+                        <a
+                          href={`/account/orders/${encodeURIComponent(
+                            String(order.order_number || "")
+                          )}`}
+                          style={ghostActionStyle}
+                        >
+                          View
+                        </a>
+
+                        <ReorderButton
+                          orderNumber={String(order.order_number || "")}
+                          label="Reorder"
+                          variant="dark"
+                        />
                       </div>
                     </div>
-
-                    <div
-                      style={{
-                        color: "#665d52",
-                        fontSize: 14,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {formatDate(order.created_at)}
-                    </div>
-
-                    <div
-                      style={{
-                        fontWeight: 700,
-                        color: "#171717",
-                        fontSize: 14,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {formatMoney(order.grand_total, order.currency)}
-                    </div>
-
-                    <div>
-                      <span
-                        style={{
-                          ...statusPillStyle,
-                          ...getStatusStyle(order.status),
-                        }}
-                      >
-                        {order.status || "submitted"}
-                      </span>
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        justifyContent: "flex-end",
-                        flexWrap: "wrap",
-                        alignItems: "center",
-                      }}
-                    >
-                      <a
-                        href={`/account/orders/${encodeURIComponent(
-                          order.order_number
-                        )}`}
-                        style={ghostActionStyle}
-                      >
-                        View
-                      </a>
-
-                      <ReorderButton
-                        items={order.items || []}
-                        label="Re-order"
-                        variant="dark"
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
@@ -451,22 +296,222 @@ export default async function AccountPage() {
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div
-        style={{
-          fontSize: 12,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: "#7a7166",
-          fontWeight: 800,
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ color: "#171717", fontWeight: 700 }}>{value}</div>
+      <div style={infoLabelStyle}>{label}</div>
+      <div style={infoValueStyle}>{value}</div>
     </div>
   );
 }
+
+const mainStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  background: "#f7f4ee",
+  padding: "40px 20px 70px",
+};
+
+const pageWrapStyle: React.CSSProperties = {
+  maxWidth: 1220,
+  margin: "0 auto",
+  display: "grid",
+  gap: 24,
+};
+
+const heroCardStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e6ddd0",
+  borderRadius: 28,
+  padding: 28,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.05)",
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 20,
+  flexWrap: "wrap",
+  alignItems: "flex-start",
+};
+
+const eyebrowStyle: React.CSSProperties = {
+  fontSize: 12,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "#7a7166",
+  fontWeight: 800,
+  marginBottom: 10,
+};
+
+const heroTitleStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: 36,
+  lineHeight: 1.1,
+  color: "#171717",
+  fontFamily: "var(--font-heading)",
+};
+
+const customerMetaStyle: React.CSSProperties = {
+  margin: "8px 0 0",
+  color: "#665d52",
+  fontSize: 15,
+};
+
+const heroActionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 12,
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
+  alignItems: "center",
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  height: 50,
+  padding: "0 22px",
+  borderRadius: 999,
+  border: "1px solid #d8cebf",
+  background: "#fff",
+  color: "#171717",
+  fontWeight: 800,
+  cursor: "pointer",
+  textDecoration: "none",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  whiteSpace: "nowrap",
+  lineHeight: 1,
+  flex: "0 0 auto",
+};
+
+const darkButtonStyle: React.CSSProperties = {
+  height: 50,
+  padding: "0 22px",
+  borderRadius: 999,
+  border: "1px solid #171717",
+  background: "#171717",
+  color: "#fff",
+  fontWeight: 800,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+  lineHeight: 1,
+};
+
+const layoutStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "320px minmax(0, 1fr)",
+  gap: 24,
+  alignItems: "start",
+};
+
+const sideCardStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e6ddd0",
+  borderRadius: 28,
+  padding: 24,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.05)",
+  alignSelf: "start",
+};
+
+const sideTitleStyle: React.CSSProperties = {
+  marginTop: 0,
+  marginBottom: 18,
+  color: "#171717",
+  fontFamily: "var(--font-heading)",
+  fontSize: 24,
+};
+
+const infoLabelStyle: React.CSSProperties = {
+  fontSize: 12,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "#7a7166",
+  fontWeight: 800,
+  marginBottom: 4,
+};
+
+const infoValueStyle: React.CSSProperties = {
+  color: "#171717",
+  fontWeight: 700,
+};
+
+const contentCardStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e6ddd0",
+  borderRadius: 28,
+  padding: 24,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.05)",
+};
+
+const sectionHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 16,
+  alignItems: "center",
+  flexWrap: "wrap",
+  marginBottom: 20,
+};
+
+const sectionTitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#171717",
+  fontFamily: "var(--font-heading)",
+  fontSize: 24,
+};
+
+const sectionSubtitleStyle: React.CSSProperties = {
+  margin: "8px 0 0",
+  color: "#665d52",
+};
+
+const countBadgeStyle: React.CSSProperties = {
+  minWidth: 120,
+  textAlign: "center",
+  padding: "10px 14px",
+  borderRadius: 999,
+  background: "#f4efe7",
+  color: "#171717",
+  fontWeight: 800,
+};
+
+const emptyStateStyle: React.CSSProperties = {
+  border: "1px dashed #d9cfbf",
+  borderRadius: 20,
+  padding: 28,
+  color: "#665d52",
+};
+
+const requestRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.45fr) 0.95fr 0.95fr 0.9fr auto",
+  alignItems: "center",
+  gap: 12,
+  padding: "16px 18px",
+  borderRadius: 18,
+  border: "1px solid #eadfce",
+  background: "#fff",
+};
+
+const requestNumberStyle: React.CSSProperties = {
+  fontWeight: 800,
+  color: "#171717",
+  fontSize: 16,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  marginBottom: 4,
+};
+
+const requestMetaStyle: React.CSSProperties = {
+  color: "#7a7166",
+  fontSize: 13,
+};
+
+const dateTextStyle: React.CSSProperties = {
+  color: "#665d52",
+  fontSize: 14,
+  whiteSpace: "nowrap",
+};
+
+const totalTextStyle: React.CSSProperties = {
+  fontWeight: 700,
+  color: "#171717",
+  fontSize: 14,
+  whiteSpace: "nowrap",
+};
 
 const statusPillStyle: React.CSSProperties = {
   display: "inline-flex",
@@ -481,11 +526,19 @@ const statusPillStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+const rowActionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  justifyContent: "flex-end",
+  flexWrap: "wrap",
+  alignItems: "center",
+};
+
 const ghostActionStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 38,
+  minHeight: 42,
   padding: "0 14px",
   borderRadius: 999,
   border: "1px solid #d8cebf",

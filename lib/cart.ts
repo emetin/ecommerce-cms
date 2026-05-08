@@ -47,6 +47,12 @@ export type CartItemRecord = {
   compare_at_price: string;
   quantity: string;
   line_total: string;
+
+  min_quantity?: string;
+  box_quantity?: string;
+  case_quantity?: string;
+  step_quantity?: string;
+
   created_at: string;
   updated_at: string;
 };
@@ -61,6 +67,11 @@ export type AddCartItemInput = {
   unit_price: number | string;
   compare_at_price?: number | string;
   quantity?: number;
+
+  min_quantity?: number | string;
+  box_quantity?: number | string;
+  case_quantity?: number | string;
+  step_quantity?: number | string;
 };
 
 export type HydratedCartItem = CartItemRecord & {
@@ -68,6 +79,10 @@ export type HydratedCartItem = CartItemRecord & {
   compare_at_price_number: number;
   quantity_number: number;
   line_total_number: number;
+  min_quantity_number: number;
+  box_quantity_number: number;
+  case_quantity_number: number;
+  step_quantity_number: number;
 };
 
 export type HydratedCart = {
@@ -83,10 +98,38 @@ export type HydratedCart = {
   };
 };
 
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
+function toPositiveInteger(value: unknown, fallback: number) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const floored = Math.floor(parsed);
+
+  return floored > 0 ? floored : fallback;
+}
+
 function addDaysIso(days: number): string {
   const now = new Date();
   now.setDate(now.getDate() + days);
   return now.toISOString();
+}
+
+function isActiveCart(cart: CartRecord | null) {
+  if (!cart) return false;
+
+  const status = normalizeLower(cart.status || "active");
+
+  return !status || status === "active";
 }
 
 async function buildRowFromHeaders(
@@ -112,6 +155,10 @@ function hydrateCartItem(item: CartItemRecord): HydratedCartItem {
     compare_at_price_number: toNumber(item.compare_at_price),
     quantity_number: toNumber(item.quantity),
     line_total_number: toNumber(item.line_total),
+    min_quantity_number: toPositiveInteger(item.min_quantity, 0),
+    box_quantity_number: toPositiveInteger(item.box_quantity, 0),
+    case_quantity_number: toPositiveInteger(item.case_quantity, 0),
+    step_quantity_number: toPositiveInteger(item.step_quantity, 0),
   };
 }
 
@@ -139,33 +186,62 @@ function calculateCartTotals(items: CartItemRecord[]) {
   };
 }
 
+function createHydratedCart(
+  cart: CartRecord,
+  items: CartItemRecord[]
+): HydratedCart {
+  const totals = calculateCartTotals(items);
+
+  return {
+    cart: {
+      ...cart,
+      subtotal: toMoney(totals.subtotal),
+      discount_total: toMoney(totals.discount_total),
+      shipping_total: toMoney(totals.shipping_total),
+      tax_total: toMoney(totals.tax_total),
+      grand_total: toMoney(totals.grand_total),
+      item_count: String(totals.item_count),
+    },
+    items: items.map(hydrateCartItem),
+    totals,
+  };
+}
+
 export async function getCartByToken(
   cartToken: string
 ): Promise<CartRecord | null> {
-  if (!cartToken?.trim()) {
+  const normalizedCartToken = normalizeText(cartToken);
+
+  if (!normalizedCartToken) {
     return null;
   }
 
-  const cart = await findSheetItemByField<CartRecord>(
+  const cartRaw = await findSheetItemByField(
     CARTS_SHEET,
     "cart_token",
-    cartToken,
+    normalizedCartToken,
     { forceFresh: true, ttlSeconds: 0 }
   );
 
-  return cart;
+  return (cartRaw as CartRecord | null) || null;
 }
 
 export async function createCart(
   cartToken: string,
   customerId = ""
 ): Promise<CartRecord> {
+  const normalizedCartToken = normalizeText(cartToken);
+
+  if (!normalizedCartToken) {
+    throw new Error("cart_token is required.");
+  }
+
   const now = nowIso();
 
   const record: CartRecord = {
     id: createId("cart"),
-    cart_token: cartToken,
-    customer_id: customerId,
+    cart_token: normalizedCartToken,
+    customer_id: normalizeText(customerId),
     status: "active",
     currency: "USD",
     subtotal: "0.00",
@@ -190,43 +266,63 @@ export async function getOrCreateCart(
   cartToken: string,
   customerId = ""
 ): Promise<CartRecord> {
-  const existing = await getCartByToken(cartToken);
+  const normalizedCartToken = normalizeText(cartToken);
 
-  if (existing) {
-    return existing;
+  if (!normalizedCartToken) {
+    throw new Error("cart_token is required.");
   }
 
-  return createCart(cartToken, customerId);
+  const existing = await getCartByToken(normalizedCartToken);
+
+  if (isActiveCart(existing)) {
+    return existing as CartRecord;
+  }
+
+  return createCart(normalizedCartToken, customerId);
 }
 
 export async function getCartItems(cartId: string): Promise<CartItemRecord[]> {
-  if (!cartId?.trim()) {
+  const normalizedCartId = normalizeText(cartId);
+
+  if (!normalizedCartId) {
     return [];
   }
 
-  const items = await findSheetItemsByField<CartItemRecord>(
+  const itemsRaw = await findSheetItemsByField(
     CART_ITEMS_SHEET,
     "cart_id",
-    cartId,
+    normalizedCartId,
     { forceFresh: true, ttlSeconds: 0 }
   );
 
-  return items;
+  return (itemsRaw as CartItemRecord[]) || [];
 }
 
 export async function syncCartTotals(cartId: string): Promise<HydratedCart> {
-  const cart = await findSheetItemByField<CartRecord>(CARTS_SHEET, "id", cartId, {
+  const normalizedCartId = normalizeText(cartId);
+
+  if (!normalizedCartId) {
+    throw new Error("cart_id is required.");
+  }
+
+  const cartRaw = await findSheetItemByField(CARTS_SHEET, "id", normalizedCartId, {
     forceFresh: true,
     ttlSeconds: 0,
   });
+
+  const cart = cartRaw as CartRecord | null;
 
   if (!cart) {
     throw new Error("Cart not found.");
   }
 
-  const items = await getCartItems(cartId);
+  const items = await getCartItems(normalizedCartId);
   const totals = calculateCartTotals(items);
-  const rowNumber = await findRowNumberByField(CARTS_SHEET, "id", cartId);
+  const rowNumber = await findRowNumberByField(
+    CARTS_SHEET,
+    "id",
+    normalizedCartId
+  );
 
   if (!rowNumber) {
     throw new Error("Cart row could not be found.");
@@ -258,18 +354,24 @@ export async function getHydratedCartByToken(
 ): Promise<HydratedCart | null> {
   const cart = await getCartByToken(cartToken);
 
-  if (!cart) {
+  if (!isActiveCart(cart)) {
     return null;
   }
 
-  const items = await getCartItems(cart.id);
-  const totals = calculateCartTotals(items);
+  const activeCart = cart as CartRecord;
+  const items = await getCartItems(activeCart.id);
 
-  return {
-    cart,
-    items: items.map(hydrateCartItem),
-    totals,
-  };
+  return createHydratedCart(activeCart, items);
+}
+
+export async function getOrCreateHydratedCartByToken(
+  cartToken: string,
+  customerId = ""
+): Promise<HydratedCart> {
+  const cart = await getOrCreateCart(cartToken, customerId);
+  const items = await getCartItems(cart.id);
+
+  return createHydratedCart(cart, items);
 }
 
 export async function addItemToCart(
@@ -277,23 +379,36 @@ export async function addItemToCart(
   input: AddCartItemInput,
   customerId = ""
 ): Promise<HydratedCart> {
-  const cart = await getOrCreateCart(cartToken, customerId);
-  const now = nowIso();
+  const normalizedCartToken = normalizeText(cartToken);
 
-  const variantId = String(input.variant_id || "").trim();
-  const productSlug = String(input.product_slug || "").trim();
+  if (!normalizedCartToken) {
+    throw new Error("cart_token is required.");
+  }
+
+  const productSlug = normalizeText(input.product_slug);
+  const variantId = normalizeText(input.variant_id);
 
   if (!productSlug) {
     throw new Error("product_slug is required.");
   }
 
+  const cart = await getOrCreateCart(normalizedCartToken, customerId);
+  const now = nowIso();
+
   const quantityToAdd = clampQuantity(input.quantity ?? 1, 1);
+  const unitPrice = toNumber(input.unit_price);
+  const compareAtPrice = toNumber(input.compare_at_price ?? 0);
+
+  if (unitPrice < 0) {
+    throw new Error("unit_price cannot be negative.");
+  }
+
   const existingItems = await getCartItems(cart.id);
 
   const existing = existingItems.find((item) => {
     return (
-      String(item.product_slug || "").trim() === productSlug &&
-      String(item.variant_id || "").trim() === variantId
+      normalizeText(item.product_slug) === productSlug &&
+      normalizeText(item.variant_id) === variantId
     );
   });
 
@@ -312,20 +427,21 @@ export async function addItemToCart(
       toNumber(existing.quantity) + quantityToAdd,
       1
     );
-    const unitPrice = toNumber(existing.unit_price || input.unit_price);
 
     const updated: CartItemRecord = {
       ...existing,
-      product_title: input.product_title || existing.product_title,
-      variant_title: input.variant_title || existing.variant_title,
-      sku: input.sku || existing.sku,
-      image: input.image || existing.image,
-      compare_at_price: toMoney(
-        input.compare_at_price ?? existing.compare_at_price ?? 0
-      ),
+      product_title: normalizeText(input.product_title || existing.product_title),
+      variant_title: normalizeText(input.variant_title || existing.variant_title),
+      sku: normalizeText(input.sku || existing.sku),
+      image: normalizeText(input.image || existing.image),
       unit_price: toMoney(unitPrice),
+      compare_at_price: toMoney(compareAtPrice),
       quantity: String(nextQuantity),
       line_total: toMoney(multiplyMoney(unitPrice, nextQuantity)),
+      min_quantity: existing.min_quantity || "",
+      box_quantity: existing.box_quantity || "",
+      case_quantity: existing.case_quantity || "",
+      step_quantity: existing.step_quantity || "",
       updated_at: now,
     };
 
@@ -335,22 +451,23 @@ export async function addItemToCart(
     return syncCartTotals(cart.id);
   }
 
-  const unitPrice = toNumber(input.unit_price);
-  const compareAtPrice = toNumber(input.compare_at_price ?? 0);
-
   const newItem: CartItemRecord = {
     id: createId("cartitem"),
     cart_id: cart.id,
     product_slug: productSlug,
     variant_id: variantId,
-    product_title: String(input.product_title || "").trim(),
-    variant_title: String(input.variant_title || "").trim(),
-    sku: String(input.sku || "").trim(),
-    image: String(input.image || "").trim(),
+    product_title: normalizeText(input.product_title),
+    variant_title: normalizeText(input.variant_title),
+    sku: normalizeText(input.sku),
+    image: normalizeText(input.image),
     unit_price: toMoney(unitPrice),
     compare_at_price: toMoney(compareAtPrice),
     quantity: String(quantityToAdd),
     line_total: toMoney(multiplyMoney(unitPrice, quantityToAdd)),
+    min_quantity: "",
+    box_quantity: "",
+    case_quantity: "",
+    step_quantity: "",
     created_at: now,
     updated_at: now,
   };
@@ -366,37 +483,58 @@ export async function updateCartItemQuantity(
   itemId: string,
   quantity: number
 ): Promise<HydratedCart> {
-  const cart = await getCartByToken(cartToken);
+  const normalizedCartToken = normalizeText(cartToken);
+  const normalizedItemId = normalizeText(itemId);
 
-  if (!cart) {
-    throw new Error("Cart not found.");
+  if (!normalizedCartToken) {
+    throw new Error("cart_token is required.");
   }
 
-  const item = await findSheetItemByField<CartItemRecord>(
+  if (!normalizedItemId) {
+    throw new Error("item_id is required.");
+  }
+
+  const cart = await getCartByToken(normalizedCartToken);
+
+  if (!isActiveCart(cart)) {
+    const fallbackCart = await getOrCreateCart(normalizedCartToken);
+    return createHydratedCart(fallbackCart, []);
+  }
+
+  const activeCart = cart as CartRecord;
+
+  const itemRaw = await findSheetItemByField(
     CART_ITEMS_SHEET,
     "id",
-    itemId,
+    normalizedItemId,
     { forceFresh: true, ttlSeconds: 0 }
   );
 
-  if (!item || item.cart_id !== cart.id) {
-    throw new Error("Cart item not found.");
+  const item = itemRaw as CartItemRecord | null;
+
+  if (!item || normalizeText(item.cart_id) !== activeCart.id) {
+    return syncCartTotals(activeCart.id);
   }
 
-  const nextQuantity = Math.floor(quantity);
+  const nextQuantity = Math.floor(Number(quantity));
 
-  if (nextQuantity <= 0) {
-    await deleteSheetRowByField(CART_ITEMS_SHEET, "id", itemId);
-    return syncCartTotals(cart.id);
+  if (!Number.isFinite(nextQuantity) || nextQuantity <= 0) {
+    await deleteSheetRowByField(CART_ITEMS_SHEET, "id", normalizedItemId);
+    return syncCartTotals(activeCart.id);
   }
 
-  const rowNumber = await findRowNumberByField(CART_ITEMS_SHEET, "id", itemId);
+  const rowNumber = await findRowNumberByField(
+    CART_ITEMS_SHEET,
+    "id",
+    normalizedItemId
+  );
 
   if (!rowNumber) {
-    throw new Error("Cart item row could not be found.");
+    return syncCartTotals(activeCart.id);
   }
 
   const unitPrice = toNumber(item.unit_price);
+
   const updated: CartItemRecord = {
     ...item,
     quantity: String(nextQuantity),
@@ -407,51 +545,74 @@ export async function updateCartItemQuantity(
   const row = await buildRowFromHeaders(CART_ITEMS_SHEET, updated);
   await updateSheetRowByRowNumber(CART_ITEMS_SHEET, rowNumber, row);
 
-  return syncCartTotals(cart.id);
+  return syncCartTotals(activeCart.id);
 }
 
 export async function removeCartItem(
   cartToken: string,
   itemId: string
 ): Promise<HydratedCart> {
-  const cart = await getCartByToken(cartToken);
+  const normalizedCartToken = normalizeText(cartToken);
+  const normalizedItemId = normalizeText(itemId);
 
-  if (!cart) {
-    throw new Error("Cart not found.");
+  if (!normalizedCartToken) {
+    throw new Error("cart_token is required.");
   }
 
-  const item = await findSheetItemByField<CartItemRecord>(
+  if (!normalizedItemId) {
+    throw new Error("item_id is required.");
+  }
+
+  const cart = await getCartByToken(normalizedCartToken);
+
+  if (!isActiveCart(cart)) {
+    const fallbackCart = await getOrCreateCart(normalizedCartToken);
+    return createHydratedCart(fallbackCart, []);
+  }
+
+  const activeCart = cart as CartRecord;
+
+  const itemRaw = await findSheetItemByField(
     CART_ITEMS_SHEET,
     "id",
-    itemId,
+    normalizedItemId,
     { forceFresh: true, ttlSeconds: 0 }
   );
 
-  if (!item || item.cart_id !== cart.id) {
-    throw new Error("Cart item not found.");
+  const item = itemRaw as CartItemRecord | null;
+
+  if (!item || normalizeText(item.cart_id) !== activeCart.id) {
+    return syncCartTotals(activeCart.id);
   }
 
-  await deleteSheetRowByField(CART_ITEMS_SHEET, "id", itemId);
+  await deleteSheetRowByField(CART_ITEMS_SHEET, "id", normalizedItemId);
 
-  return syncCartTotals(cart.id);
+  return syncCartTotals(activeCart.id);
 }
 
 export async function clearCartByToken(
   cartToken: string
 ): Promise<HydratedCart | null> {
-  const cart = await getCartByToken(cartToken);
+  const normalizedCartToken = normalizeText(cartToken);
 
-  if (!cart) {
+  if (!normalizedCartToken) {
     return null;
   }
 
-  const items = await getCartItems(cart.id);
+  const cart = await getCartByToken(normalizedCartToken);
+
+  if (!isActiveCart(cart)) {
+    return null;
+  }
+
+  const activeCart = cart as CartRecord;
+  const items = await getCartItems(activeCart.id);
 
   for (const item of items) {
     await deleteSheetRowByField(CART_ITEMS_SHEET, "id", item.id);
   }
 
-  return syncCartTotals(cart.id);
+  return syncCartTotals(activeCart.id);
 }
 
 export async function getAllCartsRaw() {

@@ -11,9 +11,12 @@ import { getCartByToken, syncCartTotals } from "./cart";
 import { toMoney, toNumber } from "./money";
 import { createId, createOrderNumber, nowIso } from "./ids";
 import { findCustomerByEmail, findCustomerById } from "./customer-account";
+import { resolveCartCatalogItem } from "./catalog";
+import { assertValidQuantityRule } from "./cart-rules";
 
 const ORDERS_SHEET = "orders";
 const ORDER_ITEMS_SHEET = "order_items";
+const CARTS_SHEET = "carts";
 
 export type OrderStatus =
   | "pending"
@@ -21,6 +24,8 @@ export type OrderStatus =
   | "reviewing"
   | "quoted"
   | "approved"
+  | "processing"
+  | "completed"
   | "cancelled"
   | "paid";
 
@@ -85,8 +90,45 @@ export type CreateOrderInput = {
   note?: string;
 };
 
-function normalize(value?: string | number) {
+type CartItemForValidation = {
+  id?: string;
+  product_slug?: string;
+  variant_id?: string;
+  product_title?: string;
+  variant_title?: string;
+  sku?: string;
+  image?: string;
+  unit_price?: string | number;
+  compare_at_price?: string | number;
+  quantity?: string | number;
+  line_total?: string | number;
+};
+
+type ValidatedOrderItemInput = {
+  product_slug: string;
+  variant_id: string;
+  product_title: string;
+  variant_title: string;
+  sku: string;
+  image: string;
+  unit_price: number;
+  compare_at_price: number;
+  quantity: number;
+  line_total: number;
+};
+
+function normalize(value?: string | number | null) {
   return String(value ?? "").trim();
+}
+
+function normalizeLower(value?: string | number | null) {
+  return normalize(value).toLowerCase();
+}
+
+function assertRequired(value: string, message: string) {
+  if (!normalize(value)) {
+    throw new Error(message);
+  }
 }
 
 async function buildRowFromHeaders(
@@ -110,7 +152,7 @@ async function resolveCustomerContext(input: {
   email?: string;
 }) {
   const customerId = normalize(input.customer_id);
-  const email = normalize(input.email).toLowerCase();
+  const email = normalizeLower(input.email);
 
   if (customerId) {
     const customer = await findCustomerById(customerId);
@@ -131,6 +173,179 @@ async function resolveCustomerContext(input: {
   return null;
 }
 
+function calculateValidatedTotals(items: ValidatedOrderItemInput[]) {
+  const subtotal = items.reduce((sum, item) => sum + item.line_total, 0);
+
+  const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
+
+  const discountTotal = 0;
+  const shippingTotal = 0;
+  const taxTotal = 0;
+  const grandTotal = subtotal + shippingTotal + taxTotal - discountTotal;
+
+  return {
+    subtotal: Number(subtotal.toFixed(2)),
+    discount_total: Number(discountTotal.toFixed(2)),
+    shipping_total: Number(shippingTotal.toFixed(2)),
+    tax_total: Number(taxTotal.toFixed(2)),
+    grand_total: Number(grandTotal.toFixed(2)),
+    item_count: itemCount,
+  };
+}
+
+async function validateCartItemsForQuote(
+  cartItems: CartItemForValidation[]
+): Promise<ValidatedOrderItemInput[]> {
+  const validatedItems: ValidatedOrderItemInput[] = [];
+
+  for (const cartItem of cartItems) {
+    const productSlug = normalize(cartItem.product_slug);
+    const variantId = normalize(cartItem.variant_id);
+    const requestedQuantity = toNumber(cartItem.quantity);
+
+    if (!productSlug) {
+      throw new Error("A cart item is missing product information.");
+    }
+
+    if (!variantId) {
+      throw new Error(
+        "A cart item is missing variant information. Please remove it and add the product again."
+      );
+    }
+
+    const resolved = await resolveCartCatalogItem(productSlug, variantId);
+
+    if (!resolved.variant?.id) {
+      throw new Error(
+        `${resolved.productTitle} does not have a purchasable variant anymore.`
+      );
+    }
+
+    if (resolved.unitPrice <= 0) {
+      throw new Error(
+        `${resolved.productTitle} does not have an active price anymore.`
+      );
+    }
+
+    const quantityRule = assertValidQuantityRule({
+      quantity: requestedQuantity,
+      minQuantity: resolved.minQuantity,
+      boxQuantity: resolved.boxQuantity,
+      caseQuantity: resolved.caseQuantity,
+    });
+
+    const lineTotal = Number(
+      (resolved.unitPrice * quantityRule.quantity).toFixed(2)
+    );
+
+    validatedItems.push({
+      product_slug: productSlug,
+      variant_id: resolved.variant.id,
+      product_title: resolved.productTitle,
+      variant_title: resolved.variantTitle,
+      sku: resolved.sku,
+      image: resolved.image,
+      unit_price: resolved.unitPrice,
+      compare_at_price: resolved.compareAtPrice,
+      quantity: quantityRule.quantity,
+      line_total: lineTotal,
+    });
+  }
+
+  return validatedItems;
+}
+
+function buildOrderItemFromValidatedItem(
+  item: ValidatedOrderItemInput,
+  orderId: string,
+  now: string
+): OrderItemRecord {
+  return {
+    id: createId("orderitem"),
+    order_id: orderId,
+    product_slug: normalize(item.product_slug),
+    variant_id: normalize(item.variant_id),
+    product_title: normalize(item.product_title),
+    variant_title: normalize(item.variant_title),
+    sku: normalize(item.sku),
+    image: normalize(item.image),
+    unit_price: toMoney(item.unit_price),
+    compare_at_price: toMoney(item.compare_at_price),
+    quantity: String(item.quantity),
+    line_total: toMoney(item.line_total),
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+async function markCartAsConverted(cart: {
+  id: string;
+  cart_token: string;
+  customer_id: string;
+  status: string;
+  currency: string;
+  subtotal: string;
+  discount_total: string;
+  shipping_total: string;
+  tax_total: string;
+  grand_total: string;
+  item_count: string;
+  note: string;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+}) {
+  const cartRowNumber = await findRowNumberByField(CARTS_SHEET, "id", cart.id);
+
+  if (!cartRowNumber) {
+    return;
+  }
+
+  const updatedCart = {
+    ...cart,
+    status: "converted",
+    updated_at: nowIso(),
+  };
+
+  const cartRow = await buildRowFromHeaders(CARTS_SHEET, updatedCart);
+  await updateSheetRowByRowNumber(CARTS_SHEET, cartRowNumber, cartRow);
+}
+
+export async function getOrderByCartId(cartId: string) {
+  const normalizedCartId = normalize(cartId);
+
+  if (!normalizedCartId) {
+    return null;
+  }
+
+  const orderRaw = await findSheetItemByField(
+    ORDERS_SHEET,
+    "cart_id",
+    normalizedCartId,
+    { forceFresh: true, ttlSeconds: 0 }
+  );
+
+  const order = orderRaw as OrderRecord | null;
+
+  if (!order) {
+    return null;
+  }
+
+  const itemsRaw = await findSheetItemsByField(
+    ORDER_ITEMS_SHEET,
+    "order_id",
+    order.id,
+    { forceFresh: true, ttlSeconds: 0 }
+  );
+
+  const items = (itemsRaw as OrderItemRecord[]) || [];
+
+  return {
+    order,
+    items,
+  };
+}
+
 export async function createOrderFromCartToken(
   cartToken: string,
   input: CreateOrderInput
@@ -147,18 +362,51 @@ export async function createOrderFromCartToken(
     throw new Error("Cart not found.");
   }
 
+  const existing = await getOrderByCartId(cart.id);
+
+  if (existing) {
+    return existing;
+  }
+
+  if (normalizeLower(cart.status) === "converted") {
+    throw new Error("This cart has already been converted to a quote request.");
+  }
+
   const hydratedCart = await syncCartTotals(cart.id);
   const cartItems = hydratedCart.items || [];
 
   if (!cartItems.length) {
-    throw new Error("Your cart is empty.");
+    throw new Error("Your quote cart is empty.");
   }
 
-  const email = normalize(input.email).toLowerCase();
+  const email = normalizeLower(input.email);
+  const firstName = normalize(input.first_name);
+  const lastName = normalize(input.last_name);
+  const company = normalize(input.company);
+  const phone = normalize(input.phone);
+  const country = normalize(input.country);
+  const city = normalize(input.city);
+  const addressLine1 = normalize(input.address_line_1);
+  const addressLine2 = normalize(input.address_line_2);
+  const postalCode = normalize(input.postal_code);
+  const note = normalize(input.note);
 
-  if (!email) {
-    throw new Error("Email is required.");
+  assertRequired(email, "Email is required.");
+  assertRequired(firstName, "First name is required.");
+  assertRequired(lastName, "Last name is required.");
+  assertRequired(company, "Company is required.");
+  assertRequired(phone, "Phone is required.");
+  assertRequired(country, "Country is required.");
+  assertRequired(city, "City is required.");
+  assertRequired(addressLine1, "Address line 1 is required.");
+
+  const validatedItems = await validateCartItemsForQuote(cartItems);
+
+  if (!validatedItems.length) {
+    throw new Error("Your quote cart is empty.");
   }
+
+  const totals = calculateValidatedTotals(validatedItems);
 
   const resolvedCustomer = await resolveCustomerContext({
     customer_id: input.customer_id,
@@ -172,28 +420,26 @@ export async function createOrderFromCartToken(
     order_number: createOrderNumber(),
     cart_token: normalizedCartToken,
     cart_id: cart.id,
-    customer_id: normalize(resolvedCustomer?.id),
+    customer_id: normalize(resolvedCustomer?.id || input.customer_id),
     email,
-    first_name:
-      normalize(input.first_name) || normalize(resolvedCustomer?.first_name),
-    last_name:
-      normalize(input.last_name) || normalize(resolvedCustomer?.last_name),
-    company: normalize(input.company) || normalize(resolvedCustomer?.company),
-    phone: normalize(input.phone) || normalize(resolvedCustomer?.phone),
-    country: normalize(input.country),
-    city: normalize(input.city),
-    address_line_1: normalize(input.address_line_1),
-    address_line_2: normalize(input.address_line_2),
-    postal_code: normalize(input.postal_code),
-    note: normalize(input.note),
+    first_name: firstName || normalize(resolvedCustomer?.first_name),
+    last_name: lastName || normalize(resolvedCustomer?.last_name),
+    company: company || normalize(resolvedCustomer?.company),
+    phone: phone || normalize(resolvedCustomer?.phone),
+    country,
+    city,
+    address_line_1: addressLine1,
+    address_line_2: addressLine2,
+    postal_code: postalCode,
+    note,
     status: "submitted",
     currency: normalize(cart.currency) || "USD",
-    subtotal: toMoney(hydratedCart.totals.subtotal),
-    discount_total: toMoney(hydratedCart.totals.discount_total),
-    shipping_total: toMoney(hydratedCart.totals.shipping_total),
-    tax_total: toMoney(hydratedCart.totals.tax_total),
-    grand_total: toMoney(hydratedCart.totals.grand_total),
-    item_count: String(hydratedCart.totals.item_count),
+    subtotal: toMoney(totals.subtotal),
+    discount_total: toMoney(totals.discount_total),
+    shipping_total: toMoney(totals.shipping_total),
+    tax_total: toMoney(totals.tax_total),
+    grand_total: toMoney(totals.grand_total),
+    item_count: String(totals.item_count),
     created_at: now,
     updated_at: now,
   };
@@ -201,44 +447,34 @@ export async function createOrderFromCartToken(
   const orderRow = await buildRowFromHeaders(ORDERS_SHEET, orderRecord);
   await appendSheetRow(ORDERS_SHEET, orderRow);
 
-  for (const cartItem of cartItems) {
-    const orderItem: OrderItemRecord = {
-      id: createId("orderitem"),
-      order_id: orderRecord.id,
-      product_slug: normalize(cartItem.product_slug),
-      variant_id: normalize(cartItem.variant_id),
-      product_title: normalize(cartItem.product_title),
-      variant_title: normalize(cartItem.variant_title),
-      sku: normalize(cartItem.sku),
-      image: normalize(cartItem.image),
-      unit_price: toMoney(cartItem.unit_price),
-      compare_at_price: toMoney(cartItem.compare_at_price),
-      quantity: String(toNumber(cartItem.quantity)),
-      line_total: toMoney(cartItem.line_total),
-      created_at: now,
-      updated_at: now,
-    };
+  const createdItems: OrderItemRecord[] = [];
+
+  for (const validatedItem of validatedItems) {
+    const orderItem = buildOrderItemFromValidatedItem(
+      validatedItem,
+      orderRecord.id,
+      now
+    );
 
     const orderItemRow = await buildRowFromHeaders(ORDER_ITEMS_SHEET, orderItem);
     await appendSheetRow(ORDER_ITEMS_SHEET, orderItemRow);
+
+    createdItems.push(orderItem);
   }
 
-  const cartRowNumber = await findRowNumberByField("carts", "id", cart.id);
-
-  if (cartRowNumber) {
-    const updatedCart = {
-      ...cart,
-      status: "converted",
-      updated_at: nowIso(),
-    };
-
-    const cartRow = await buildRowFromHeaders("carts", updatedCart);
-    await updateSheetRowByRowNumber("carts", cartRowNumber, cartRow);
-  }
+  await markCartAsConverted({
+    ...cart,
+    subtotal: orderRecord.subtotal,
+    discount_total: orderRecord.discount_total,
+    shipping_total: orderRecord.shipping_total,
+    tax_total: orderRecord.tax_total,
+    grand_total: orderRecord.grand_total,
+    item_count: orderRecord.item_count,
+  });
 
   return {
     order: orderRecord,
-    items: cartItems,
+    items: createdItems,
   };
 }
 
@@ -249,23 +485,27 @@ export async function getOrderByNumber(orderNumber: string) {
     return null;
   }
 
-  const order = await findSheetItemByField<OrderRecord>(
+  const orderRaw = await findSheetItemByField(
     ORDERS_SHEET,
     "order_number",
     normalizedOrderNumber,
     { forceFresh: true, ttlSeconds: 0 }
   );
 
+  const order = orderRaw as OrderRecord | null;
+
   if (!order) {
     return null;
   }
 
-  const items = await findSheetItemsByField<OrderItemRecord>(
+  const itemsRaw = await findSheetItemsByField(
     ORDER_ITEMS_SHEET,
     "order_id",
     order.id,
     { forceFresh: true, ttlSeconds: 0 }
   );
+
+  const items = (itemsRaw as OrderItemRecord[]) || [];
 
   return {
     order,
@@ -302,12 +542,14 @@ export async function updateOrderStatus(
     throw new Error("status is required.");
   }
 
-  const order = await findSheetItemByField<OrderRecord>(
+  const orderRaw = await findSheetItemByField(
     ORDERS_SHEET,
     "order_number",
     normalizedOrderNumber,
     { forceFresh: true, ttlSeconds: 0 }
   );
+
+  const order = orderRaw as OrderRecord | null;
 
   if (!order) {
     throw new Error("Order not found.");
@@ -332,46 +574,17 @@ export async function updateOrderStatus(
   const row = await buildRowFromHeaders(ORDERS_SHEET, updatedOrder);
   await updateSheetRowByRowNumber(ORDERS_SHEET, rowNumber, row);
 
-  const items = await findSheetItemsByField<OrderItemRecord>(
+  const itemsRaw = await findSheetItemsByField(
     ORDER_ITEMS_SHEET,
     "order_id",
     order.id,
     { forceFresh: true, ttlSeconds: 0 }
   );
+
+  const items = (itemsRaw as OrderItemRecord[]) || [];
 
   return {
     order: updatedOrder,
-    items,
-  };
-}
-
-export async function getOrderByCartId(cartId: string) {
-  const normalizedCartId = normalize(cartId);
-
-  if (!normalizedCartId) {
-    return null;
-  }
-
-  const order = await findSheetItemByField<OrderRecord>(
-    ORDERS_SHEET,
-    "cart_id",
-    normalizedCartId,
-    { forceFresh: true, ttlSeconds: 0 }
-  );
-
-  if (!order) {
-    return null;
-  }
-
-  const items = await findSheetItemsByField<OrderItemRecord>(
-    ORDER_ITEMS_SHEET,
-    "order_id",
-    order.id,
-    { forceFresh: true, ttlSeconds: 0 }
-  );
-
-  return {
-    order,
     items,
   };
 }
@@ -400,6 +613,10 @@ export async function createPaidOrderFromCartToken(
     return existing;
   }
 
+  if (normalizeLower(cart.status) === "converted") {
+    throw new Error("This cart has already been converted to an order.");
+  }
+
   const hydratedCart = await syncCartTotals(cart.id);
   const cartItems = hydratedCart.items || [];
 
@@ -407,7 +624,15 @@ export async function createPaidOrderFromCartToken(
     throw new Error("Your cart is empty.");
   }
 
-  const email = normalize(input.email).toLowerCase();
+  const validatedItems = await validateCartItemsForQuote(cartItems);
+
+  if (!validatedItems.length) {
+    throw new Error("Your cart is empty.");
+  }
+
+  const totals = calculateValidatedTotals(validatedItems);
+
+  const email = normalizeLower(input.email);
 
   if (!email) {
     throw new Error("Email is required.");
@@ -426,7 +651,7 @@ export async function createPaidOrderFromCartToken(
     order_number: createOrderNumber(),
     cart_token: normalizedCartToken,
     cart_id: cart.id,
-    customer_id: normalize(resolvedCustomer?.id),
+    customer_id: normalize(resolvedCustomer?.id || input.customer_id),
     email,
     first_name:
       normalize(input.first_name) || normalize(resolvedCustomer?.first_name),
@@ -442,12 +667,12 @@ export async function createPaidOrderFromCartToken(
     note: normalize(input.note),
     status: finalStatus,
     currency: normalize(cart.currency) || "USD",
-    subtotal: toMoney(hydratedCart.totals.subtotal),
-    discount_total: toMoney(hydratedCart.totals.discount_total),
-    shipping_total: toMoney(hydratedCart.totals.shipping_total),
-    tax_total: toMoney(hydratedCart.totals.tax_total),
-    grand_total: toMoney(hydratedCart.totals.grand_total),
-    item_count: String(hydratedCart.totals.item_count),
+    subtotal: toMoney(totals.subtotal),
+    discount_total: toMoney(totals.discount_total),
+    shipping_total: toMoney(totals.shipping_total),
+    tax_total: toMoney(totals.tax_total),
+    grand_total: toMoney(totals.grand_total),
+    item_count: String(totals.item_count),
     created_at: now,
     updated_at: now,
   };
@@ -455,43 +680,33 @@ export async function createPaidOrderFromCartToken(
   const orderRow = await buildRowFromHeaders(ORDERS_SHEET, orderRecord);
   await appendSheetRow(ORDERS_SHEET, orderRow);
 
-  for (const cartItem of cartItems) {
-    const orderItem: OrderItemRecord = {
-      id: createId("orderitem"),
-      order_id: orderRecord.id,
-      product_slug: normalize(cartItem.product_slug),
-      variant_id: normalize(cartItem.variant_id),
-      product_title: normalize(cartItem.product_title),
-      variant_title: normalize(cartItem.variant_title),
-      sku: normalize(cartItem.sku),
-      image: normalize(cartItem.image),
-      unit_price: toMoney(cartItem.unit_price),
-      compare_at_price: toMoney(cartItem.compare_at_price),
-      quantity: String(toNumber(cartItem.quantity)),
-      line_total: toMoney(cartItem.line_total),
-      created_at: now,
-      updated_at: now,
-    };
+  const createdItems: OrderItemRecord[] = [];
+
+  for (const validatedItem of validatedItems) {
+    const orderItem = buildOrderItemFromValidatedItem(
+      validatedItem,
+      orderRecord.id,
+      now
+    );
 
     const orderItemRow = await buildRowFromHeaders(ORDER_ITEMS_SHEET, orderItem);
     await appendSheetRow(ORDER_ITEMS_SHEET, orderItemRow);
+
+    createdItems.push(orderItem);
   }
 
-  const cartRowNumber = await findRowNumberByField("carts", "id", cart.id);
-
-  if (cartRowNumber) {
-    const updatedCart = {
-      ...cart,
-      status: "converted",
-      updated_at: nowIso(),
-    };
-
-    const cartRow = await buildRowFromHeaders("carts", updatedCart);
-    await updateSheetRowByRowNumber("carts", cartRowNumber, cartRow);
-  }
+  await markCartAsConverted({
+    ...cart,
+    subtotal: orderRecord.subtotal,
+    discount_total: orderRecord.discount_total,
+    shipping_total: orderRecord.shipping_total,
+    tax_total: orderRecord.tax_total,
+    grand_total: orderRecord.grand_total,
+    item_count: orderRecord.item_count,
+  });
 
   return {
     order: orderRecord,
-    items: cartItems,
+    items: createdItems,
   };
 }

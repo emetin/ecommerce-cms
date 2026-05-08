@@ -12,114 +12,168 @@ type CartItem = {
   image?: string;
   unit_price?: number | string;
   quantity?: number | string;
+  line_total?: number | string;
+  sku?: string;
+
+  min_quantity?: number | string;
+  box_quantity?: number | string;
+  case_quantity?: number | string;
+  step_quantity?: number | string;
+
+  min_quantity_number?: number;
+  box_quantity_number?: number;
+  case_quantity_number?: number;
+  step_quantity_number?: number;
 };
+
+function toPositiveInteger(value: unknown, fallback: number) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const floored = Math.floor(parsed);
+
+  return floored > 0 ? floored : fallback;
+}
+
+function getStepQuantity(item: CartItem) {
+  return (
+    toPositiveInteger(item.step_quantity_number, 0) ||
+    toPositiveInteger(item.step_quantity, 0) ||
+    toPositiveInteger(item.case_quantity_number, 0) ||
+    toPositiveInteger(item.case_quantity, 0) ||
+    toPositiveInteger(item.box_quantity_number, 0) ||
+    toPositiveInteger(item.box_quantity, 0) ||
+    toPositiveInteger(item.min_quantity_number, 0) ||
+    toPositiveInteger(item.min_quantity, 0) ||
+    1
+  );
+}
+
+function getMinQuantity(item: CartItem) {
+  return (
+    toPositiveInteger(item.min_quantity_number, 0) ||
+    toPositiveInteger(item.min_quantity, 0) ||
+    1
+  );
+}
+
+function isTechnicalCartError(message: string) {
+  const normalized = String(message || "").toLowerCase();
+
+  return (
+    normalized.includes("cart not found") ||
+    normalized.includes("cart token not found") ||
+    normalized.includes("cart row could not be found")
+  );
+}
 
 function CartDrawerComponent() {
   const {
     cart,
     isDrawerOpen,
     closeDrawer,
-    isMutating,
+    isUpdating,
+    error,
+    clearError,
     handleUpdateQuantity,
     handleRemoveItem,
     handleClearCart,
   } = useCart();
 
   const items = useMemo(() => {
-    return (cart?.items || []) as CartItem[];
+    return Array.isArray(cart?.items) ? (cart.items as CartItem[]) : [];
   }, [cart]);
 
   const subtotal = useMemo(() => {
     return Number(cart?.totals?.subtotal || 0);
   }, [cart]);
 
+  const itemCount = useMemo(() => {
+    return Number(cart?.totals?.item_count || 0);
+  }, [cart]);
+
+  const visibleError = error && !isTechnicalCartError(error) ? error : "";
+
+  async function safelyClearCart() {
+    try {
+      await handleClearCart();
+    } catch {
+      // Shared cart error is rendered inside drawer.
+    }
+  }
+
   return (
     <>
       {isDrawerOpen ? (
         <div
-          onClick={closeDrawer}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            zIndex: 9998,
+          onClick={() => {
+            clearError();
+            closeDrawer();
           }}
+          style={overlayStyle}
         />
       ) : null}
 
       <aside
         style={{
-          position: "fixed",
-          top: 0,
-          right: 0,
-          height: "100vh",
-          width: "100%",
-          maxWidth: "440px",
-          background: "#fff",
-          zIndex: 9999,
+          ...drawerStyle,
           transform: isDrawerOpen ? "translateX(0)" : "translateX(100%)",
-          transition: "transform 0.25s ease",
-          boxShadow: "-8px 0 30px rgba(0,0,0,0.12)",
-          display: "flex",
-          flexDirection: "column",
         }}
         aria-hidden={!isDrawerOpen}
       >
-        <div
-          style={{
-            padding: "18px 20px",
-            borderBottom: "1px solid #ececec",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <h3
-            style={{
-              margin: 0,
-              fontSize: "20px",
-              fontWeight: 600,
-              color: "#111",
-            }}
-          >
-            Your Cart
-          </h3>
+        <div style={headerStyle}>
+          <div>
+            <h3 style={titleStyle}>Quote Cart</h3>
+
+            <p style={subtitleStyle}>
+              Review selected products before submitting a B2B quote request.
+            </p>
+          </div>
 
           <button
             type="button"
-            onClick={closeDrawer}
-            style={{
-              border: "none",
-              background: "transparent",
-              fontSize: "26px",
-              lineHeight: 1,
-              cursor: "pointer",
+            onClick={() => {
+              clearError();
+              closeDrawer();
             }}
+            aria-label="Close quote cart"
+            style={closeButtonStyle}
           >
             ×
           </button>
         </div>
 
-        <div
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            padding: "18px 20px",
-          }}
-        >
+        <div style={bodyStyle}>
+          {visibleError ? <div style={errorBoxStyle}>{visibleError}</div> : null}
+
           {!items.length ? (
-            <div style={{ paddingTop: "20px" }}>
-              <p style={{ margin: 0, color: "#666", fontSize: "15px" }}>
-                Your cart is currently empty.
+            <div style={emptyBoxStyle}>
+              <p style={emptyTextStyle}>
+                Your quote cart is currently empty. Add products from the
+                catalog to start a wholesale request.
               </p>
+
+              <Link
+                href="/collections"
+                onClick={() => {
+                  clearError();
+                  closeDrawer();
+                }}
+                style={emptyLinkStyle}
+              >
+                Browse Collections
+              </Link>
             </div>
           ) : (
-            <div style={{ display: "grid", gap: "18px" }}>
+            <div style={{ display: "grid", gap: 14 }}>
               {items.map((item) => (
                 <CartDrawerItem
                   key={item.id}
                   item={item}
-                  isMutating={isMutating}
+                  isUpdating={isUpdating}
                   onUpdateQuantity={handleUpdateQuantity}
                   onRemoveItem={handleRemoveItem}
                 />
@@ -128,85 +182,61 @@ function CartDrawerComponent() {
           )}
         </div>
 
-        <div
-          style={{
-            borderTop: "1px solid #ececec",
-            padding: "18px 20px 22px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: "16px",
-              fontSize: "16px",
-              fontWeight: 600,
-              color: "#111",
-            }}
-          >
-            <span>Subtotal</span>
-            <span>{formatMoney(subtotal)}</span>
+        <div style={footerStyle}>
+          <div style={summaryWrapStyle}>
+            <div style={summaryRowStyle}>
+              <span>Items</span>
+              <strong>{itemCount}</strong>
+            </div>
+
+            <div style={summaryRowStyle}>
+              <span>Estimated Subtotal</span>
+              <strong>{formatMoney(subtotal)}</strong>
+            </div>
           </div>
 
-          <div style={{ display: "grid", gap: "10px" }}>
+          <div style={noticeStyle}>
+            Final pricing, freight, availability, and payment terms will be
+            reviewed by the Globaltex sales team.
+          </div>
+
+          <div style={{ display: "grid", gap: 10 }}>
             <Link
               href="/cart"
-              onClick={closeDrawer}
-              style={{
-                display: "block",
-                textAlign: "center",
-                padding: "14px 18px",
-                background: "#111",
-                color: "#fff",
-                textDecoration: "none",
-                borderRadius: "10px",
-                fontSize: "14px",
-                fontWeight: 600,
+              onClick={() => {
+                clearError();
+                closeDrawer();
               }}
+              style={secondaryLinkStyle}
             >
-              View Cart
+              View Quote Cart
             </Link>
 
             {!!items.length ? (
               <Link
                 href="/checkout"
-                onClick={closeDrawer}
-                style={{
-                  display: "block",
-                  textAlign: "center",
-                  padding: "14px 18px",
-                  background: "#d8bc55",
-                  color: "#fff",
-                  textDecoration: "none",
-                  borderRadius: "10px",
-                  fontSize: "14px",
-                  fontWeight: 700,
+                onClick={() => {
+                  clearError();
+                  closeDrawer();
                 }}
+                style={primaryLinkStyle}
               >
-                Go to Checkout
+                Submit Quote Request
               </Link>
             ) : null}
 
             {!!items.length ? (
               <button
                 type="button"
-                onClick={handleClearCart}
-                disabled={isMutating}
+                onClick={safelyClearCart}
+                disabled={isUpdating}
                 style={{
-                  display: "block",
-                  textAlign: "center",
-                  padding: "13px 18px",
-                  background: "#fff",
-                  color: "#111",
-                  border: "1px solid #d9d9d9",
-                  borderRadius: "10px",
-                  fontSize: "14px",
-                  fontWeight: 500,
-                  cursor: isMutating ? "not-allowed" : "pointer",
-                  opacity: isMutating ? 0.65 : 1,
+                  ...clearButtonStyle,
+                  cursor: isUpdating ? "not-allowed" : "pointer",
+                  opacity: isUpdating ? 0.65 : 1,
                 }}
               >
-                {isMutating ? "Updating..." : "Clear Cart"}
+                {isUpdating ? "Updating..." : "Clear Quote Cart"}
               </button>
             ) : null}
           </div>
@@ -218,126 +248,99 @@ function CartDrawerComponent() {
 
 function CartDrawerItemComponent({
   item,
-  isMutating,
+  isUpdating,
   onUpdateQuantity,
   onRemoveItem,
 }: {
   item: CartItem;
-  isMutating: boolean;
+  isUpdating: boolean;
   onUpdateQuantity: (itemId: string, quantity: number) => Promise<void>;
   onRemoveItem: (itemId: string) => Promise<void>;
 }) {
   const quantity = Math.max(1, Number(item.quantity || 1));
+  const minQuantity = getMinQuantity(item);
+  const stepQuantity = getStepQuantity(item);
   const itemPrice = Number(item.unit_price || 0);
+  const lineTotal = Number(item.line_total || itemPrice * quantity || 0);
+
+  const nextDecreaseQuantity =
+    quantity - stepQuantity < minQuantity ? 0 : quantity - stepQuantity;
+
+  async function safelyUpdateQuantity(nextQuantity: number) {
+    try {
+      await onUpdateQuantity(item.id, nextQuantity);
+    } catch {
+      // Shared cart error is rendered by drawer parent.
+    }
+  }
+
+  async function safelyRemoveItem() {
+    try {
+      await onRemoveItem(item.id);
+    } catch {
+      // Shared cart error is rendered by drawer parent.
+    }
+  }
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "88px 1fr",
-        gap: "14px",
-        paddingBottom: "18px",
-        borderBottom: "1px solid #f1f1f1",
-      }}
-    >
-      <div
-        style={{
-          width: "88px",
-          height: "88px",
-          borderRadius: "10px",
-          overflow: "hidden",
-          background: "#f7f7f7",
-        }}
-      >
+    <div style={itemWrapStyle}>
+      <div style={imageWrapStyle}>
         {item.image ? (
           <img
             src={item.image}
             alt={item.product_title || "Product"}
             loading="lazy"
             decoding="async"
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              display: "block",
-            }}
+            style={imageStyle}
           />
-        ) : null}
+        ) : (
+          <div style={imagePlaceholderStyle}>No Image</div>
+        )}
       </div>
 
-      <div>
-        <div
-          style={{
-            fontSize: "15px",
-            fontWeight: 600,
-            color: "#111",
-            marginBottom: "4px",
-          }}
-        >
-          {item.product_title}
-        </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={itemTitleStyle}>{item.product_title || "Product"}</div>
 
         {item.variant_title ? (
-          <div
-            style={{
-              fontSize: "13px",
-              color: "#777",
-              marginBottom: "8px",
-            }}
-          >
-            {item.variant_title}
-          </div>
+          <div style={variantTextStyle}>{item.variant_title}</div>
         ) : null}
 
-        <div
-          style={{
-            fontSize: "14px",
-            color: "#222",
-            marginBottom: "10px",
-          }}
-        >
-          {formatMoney(itemPrice)}
+        {item.sku ? <div style={skuTextStyle}>SKU: {item.sku}</div> : null}
+
+        <div style={priceTextStyle}>
+          Unit: {formatMoney(itemPrice)}
+          <br />
+          Line: <strong>{formatMoney(lineTotal)}</strong>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            marginBottom: "10px",
-          }}
-        >
+        <div style={ruleTextStyle}>
+          Min: {minQuantity} · Step: {stepQuantity}
+        </div>
+
+        <div style={quantityRowStyle}>
           <button
             type="button"
-            onClick={() => onUpdateQuantity(item.id, Math.max(1, quantity - 1))}
-            disabled={isMutating}
+            onClick={() => safelyUpdateQuantity(nextDecreaseQuantity)}
+            disabled={isUpdating}
             style={{
               ...qtyButtonStyle,
-              opacity: isMutating ? 0.65 : 1,
-              cursor: isMutating ? "not-allowed" : "pointer",
+              opacity: isUpdating ? 0.65 : 1,
+              cursor: isUpdating ? "not-allowed" : "pointer",
             }}
           >
             -
           </button>
 
-          <span
-            style={{
-              minWidth: "24px",
-              textAlign: "center",
-              fontSize: "14px",
-            }}
-          >
-            {quantity}
-          </span>
+          <span style={qtyValueStyle}>{quantity}</span>
 
           <button
             type="button"
-            onClick={() => onUpdateQuantity(item.id, quantity + 1)}
-            disabled={isMutating}
+            onClick={() => safelyUpdateQuantity(quantity + stepQuantity)}
+            disabled={isUpdating}
             style={{
               ...qtyButtonStyle,
-              opacity: isMutating ? 0.65 : 1,
-              cursor: isMutating ? "not-allowed" : "pointer",
+              opacity: isUpdating ? 0.65 : 1,
+              cursor: isUpdating ? "not-allowed" : "pointer",
             }}
           >
             +
@@ -346,17 +349,12 @@ function CartDrawerItemComponent({
 
         <button
           type="button"
-          onClick={() => onRemoveItem(item.id)}
-          disabled={isMutating}
+          onClick={safelyRemoveItem}
+          disabled={isUpdating}
           style={{
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            cursor: isMutating ? "not-allowed" : "pointer",
-            fontSize: "13px",
-            color: "#777",
-            textDecoration: "underline",
-            opacity: isMutating ? 0.65 : 1,
+            ...removeButtonStyle,
+            cursor: isUpdating ? "not-allowed" : "pointer",
+            opacity: isUpdating ? 0.65 : 1,
           }}
         >
           Remove
@@ -368,14 +366,290 @@ function CartDrawerItemComponent({
 
 const CartDrawerItem = memo(CartDrawerItemComponent);
 
-const qtyButtonStyle: React.CSSProperties = {
-  width: "30px",
-  height: "30px",
-  borderRadius: "8px",
-  border: "1px solid #ddd",
+const overlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.42)",
+  zIndex: 9998,
+};
+
+const drawerStyle: React.CSSProperties = {
+  position: "fixed",
+  top: 0,
+  right: 0,
+  height: "100vh",
+  width: "100%",
+  maxWidth: 460,
   background: "#fff",
-  fontSize: "16px",
+  zIndex: 9999,
+  transition: "transform 0.25s ease",
+  boxShadow: "-10px 0 40px rgba(0,0,0,0.16)",
+  display: "flex",
+  flexDirection: "column",
+};
+
+const headerStyle: React.CSSProperties = {
+  padding: "20px 22px",
+  borderBottom: "1px solid #ece3d7",
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 16,
+};
+
+const titleStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: 21,
+  fontWeight: 850,
+  color: "#171717",
+  lineHeight: 1.2,
+};
+
+const subtitleStyle: React.CSSProperties = {
+  margin: "7px 0 0",
+  fontSize: 13,
+  lineHeight: 1.5,
+  color: "#6f665b",
+};
+
+const closeButtonStyle: React.CSSProperties = {
+  border: "none",
+  background: "transparent",
+  fontSize: 30,
   lineHeight: 1,
+  cursor: "pointer",
+  color: "#171717",
+  padding: 0,
+};
+
+const bodyStyle: React.CSSProperties = {
+  flex: 1,
+  overflowY: "auto",
+  padding: "20px 22px",
+  background: "#fffaf4",
+};
+
+const emptyBoxStyle: React.CSSProperties = {
+  padding: 22,
+  borderRadius: 18,
+  border: "1px solid #eee5d9",
+  background: "#fff",
+};
+
+const emptyTextStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#5d554a",
+  fontSize: 15,
+  lineHeight: 1.7,
+};
+
+const emptyLinkStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 46,
+  padding: "0 18px",
+  borderRadius: 999,
+  background: "#171717",
+  color: "#fff",
+  textDecoration: "none",
+  fontWeight: 800,
+  fontSize: 14,
+  border: "1px solid #171717",
+  marginTop: 16,
+};
+
+const errorBoxStyle: React.CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 14,
+  border: "1px solid #f1c7c7",
+  background: "#fff4f4",
+  color: "#9b2c2c",
+  fontSize: 14,
+  fontWeight: 700,
+  lineHeight: 1.6,
+  marginBottom: 16,
+};
+
+const footerStyle: React.CSSProperties = {
+  borderTop: "1px solid #ece3d7",
+  padding: "18px 22px 22px",
+  background: "#fff",
+};
+
+const summaryWrapStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 10,
+  marginBottom: 16,
+};
+
+const summaryRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  fontSize: 15,
+  color: "#171717",
+};
+
+const noticeStyle: React.CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 14,
+  background: "#f8f5ef",
+  border: "1px solid #eee5d9",
+  color: "#6b6256",
+  fontSize: 13,
+  lineHeight: 1.6,
+  marginBottom: 14,
+};
+
+const primaryLinkStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 52,
+  padding: "0 20px",
+  borderRadius: 999,
+  background: "#171717",
+  color: "#fff",
+  textDecoration: "none",
+  fontWeight: 850,
+  fontSize: 14,
+  border: "1px solid #171717",
+};
+
+const secondaryLinkStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 52,
+  padding: "0 20px",
+  borderRadius: 999,
+  background: "#fff",
+  color: "#171717",
+  textDecoration: "none",
+  fontWeight: 800,
+  fontSize: 14,
+  border: "1px solid #ddd3c5",
+};
+
+const clearButtonStyle: React.CSSProperties = {
+  display: "block",
+  textAlign: "center",
+  minHeight: 50,
+  padding: "0 18px",
+  background: "#fff",
+  color: "#171717",
+  border: "1px solid #ddd3c5",
+  borderRadius: 999,
+  fontSize: 14,
+  fontWeight: 700,
+};
+
+const itemWrapStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "92px 1fr",
+  gap: 14,
+  padding: 14,
+  border: "1px solid #eee5d9",
+  borderRadius: 18,
+  background: "#fff",
+};
+
+const imageWrapStyle: React.CSSProperties = {
+  width: 92,
+  height: 92,
+  borderRadius: 14,
+  overflow: "hidden",
+  background: "#f7f4ef",
+};
+
+const imageStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+  display: "block",
+};
+
+const imagePlaceholderStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  display: "grid",
+  placeItems: "center",
+  color: "#9b9288",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const itemTitleStyle: React.CSSProperties = {
+  fontSize: 15,
+  fontWeight: 850,
+  color: "#171717",
+  marginBottom: 5,
+  lineHeight: 1.35,
+};
+
+const variantTextStyle: React.CSSProperties = {
+  fontSize: 13,
+  color: "#7b7367",
+  marginBottom: 6,
+  lineHeight: 1.45,
+};
+
+const skuTextStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: "#8a8176",
+  marginBottom: 8,
+  lineHeight: 1.45,
+};
+
+const priceTextStyle: React.CSSProperties = {
+  fontSize: 13,
+  color: "#5d554a",
+  marginBottom: 8,
+  lineHeight: 1.5,
+};
+
+const ruleTextStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: "#7b7367",
+  marginBottom: 10,
+  lineHeight: 1.45,
+  fontWeight: 700,
+};
+
+const quantityRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  marginBottom: 10,
+};
+
+const qtyButtonStyle: React.CSSProperties = {
+  width: 32,
+  height: 32,
+  borderRadius: 9,
+  border: "1px solid #ddd3c5",
+  background: "#fff",
+  fontSize: 16,
+  lineHeight: 1,
+  color: "#171717",
+};
+
+const qtyValueStyle: React.CSSProperties = {
+  minWidth: 28,
+  textAlign: "center",
+  fontSize: 14,
+  fontWeight: 850,
+  color: "#171717",
+};
+
+const removeButtonStyle: React.CSSProperties = {
+  border: "none",
+  background: "transparent",
+  padding: 0,
+  fontSize: 13,
+  color: "#7b7367",
+  textDecoration: "underline",
 };
 
 export default memo(CartDrawerComponent);

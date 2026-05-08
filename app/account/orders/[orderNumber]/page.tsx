@@ -62,7 +62,10 @@ function formatDate(value: string) {
   if (!value) return "-";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
 
   return date.toLocaleDateString("en-US", {
     year: "numeric",
@@ -90,7 +93,12 @@ function getStatusStyles(status: string): React.CSSProperties {
     };
   }
 
-  if (normalized === "processing" || normalized === "shipped") {
+  if (
+    normalized === "processing" ||
+    normalized === "shipped" ||
+    normalized === "approved" ||
+    normalized === "quoted"
+  ) {
     return {
       background: "#eff6ff",
       color: "#1d4ed8",
@@ -103,6 +111,10 @@ function getStatusStyles(status: string): React.CSSProperties {
     color: "#8a5a00",
     border: "1px solid #f5deb0",
   };
+}
+
+function getContactName(order: Order) {
+  return [order.first_name, order.last_name].filter(Boolean).join(" ").trim();
 }
 
 export default function AccountOrderDetailPage({
@@ -122,6 +134,7 @@ export default function AccountOrderDetailPage({
     async function load() {
       try {
         const resolved = await params;
+
         if (!active) return;
 
         setOrderNumber(resolved.orderNumber);
@@ -142,14 +155,17 @@ export default function AccountOrderDetailPage({
         if (!active) return;
 
         if (!response.ok || !data?.ok || !data.order) {
-          throw new Error(data?.error || "Failed to load order.");
+          throw new Error(data?.error || "Failed to load quote request.");
         }
 
         setOrder(data.order);
         setItems(data.items || []);
       } catch (err) {
         if (!active) return;
-        setError(err instanceof Error ? err.message : "Failed to load order.");
+
+        setError(
+          err instanceof Error ? err.message : "Failed to load quote request."
+        );
       } finally {
         if (active) {
           setLoading(false);
@@ -168,18 +184,22 @@ export default function AccountOrderDetailPage({
     <div style={pageStyle}>
       <div style={headerStyle}>
         <div>
-          <p style={eyebrowStyle}>Order Detail</p>
-          <h1 style={titleStyle}>{orderNumber || "Order"}</h1>
+          <p style={eyebrowStyle}>Quote Request Detail</p>
+
+          <h1 style={titleStyle}>{orderNumber || "Quote Request"}</h1>
+
           {order ? (
-            <p style={subtitleStyle}>Placed on {formatDate(order.created_at)}</p>
+            <p style={subtitleStyle}>
+              Submitted on {formatDate(order.created_at)}
+            </p>
           ) : null}
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {items.length ? (
+        <div style={headerActionsStyle}>
+          {orderNumber ? (
             <ReorderButton
-              items={items}
-              label="Re-order This Order"
+              orderNumber={orderNumber}
+              label="Reorder to Quote Cart"
               variant="dark"
             />
           ) : null}
@@ -191,11 +211,11 @@ export default function AccountOrderDetailPage({
       </div>
 
       {loading ? (
-        <div style={cardStyle}>Loading order...</div>
+        <div style={cardStyle}>Loading quote request...</div>
       ) : error ? (
         <div style={errorStyle}>{error}</div>
       ) : !order ? (
-        <div style={cardStyle}>Order not found.</div>
+        <div style={cardStyle}>Quote request not found.</div>
       ) : (
         <div style={layoutStyle}>
           <div style={{ display: "grid", gap: 20 }}>
@@ -203,8 +223,11 @@ export default function AccountOrderDetailPage({
               <div style={sectionHeaderStyle}>
                 <div>
                   <div style={orderNumberStyle}>{order.order_number}</div>
+
                   <div style={orderMetaStyle}>
-                    {order.item_count} item{order.item_count === 1 ? "" : "s"}
+                    {order.item_count} item
+                    {order.item_count === 1 ? "" : "s"} ·{" "}
+                    {order.currency || "USD"}
                   </div>
                 </div>
 
@@ -217,46 +240,65 @@ export default function AccountOrderDetailPage({
                   {order.status || "submitted"}
                 </span>
               </div>
+
+              <div style={requestNoticeStyle}>
+                This is a B2B quote request record. Final pricing, freight,
+                availability, lead time, taxes, and payment terms are reviewed
+                by the Globaltex Fine Linens sales team.
+              </div>
             </div>
 
             <div style={cardStyle}>
               <h3 style={sectionTitleStyle}>Items</h3>
 
-              <div style={{ display: "grid", gap: 18 }}>
-                {items.map((item) => (
-                  <div key={item.id} style={itemRowStyle}>
-                    <div style={itemImageWrapStyle}>
-                      {item.image ? (
-                        <img
-                          src={item.image}
-                          alt={item.product_title}
-                          style={itemImageStyle}
-                        />
-                      ) : null}
-                    </div>
+              {!items.length ? (
+                <div style={emptyItemsStyle}>
+                  No line items found for this quote request.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 18 }}>
+                  {items.map((item) => (
+                    <div key={item.id} style={itemRowStyle}>
+                      <div style={itemImageWrapStyle}>
+                        {item.image ? (
+                          <img
+                            src={item.image}
+                            alt={item.product_title}
+                            loading="lazy"
+                            decoding="async"
+                            style={itemImageStyle}
+                          />
+                        ) : (
+                          <div style={imagePlaceholderStyle}>No Image</div>
+                        )}
+                      </div>
 
-                    <div style={{ minWidth: 0 }}>
-                      <div style={itemTitleStyle}>{item.product_title}</div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={itemTitleStyle}>{item.product_title}</div>
 
-                      {item.variant_title ? (
-                        <div style={itemVariantStyle}>{item.variant_title}</div>
-                      ) : null}
+                        {item.variant_title ? (
+                          <div style={itemVariantStyle}>
+                            {item.variant_title}
+                          </div>
+                        ) : null}
 
-                      {item.sku ? (
-                        <div style={itemSkuStyle}>SKU: {item.sku}</div>
-                      ) : null}
+                        {item.sku ? (
+                          <div style={itemSkuStyle}>SKU: {item.sku}</div>
+                        ) : null}
 
-                      <div style={itemMetaStyle}>
-                        Qty: {item.quantity} • Unit: {formatMoney(item.unit_price)}
+                        <div style={itemMetaStyle}>
+                          Qty: {item.quantity} · Unit:{" "}
+                          {formatMoney(item.unit_price)}
+                        </div>
+                      </div>
+
+                      <div style={itemLineTotalStyle}>
+                        {formatMoney(item.line_total)}
                       </div>
                     </div>
-
-                    <div style={itemLineTotalStyle}>
-                      {formatMoney(item.line_total)}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -286,24 +328,34 @@ export default function AccountOrderDetailPage({
                 </div>
 
                 <div style={grandTotalRowStyle}>
-                  <span>Total</span>
+                  <span>Estimated Total</span>
                   <span>{formatMoney(order.grand_total)}</span>
                 </div>
               </div>
+
+              <p style={summaryNoteStyle}>
+                This total is an estimated request value, not a final invoice.
+              </p>
             </div>
 
             <div style={cardStyle}>
-              <h3 style={sectionTitleStyle}>Billing & Shipping</h3>
+              <h3 style={sectionTitleStyle}>Contact & Shipping</h3>
 
               <div style={addressTextStyle}>
-                <strong>
-                  {order.first_name} {order.last_name}
-                </strong>
+                <strong>{getContactName(order) || "-"}</strong>
+
                 {order.company ? <div>{order.company}</div> : null}
                 {order.email ? <div>{order.email}</div> : null}
                 {order.phone ? <div>{order.phone}</div> : null}
-                {order.address_line_1 ? <div>{order.address_line_1}</div> : null}
-                {order.address_line_2 ? <div>{order.address_line_2}</div> : null}
+
+                {order.address_line_1 ? (
+                  <div>{order.address_line_1}</div>
+                ) : null}
+
+                {order.address_line_2 ? (
+                  <div>{order.address_line_2}</div>
+                ) : null}
+
                 {(order.city || order.postal_code) && (
                   <div>
                     {order.city}
@@ -311,13 +363,14 @@ export default function AccountOrderDetailPage({
                     {order.postal_code}
                   </div>
                 )}
+
                 {order.country ? <div>{order.country}</div> : null}
               </div>
             </div>
 
             {order.note ? (
               <div style={cardStyle}>
-                <h3 style={sectionTitleStyle}>Order Note</h3>
+                <h3 style={sectionTitleStyle}>Request Note</h3>
                 <p style={noteTextStyle}>{order.note}</p>
               </div>
             ) : null}
@@ -342,6 +395,13 @@ const headerStyle: React.CSSProperties = {
   justifyContent: "space-between",
   gap: 20,
   flexWrap: "wrap",
+};
+
+const headerActionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  alignItems: "flex-start",
 };
 
 const eyebrowStyle: React.CSSProperties = {
@@ -424,11 +484,32 @@ const statusBadgeStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+const requestNoticeStyle: React.CSSProperties = {
+  marginTop: 18,
+  padding: "13px 14px",
+  borderRadius: 16,
+  background: "#f8f5ef",
+  border: "1px solid #eee5d9",
+  color: "#6b6256",
+  fontSize: 13,
+  lineHeight: 1.7,
+};
+
 const sectionTitleStyle: React.CSSProperties = {
   margin: "0 0 16px",
   fontSize: 18,
   fontWeight: 800,
   color: "#171717",
+};
+
+const emptyItemsStyle: React.CSSProperties = {
+  padding: 16,
+  borderRadius: 16,
+  border: "1px dashed #ddd3c5",
+  background: "#fffaf4",
+  color: "#6b6256",
+  fontSize: 14,
+  fontWeight: 700,
 };
 
 const itemRowStyle: React.CSSProperties = {
@@ -450,6 +531,16 @@ const itemImageStyle: React.CSSProperties = {
   width: "100%",
   height: "100%",
   objectFit: "cover",
+};
+
+const imagePlaceholderStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  display: "grid",
+  placeItems: "center",
+  color: "#9b9288",
+  fontSize: 11,
+  fontWeight: 700,
 };
 
 const itemTitleStyle: React.CSSProperties = {
@@ -510,6 +601,13 @@ const grandTotalRowStyle: React.CSSProperties = {
   marginTop: 4,
 };
 
+const summaryNoteStyle: React.CSSProperties = {
+  margin: "14px 0 0",
+  color: "#6b6256",
+  fontSize: 13,
+  lineHeight: 1.7,
+};
+
 const addressTextStyle: React.CSSProperties = {
   display: "grid",
   gap: 4,
@@ -529,12 +627,13 @@ const secondaryButtonStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 46,
-  padding: "0 18px",
+  minHeight: 42,
+  padding: "0 16px",
   borderRadius: 999,
   background: "#fff",
   color: "#171717",
   textDecoration: "none",
   fontWeight: 800,
   border: "1px solid #ddd3c5",
+  fontSize: 13,
 };

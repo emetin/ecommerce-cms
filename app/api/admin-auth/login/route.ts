@@ -97,8 +97,6 @@ export async function POST(req: Request) {
 
     clearFailedAttempts(clientKey);
 
-    await markAdminLogin(adminUser.id);
-
     const token = await createAdminSessionToken(adminUser);
 
     const response = NextResponse.json({
@@ -128,6 +126,13 @@ export async function POST(req: Request) {
       value: "",
       path: "/",
       maxAge: 0,
+    });
+
+    void markAdminLogin(adminUser.id).catch((error) => {
+      console.error(
+        "Failed to update admin last login timestamp:",
+        error instanceof Error ? error.message : error
+      );
     });
 
     return response;

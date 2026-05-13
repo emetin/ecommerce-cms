@@ -375,23 +375,12 @@ async function resolveActualSheetTitle(
     return sheetName;
   }
 
-  const allMeta = await getAllCatalogSheetMetaUncached();
-  const requested = normalizeCellValueLower(sheetName);
-  const candidates = getCandidateSheetTitles(sheetName).map((item) =>
-    normalizeCellValueLower(item)
-  );
+  const sheet = await getSheetMetaByTitle(sheetName, {
+    forceFresh: false,
+    ttlSeconds: DEFAULT_TTL_SECONDS,
+  });
 
-  const exactCandidate =
-    allMeta.find((item) =>
-      candidates.includes(normalizeCellValueLower(item.title))
-    ) ||
-    allMeta.find((item) => normalizeCellValueLower(item.title) === requested);
-
-  if (!exactCandidate) {
-    throw new Error(`Sheet metadata was not found for "${sheetName}".`);
-  }
-
-  return exactCandidate.title;
+  return sheet.title;
 }
 
 async function fetchSheetRowsUncached(

@@ -14,6 +14,8 @@ import { createId, nowIso } from "./ids";
 const CARTS_SHEET = "carts";
 const CART_ITEMS_SHEET = "cart_items";
 
+const CART_LOOKUP_TTL_SECONDS = 15;
+
 export type CartStatus = "active" | "converted" | "abandoned";
 
 export type CartRecord = {
@@ -132,6 +134,58 @@ function isActiveCart(cart: CartRecord | null) {
   return !status || status === "active";
 }
 
+function getInputMinQuantity(input: AddCartItemInput) {
+  return toPositiveInteger(input.min_quantity, 1);
+}
+
+function getInputBoxQuantity(input: AddCartItemInput) {
+  return toPositiveInteger(input.box_quantity, 0);
+}
+
+function getInputCaseQuantity(input: AddCartItemInput) {
+  return toPositiveInteger(input.case_quantity, 0);
+}
+
+function getInputStepQuantity(input: AddCartItemInput) {
+  return (
+    toPositiveInteger(input.step_quantity, 0) ||
+    getInputCaseQuantity(input) ||
+    getInputBoxQuantity(input) ||
+    getInputMinQuantity(input) ||
+    1
+  );
+}
+
+function getResolvedQuantityRules(input: AddCartItemInput) {
+  const minQuantity = getInputMinQuantity(input);
+  const boxQuantity = getInputBoxQuantity(input);
+  const caseQuantity = getInputCaseQuantity(input);
+  const stepQuantity = getInputStepQuantity(input);
+
+  return {
+    min_quantity: String(minQuantity),
+    box_quantity: boxQuantity > 0 ? String(boxQuantity) : "",
+    case_quantity: caseQuantity > 0 ? String(caseQuantity) : "",
+    step_quantity: String(stepQuantity),
+  };
+}
+
+function preserveOrResolveQuantityRules(
+  existing: CartItemRecord,
+  input: AddCartItemInput
+) {
+  const resolved = getResolvedQuantityRules(input);
+
+  return {
+    min_quantity: normalizeText(existing.min_quantity) || resolved.min_quantity,
+    box_quantity: normalizeText(existing.box_quantity) || resolved.box_quantity,
+    case_quantity:
+      normalizeText(existing.case_quantity) || resolved.case_quantity,
+    step_quantity:
+      normalizeText(existing.step_quantity) || resolved.step_quantity,
+  };
+}
+
 async function buildRowFromHeaders(
   sheetName: string,
   record: Record<string, unknown>
@@ -207,6 +261,39 @@ function createHydratedCart(
   };
 }
 
+async function updateCartTotalsFromItems(
+  cart: CartRecord,
+  items: CartItemRecord[]
+): Promise<HydratedCart> {
+  const totals = calculateCartTotals(items);
+
+  const rowNumber = await findRowNumberByField(CARTS_SHEET, "id", cart.id);
+
+  if (!rowNumber) {
+    throw new Error("Cart row could not be found.");
+  }
+
+  const updatedCart: CartRecord = {
+    ...cart,
+    subtotal: toMoney(totals.subtotal),
+    discount_total: toMoney(totals.discount_total),
+    shipping_total: toMoney(totals.shipping_total),
+    tax_total: toMoney(totals.tax_total),
+    grand_total: toMoney(totals.grand_total),
+    item_count: String(totals.item_count),
+    updated_at: nowIso(),
+  };
+
+  const row = await buildRowFromHeaders(CARTS_SHEET, updatedCart);
+  await updateSheetRowByRowNumber(CARTS_SHEET, rowNumber, row);
+
+  return {
+    cart: updatedCart,
+    items: items.map(hydrateCartItem),
+    totals,
+  };
+}
+
 export async function getCartByToken(
   cartToken: string
 ): Promise<CartRecord | null> {
@@ -220,7 +307,10 @@ export async function getCartByToken(
     CARTS_SHEET,
     "cart_token",
     normalizedCartToken,
-    { forceFresh: true, ttlSeconds: 0 }
+    {
+      forceFresh: false,
+      ttlSeconds: CART_LOOKUP_TTL_SECONDS,
+    }
   );
 
   return (cartRaw as CartRecord | null) || null;
@@ -292,7 +382,10 @@ export async function getCartItems(cartId: string): Promise<CartItemRecord[]> {
     CART_ITEMS_SHEET,
     "cart_id",
     normalizedCartId,
-    { forceFresh: true, ttlSeconds: 0 }
+    {
+      forceFresh: false,
+      ttlSeconds: CART_LOOKUP_TTL_SECONDS,
+    }
   );
 
   return (itemsRaw as CartItemRecord[]) || [];
@@ -317,36 +410,8 @@ export async function syncCartTotals(cartId: string): Promise<HydratedCart> {
   }
 
   const items = await getCartItems(normalizedCartId);
-  const totals = calculateCartTotals(items);
-  const rowNumber = await findRowNumberByField(
-    CARTS_SHEET,
-    "id",
-    normalizedCartId
-  );
 
-  if (!rowNumber) {
-    throw new Error("Cart row could not be found.");
-  }
-
-  const updatedCart: CartRecord = {
-    ...cart,
-    subtotal: toMoney(totals.subtotal),
-    discount_total: toMoney(totals.discount_total),
-    shipping_total: toMoney(totals.shipping_total),
-    tax_total: toMoney(totals.tax_total),
-    grand_total: toMoney(totals.grand_total),
-    item_count: String(totals.item_count),
-    updated_at: nowIso(),
-  };
-
-  const row = await buildRowFromHeaders(CARTS_SHEET, updatedCart);
-  await updateSheetRowByRowNumber(CARTS_SHEET, rowNumber, row);
-
-  return {
-    cart: updatedCart,
-    items: items.map(hydrateCartItem),
-    totals,
-  };
+  return updateCartTotalsFromItems(cart, items);
 }
 
 export async function getHydratedCartByToken(
@@ -428,6 +493,8 @@ export async function addItemToCart(
       1
     );
 
+    const quantityRules = preserveOrResolveQuantityRules(existing, input);
+
     const updated: CartItemRecord = {
       ...existing,
       product_title: normalizeText(input.product_title || existing.product_title),
@@ -438,18 +505,24 @@ export async function addItemToCart(
       compare_at_price: toMoney(compareAtPrice),
       quantity: String(nextQuantity),
       line_total: toMoney(multiplyMoney(unitPrice, nextQuantity)),
-      min_quantity: existing.min_quantity || "",
-      box_quantity: existing.box_quantity || "",
-      case_quantity: existing.case_quantity || "",
-      step_quantity: existing.step_quantity || "",
+      min_quantity: quantityRules.min_quantity,
+      box_quantity: quantityRules.box_quantity,
+      case_quantity: quantityRules.case_quantity,
+      step_quantity: quantityRules.step_quantity,
       updated_at: now,
     };
 
     const row = await buildRowFromHeaders(CART_ITEMS_SHEET, updated);
     await updateSheetRowByRowNumber(CART_ITEMS_SHEET, rowNumber, row);
 
-    return syncCartTotals(cart.id);
+    const nextItems = existingItems.map((item) =>
+      item.id === existing.id ? updated : item
+    );
+
+    return updateCartTotalsFromItems(cart, nextItems);
   }
+
+  const quantityRules = getResolvedQuantityRules(input);
 
   const newItem: CartItemRecord = {
     id: createId("cartitem"),
@@ -464,10 +537,10 @@ export async function addItemToCart(
     compare_at_price: toMoney(compareAtPrice),
     quantity: String(quantityToAdd),
     line_total: toMoney(multiplyMoney(unitPrice, quantityToAdd)),
-    min_quantity: "",
-    box_quantity: "",
-    case_quantity: "",
-    step_quantity: "",
+    min_quantity: quantityRules.min_quantity,
+    box_quantity: quantityRules.box_quantity,
+    case_quantity: quantityRules.case_quantity,
+    step_quantity: quantityRules.step_quantity,
     created_at: now,
     updated_at: now,
   };
@@ -475,7 +548,7 @@ export async function addItemToCart(
   const row = await buildRowFromHeaders(CART_ITEMS_SHEET, newItem);
   await appendSheetRow(CART_ITEMS_SHEET, row);
 
-  return syncCartTotals(cart.id);
+  return updateCartTotalsFromItems(cart, [...existingItems, newItem]);
 }
 
 export async function updateCartItemQuantity(
@@ -503,24 +576,25 @@ export async function updateCartItemQuantity(
 
   const activeCart = cart as CartRecord;
 
-  const itemRaw = await findSheetItemByField(
-    CART_ITEMS_SHEET,
-    "id",
-    normalizedItemId,
-    { forceFresh: true, ttlSeconds: 0 }
+  const existingItems = await getCartItems(activeCart.id);
+  const item = existingItems.find(
+    (cartItem) => normalizeText(cartItem.id) === normalizedItemId
   );
 
-  const item = itemRaw as CartItemRecord | null;
-
-  if (!item || normalizeText(item.cart_id) !== activeCart.id) {
-    return syncCartTotals(activeCart.id);
+  if (!item) {
+    return updateCartTotalsFromItems(activeCart, existingItems);
   }
 
   const nextQuantity = Math.floor(Number(quantity));
 
   if (!Number.isFinite(nextQuantity) || nextQuantity <= 0) {
     await deleteSheetRowByField(CART_ITEMS_SHEET, "id", normalizedItemId);
-    return syncCartTotals(activeCart.id);
+
+    const nextItems = existingItems.filter(
+      (cartItem) => normalizeText(cartItem.id) !== normalizedItemId
+    );
+
+    return updateCartTotalsFromItems(activeCart, nextItems);
   }
 
   const rowNumber = await findRowNumberByField(
@@ -530,7 +604,7 @@ export async function updateCartItemQuantity(
   );
 
   if (!rowNumber) {
-    return syncCartTotals(activeCart.id);
+    return updateCartTotalsFromItems(activeCart, existingItems);
   }
 
   const unitPrice = toNumber(item.unit_price);
@@ -545,7 +619,11 @@ export async function updateCartItemQuantity(
   const row = await buildRowFromHeaders(CART_ITEMS_SHEET, updated);
   await updateSheetRowByRowNumber(CART_ITEMS_SHEET, rowNumber, row);
 
-  return syncCartTotals(activeCart.id);
+  const nextItems = existingItems.map((cartItem) =>
+    cartItem.id === item.id ? updated : cartItem
+  );
+
+  return updateCartTotalsFromItems(activeCart, nextItems);
 }
 
 export async function removeCartItem(
@@ -571,23 +649,23 @@ export async function removeCartItem(
   }
 
   const activeCart = cart as CartRecord;
+  const existingItems = await getCartItems(activeCart.id);
 
-  const itemRaw = await findSheetItemByField(
-    CART_ITEMS_SHEET,
-    "id",
-    normalizedItemId,
-    { forceFresh: true, ttlSeconds: 0 }
+  const item = existingItems.find(
+    (cartItem) => normalizeText(cartItem.id) === normalizedItemId
   );
 
-  const item = itemRaw as CartItemRecord | null;
-
-  if (!item || normalizeText(item.cart_id) !== activeCart.id) {
-    return syncCartTotals(activeCart.id);
+  if (!item) {
+    return updateCartTotalsFromItems(activeCart, existingItems);
   }
 
   await deleteSheetRowByField(CART_ITEMS_SHEET, "id", normalizedItemId);
 
-  return syncCartTotals(activeCart.id);
+  const nextItems = existingItems.filter(
+    (cartItem) => normalizeText(cartItem.id) !== normalizedItemId
+  );
+
+  return updateCartTotalsFromItems(activeCart, nextItems);
 }
 
 export async function clearCartByToken(
@@ -612,7 +690,7 @@ export async function clearCartByToken(
     await deleteSheetRowByField(CART_ITEMS_SHEET, "id", item.id);
   }
 
-  return syncCartTotals(activeCart.id);
+  return updateCartTotalsFromItems(activeCart, []);
 }
 
 export async function getAllCartsRaw() {

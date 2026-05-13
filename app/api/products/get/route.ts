@@ -48,9 +48,15 @@ export async function GET(req: Request) {
       );
     }
 
+    /*
+      Performance fix:
+      Previously this endpoint used forceFresh: true and ttlSeconds: 0.
+      That forced a fresh Google Sheets request on every product detail call.
+      60 seconds cache keeps admin faster without changing the response shape.
+      Sheet write operations already invalidate cache from lib/sheets.ts.
+    */
     const products = (await getSheetData(SHEET_NAME, {
-      forceFresh: true,
-      ttlSeconds: 0,
+      ttlSeconds: 60,
     })) as ProductRecord[];
 
     const item =
@@ -70,7 +76,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "no-store",
+          "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
         },
       }
     );

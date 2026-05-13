@@ -23,7 +23,6 @@ import {
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  // ROUTE TYPE TESPİTİ
   const isAdminRoute = isAdminPageRoute(pathname);
   const isPortalRoute = isAdminPortalRoute(pathname);
   const adminAuthRoute = isAdminAuthRoute(pathname);
@@ -40,40 +39,34 @@ export async function proxy(request: NextRequest) {
   const shouldCheckCustomer =
     isCustomerPortalLogin || customerAuthRoute || customerProtectedRoute;
 
-  // HİÇBİRİNE GİRMİYORSA DEVAM
   if (!shouldCheckAdmin && !shouldCheckCustomer && !publicOrderRoute) {
     return NextResponse.next();
   }
 
-  // PUBLIC ORDER ROUTES
   if (publicOrderRoute) {
     return NextResponse.next();
   }
 
-  // ADMIN AUTH (LOGIN / LOGOUT vs)
   if (adminAuthRoute && isAllowedAdminAuthRoute(pathname)) {
     return NextResponse.next();
   }
 
-  // CUSTOMER AUTH (LOGIN / LOGOUT vs)
   if (customerAuthRoute && isAllowedCustomerAuthRoute(pathname)) {
     return NextResponse.next();
   }
 
-  // ADMIN KONTROLÜ
   if (shouldCheckAdmin) {
     const adminAuthCookie = request.cookies.get(ADMIN_COOKIE_NAME)?.value;
     const isAdminLoggedIn = await isAuthenticatedAdmin(adminAuthCookie);
 
-    // ADMIN LOGIN SAYFASI
     if (isPortalRoute) {
       if (isAdminLoggedIn) {
         return NextResponse.redirect(new URL("/admin/products", request.url));
       }
+
       return NextResponse.next();
     }
 
-    // ADMIN PROTECTED
     if ((isAdminRoute || protectedAdminApiRoute) && !isAdminLoggedIn) {
       if (protectedAdminApiRoute) {
         return NextResponse.json(
@@ -88,22 +81,20 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // CUSTOMER KONTROLÜ
   if (shouldCheckCustomer) {
     const customerAuthCookie = request.cookies.get(CUSTOMER_COOKIE_NAME)?.value;
     const isCustomerLoggedIn = await isAuthenticatedCustomer(
       customerAuthCookie
     );
 
-    // CUSTOMER LOGIN PAGE
     if (isCustomerPortalLogin) {
       if (isCustomerLoggedIn) {
         return NextResponse.redirect(new URL("/account", request.url));
       }
+
       return NextResponse.next();
     }
 
-    // CUSTOMER PROTECTED ROUTES
     if (customerProtectedRoute && !isCustomerLoggedIn) {
       if (pathname.startsWith("/api/")) {
         return NextResponse.json(
@@ -121,7 +112,6 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-// ⚠️ BURASI ÇOK ÖNEMLİ → STATIC OLMAK ZORUNDA
 export const config = {
   matcher: [
     "/admin/:path*",
@@ -130,14 +120,28 @@ export const config = {
     "/api/admin/:path*",
     "/api/admin-auth/:path*",
 
-    "/api/products/:path*",
-    "/api/blog/:path*",
-    "/api/collections/:path*",
-    "/api/product-images/:path*",
-    "/api/variants/:path*",
-    "/api/product-variants/:path*",
     "/api/upload/:path*",
-    "/api/collection-products/:path*",
+
+    "/api/products/create",
+    "/api/products/update",
+    "/api/products/delete",
+
+    "/api/product-images/create",
+    "/api/product-images/update",
+    "/api/product-images/delete",
+    "/api/product-images/fix-missing-alt-texts",
+
+    "/api/variants/create",
+    "/api/variants/update",
+    "/api/variants/delete",
+
+    "/api/product-variants/create",
+    "/api/product-variants/update",
+    "/api/product-variants/delete",
+
+    "/api/collection-products/create",
+    "/api/collection-products/update",
+    "/api/collection-products/delete",
 
     "/portal-login",
     "/account/:path*",

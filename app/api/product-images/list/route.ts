@@ -24,6 +24,7 @@ function isTrue(value: unknown) {
 
 function toSafeOrder(value: unknown) {
   const num = Number(String(value || "").trim());
+
   return Number.isFinite(num) ? num : 999999;
 }
 
@@ -32,9 +33,15 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const productSlug = normalizeText(searchParams.get("product_slug")).toLowerCase();
 
+    /*
+      Performance fix:
+      Previously this endpoint used forceFresh: true and ttlSeconds: 0.
+      That made every product image page reload pull product_images from Google Sheets again.
+      60 seconds cache is enough for admin listing.
+      Image create/update/delete operations should already clear cache through sheet invalidation.
+    */
     const items = (await getSheetData("product_images", {
-      forceFresh: true,
-      ttlSeconds: 0,
+      ttlSeconds: 60,
     })) as ProductImageRecord[];
 
     const filtered = items
@@ -63,7 +70,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+          "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
         },
       }
     );

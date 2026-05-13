@@ -5,15 +5,28 @@ type CollectionItem = Record<string, string>;
 
 const ALLOWED_STATUS = ["published", "draft", "archived"];
 
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
-    const statusParam = String(searchParams.get("status") || "")
-      .trim()
-      .toLowerCase();
+    const statusParam = normalizeLower(searchParams.get("status"));
 
-    const collections = (await getSheetData("collections")) as CollectionItem[];
+    /*
+      Performance fix:
+      getSheetData already uses cache when forceFresh is not enabled.
+      We keep the same behavior but explicitly set a 60-second TTL for clarity.
+    */
+    const collections = (await getSheetData("collections", {
+      ttlSeconds: 60,
+    })) as CollectionItem[];
 
     let items = collections.filter((item) => item && item.slug);
 
@@ -29,13 +42,12 @@ export async function GET(req: Request) {
       }
 
       items = items.filter(
-        (item) =>
-          String(item.status || "").trim().toLowerCase() === statusParam
+        (item) => normalizeLower(item.status) === statusParam
       );
     }
 
     items = items.sort((a, b) =>
-      String(a.title || "").localeCompare(String(b.title || ""))
+      normalizeText(a.title).localeCompare(normalizeText(b.title))
     );
 
     return NextResponse.json(
@@ -46,7 +58,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "no-store",
+          "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
         },
       }
     );

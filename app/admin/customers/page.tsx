@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CustomerAnalyticsPanel from "../../../components/admin/CustomerAnalyticsPanel";
 
 type CustomerItem = {
@@ -57,7 +57,10 @@ function formatDate(value?: string) {
   if (!value) return "-";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
 
   return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
@@ -131,7 +134,9 @@ export default function AdminCustomersPage() {
   const [generatedEmail, setGeneratedEmail] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  async function loadCustomers() {
+  const didLoadRef = useRef(false);
+
+  const loadCustomers = useCallback(async () => {
     try {
       setLoading(true);
       setErrorMessage("");
@@ -147,9 +152,11 @@ export default function AdminCustomersPage() {
       }
 
       const nextItems = Array.isArray(data.items) ? data.items : [];
+
       setItems(nextItems);
 
       const nextStatusMap: Record<string, string> = {};
+
       nextItems.forEach((item: CustomerItem) => {
         nextStatusMap[item.id] =
           normalizeLower(item.status || "inactive") || "inactive";
@@ -163,11 +170,17 @@ export default function AdminCustomersPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
+    if (didLoadRef.current) {
+      return;
+    }
+
+    didLoadRef.current = true;
+
     loadCustomers();
-  }, []);
+  }, [loadCustomers]);
 
   const filteredItems = useMemo(() => {
     const query = normalizeLower(searchInput);
@@ -249,6 +262,7 @@ export default function AdminCustomersPage() {
       );
 
       setSuccessMessage("Temporary password generated successfully.");
+
       await loadCustomers();
     } catch (error) {
       alert(error instanceof Error ? error.message : "An unknown error occurred.");
@@ -376,7 +390,7 @@ export default function AdminCustomersPage() {
             <label style={labelStyle}>Search</label>
             <input
               value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
+              onChange={(event) => setSearchInput(event.target.value)}
               placeholder="Search by name, company, email, phone, or customer code"
               style={inputStyle}
             />
@@ -386,7 +400,7 @@ export default function AdminCustomersPage() {
             <label style={labelStyle}>Status</label>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(event) => setStatusFilter(event.target.value)}
               style={inputStyle}
             >
               <option value="all">all</option>
@@ -399,7 +413,7 @@ export default function AdminCustomersPage() {
             <label style={labelStyle}>Price Tier</label>
             <select
               value={priceTierFilter}
-              onChange={(e) => setPriceTierFilter(e.target.value)}
+              onChange={(event) => setPriceTierFilter(event.target.value)}
               style={inputStyle}
             >
               {PRICE_TIER_OPTIONS.map((option) => (
@@ -424,13 +438,16 @@ export default function AdminCustomersPage() {
             <div>
               <strong>Company:</strong> {resetResult.companyName}
             </div>
+
             <div>
               <strong>Email:</strong> {resetResult.email}
             </div>
+
             <div>
               <strong>Temporary Password:</strong>{" "}
               {resetResult.temporaryPassword}
             </div>
+
             {resetResult.expiresAt ? (
               <div>
                 <strong>Expires:</strong> {formatDate(resetResult.expiresAt)}
@@ -465,7 +482,11 @@ export default function AdminCustomersPage() {
               Copy Email Address
             </button>
 
-            <button type="button" onClick={handleCopyEmail} style={primaryButtonStyle}>
+            <button
+              type="button"
+              onClick={handleCopyEmail}
+              style={primaryButtonStyle}
+            >
               Copy Email
             </button>
           </div>
@@ -498,6 +519,7 @@ export default function AdminCustomersPage() {
                 <div style={tableRowStyle}>
                   <div style={nameCellStyle}>
                     <div style={primaryTextStyle}>{item.full_name || "-"}</div>
+
                     {item.customer_code ? (
                       <div style={secondaryTextStyle}>
                         Code: {item.customer_code}
@@ -511,6 +533,7 @@ export default function AdminCustomersPage() {
 
                   <div style={cellStyle}>
                     <div style={primaryTextStyle}>{item.email || "-"}</div>
+
                     {item.phone ? (
                       <div style={secondaryTextStyle}>{item.phone}</div>
                     ) : null}
@@ -581,9 +604,7 @@ export default function AdminCustomersPage() {
 
                       <div>
                         <div style={metaLabelStyle}>Last Name</div>
-                        <div style={metaValueStyle}>
-                          {item.last_name || "-"}
-                        </div>
+                        <div style={metaValueStyle}>{item.last_name || "-"}</div>
                       </div>
 
                       <div>
@@ -659,10 +680,10 @@ export default function AdminCustomersPage() {
                             normalizeLower(item.status) ||
                             "inactive"
                           }
-                          onChange={(e) =>
+                          onChange={(event) =>
                             setStatusMap((prev) => ({
                               ...prev,
-                              [item.id]: e.target.value,
+                              [item.id]: event.target.value,
                             }))
                           }
                           style={compactSelectStyle}
@@ -687,7 +708,9 @@ export default function AdminCustomersPage() {
                                 : "pointer",
                           }}
                         >
-                          {statusLoadingId === item.id ? "Saving..." : "Save Status"}
+                          {statusLoadingId === item.id
+                            ? "Saving..."
+                            : "Save Status"}
                         </button>
                       </div>
                     </div>
@@ -1049,8 +1072,9 @@ const emailActionsStyle: React.CSSProperties = {
 
 const errorBoxStyle: React.CSSProperties = {
   padding: 18,
-  borderRadius: 16,
+  borderRadius: 18,
   background: "#fff1f1",
-  border: "1px solid #f0c9c9",
-  color: "#8d2f2f",
+  border: "1px solid #efc9c9",
+  color: "#7a2222",
+  fontWeight: 700,
 };

@@ -513,10 +513,15 @@ export async function getOrderByNumber(orderNumber: string) {
   };
 }
 
-export async function getAllOrders(): Promise<OrderRecord[]> {
+export async function getAllOrders(
+  options?: {
+    forceFresh?: boolean;
+    ttlSeconds?: number;
+  }
+): Promise<OrderRecord[]> {
   const rows = (await getSheetData(ORDERS_SHEET, {
-    forceFresh: true,
-    ttlSeconds: 0,
+    forceFresh: options?.forceFresh ?? false,
+    ttlSeconds: options?.ttlSeconds ?? 60,
   })) as OrderRecord[];
 
   return [...rows].sort((a, b) => {

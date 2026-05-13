@@ -9,6 +9,7 @@ import {
   getPrimaryProductImage,
   getProductsAndImages,
   getPublishedProducts,
+  type ProductImageItem,
   type ProductItem,
 } from "../../lib/product-data";
 
@@ -30,7 +31,7 @@ type PreparedProduct = ProductItem & {
 
 function prepareProducts(
   products: ProductItem[],
-  imagesBySlug: Map<string, Record<string, string>[]>
+  imagesBySlug: Map<string, ProductImageItem[]>
 ): PreparedProduct[] {
   const publishedProducts = getPublishedProducts(products);
 
@@ -57,7 +58,7 @@ export default async function ProductsPage() {
   let errorMessage = "";
 
   try {
-    const { products, imagesBySlug } = await getProductsAndImages(1800);
+    const { products, imagesBySlug } = await getProductsAndImages();
     preparedProducts = prepareProducts(products, imagesBySlug);
   } catch (error) {
     errorMessage =

@@ -1,20 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-
-type ProductListResponse = {
-  ok?: boolean;
-  error?: string;
-  total?: number;
-  items?: Array<{
-    id?: string;
-    title?: string;
-    slug?: string;
-    status?: string;
-    updated_at?: string;
-  }>;
-};
+import { useEffect, useRef, useState } from "react";
 
 type ApplicationItem = {
   id: string;
@@ -47,11 +34,37 @@ type OrderItem = {
   updated_at: string;
 };
 
-type SafeApiResult<T> = {
-  ok: boolean;
-  status: number;
-  data: T | null;
-  error: string;
+type DashboardStats = {
+  productTotal: number;
+  pendingApplications: number;
+  approvedApplications: number;
+  activeCustomers: number;
+  inactiveCustomers: number;
+  pendingOrders: number;
+  processingOrders: number;
+  completedOrders: number;
+  orderVolume: number;
+};
+
+type DashboardSummaryResponse = {
+  ok?: boolean;
+  error?: string;
+  stats?: DashboardStats;
+  recentApplications?: ApplicationItem[];
+  recentCustomers?: CustomerItem[];
+  recentOrders?: OrderItem[];
+};
+
+const emptyStats: DashboardStats = {
+  productTotal: 0,
+  pendingApplications: 0,
+  approvedApplications: 0,
+  activeCustomers: 0,
+  inactiveCustomers: 0,
+  pendingOrders: 0,
+  processingOrders: 0,
+  completedOrders: 0,
+  orderVolume: 0,
 };
 
 function normalizeText(value?: string) {
@@ -85,20 +98,16 @@ function formatMoney(value: number, currency = "USD") {
 async function readJsonResponse<T>(
   response: Response,
   fallbackMessage: string
-): Promise<SafeApiResult<T>> {
+): Promise<T> {
   const contentType = response.headers.get("content-type") || "";
   const text = await response.text();
 
   if (!contentType.includes("application/json")) {
-    return {
-      ok: false,
-      status: response.status,
-      data: null,
-      error:
-        response.status === 401 || response.status === 403
-          ? "Admin session expired. Please log in again."
-          : `${fallbackMessage} Endpoint returned HTML instead of JSON. Status: ${response.status}`,
-    };
+    throw new Error(
+      response.status === 401 || response.status === 403
+        ? "Admin session expired. Please log in again."
+        : `${fallbackMessage} Endpoint returned HTML instead of JSON. Status: ${response.status}`
+    );
   }
 
   try {
@@ -107,22 +116,17 @@ async function readJsonResponse<T>(
       error?: string;
     };
 
-    return {
-      ok: response.ok,
-      status: response.status,
-      data,
-      error:
-        !response.ok && typeof data?.error === "string"
-          ? String(data.error)
-          : "",
-    };
-  } catch {
-    return {
-      ok: false,
-      status: response.status,
-      data: null,
-      error: `${fallbackMessage} Invalid JSON response.`,
-    };
+    if (!response.ok || data?.ok === false) {
+      throw new Error(data?.error || fallbackMessage);
+    }
+
+    return data as T;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error;
+    }
+
+    throw new Error(`${fallbackMessage} Invalid JSON response.`);
   }
 }
 
@@ -153,7 +157,7 @@ function getStatusPillStyle(value?: string): React.CSSProperties {
     };
   }
 
-  if (raw === "quoted" || raw === "approved") {
+  if (raw === "quoted") {
     return {
       background: "#eef4fb",
       color: "#315f95",
@@ -177,112 +181,43 @@ function getStatusPillStyle(value?: string): React.CSSProperties {
 }
 
 export default function AdminDashboardPage() {
+  const hasLoadedRef = useRef(false);
+
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
-
-  const [productTotal, setProductTotal] = useState(0);
-  const [applications, setApplications] = useState<ApplicationItem[]>([]);
-  const [customers, setCustomers] = useState<CustomerItem[]>([]);
-  const [orders, setOrders] = useState<OrderItem[]>([]);
+  const [stats, setStats] = useState<DashboardStats>(emptyStats);
+  const [recentApplications, setRecentApplications] = useState<
+    ApplicationItem[]
+  >([]);
+  const [recentCustomers, setRecentCustomers] = useState<CustomerItem[]>([]);
+  const [recentOrders, setRecentOrders] = useState<OrderItem[]>([]);
 
   async function loadDashboard() {
     try {
       setLoading(true);
       setErrorMessage("");
 
-      const [productsRes, applicationsRes, customersRes, ordersRes] =
-        await Promise.all([
-          fetch("/api/products/list?page=1&limit=1", {
-            cache: "no-store",
-            credentials: "same-origin",
-          }),
-          fetch("/api/admin/customer-applications/list", {
-            cache: "no-store",
-            credentials: "same-origin",
-          }),
-          fetch("/api/admin/customers/list", {
-            cache: "no-store",
-            credentials: "same-origin",
-          }),
-          fetch("/api/admin/orders/list", {
-            cache: "no-store",
-            credentials: "same-origin",
-          }),
-        ]);
+      const response = await fetch("/api/admin/dashboard/summary", {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
 
-      const [productsResult, applicationsResult, customersResult, ordersResult] =
-        await Promise.all([
-          readJsonResponse<ProductListResponse>(
-            productsRes,
-            "Failed to load product summary."
-          ),
-          readJsonResponse<{
-            ok?: boolean;
-            error?: string;
-            items?: ApplicationItem[];
-          }>(applicationsRes, "Failed to load applications."),
-          readJsonResponse<{
-            ok?: boolean;
-            error?: string;
-            items?: CustomerItem[];
-          }>(customersRes, "Failed to load customers."),
-          readJsonResponse<{
-            ok?: boolean;
-            error?: string;
-            items?: OrderItem[];
-          }>(ordersRes, "Failed to load orders."),
-        ]);
-
-      if (!productsResult.ok || !productsResult.data?.ok) {
-        throw new Error(
-          productsResult.error ||
-            (productsResult.data?.ok === false
-              ? productsResult.data.error || "Failed to load product summary."
-              : "Failed to load products.")
-        );
-      }
-
-      if (!applicationsResult.ok || !applicationsResult.data?.ok) {
-        throw new Error(
-          applicationsResult.error ||
-            applicationsResult.data?.error ||
-            "Failed to load applications."
-        );
-      }
-
-      if (!customersResult.ok || !customersResult.data?.ok) {
-        throw new Error(
-          customersResult.error ||
-            customersResult.data?.error ||
-            "Failed to load customers."
-        );
-      }
-
-      if (!ordersResult.ok || !ordersResult.data?.ok) {
-        throw new Error(
-          ordersResult.error ||
-            ordersResult.data?.error ||
-            "Failed to load orders."
-        );
-      }
-
-      setProductTotal(Number(productsResult.data.total || 0));
-
-      setApplications(
-        Array.isArray(applicationsResult.data.items)
-          ? applicationsResult.data.items
-          : []
+      const data = await readJsonResponse<DashboardSummaryResponse>(
+        response,
+        "Failed to load dashboard summary."
       );
 
-      setCustomers(
-        Array.isArray(customersResult.data.items)
-          ? customersResult.data.items
-          : []
+      setStats(data.stats || emptyStats);
+
+      setRecentApplications(
+        Array.isArray(data.recentApplications) ? data.recentApplications : []
       );
 
-      setOrders(
-        Array.isArray(ordersResult.data.items) ? ordersResult.data.items : []
+      setRecentCustomers(
+        Array.isArray(data.recentCustomers) ? data.recentCustomers : []
       );
+
+      setRecentOrders(Array.isArray(data.recentOrders) ? data.recentOrders : []);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "An unknown error occurred."
@@ -293,87 +228,11 @@ export default function AdminDashboardPage() {
   }
 
   useEffect(() => {
+    if (hasLoadedRef.current) return;
+
+    hasLoadedRef.current = true;
     loadDashboard();
   }, []);
-
-  const stats = useMemo(() => {
-    const pendingApplications = applications.filter(
-      (item) => normalizeLower(item.status) === "pending"
-    ).length;
-
-    const approvedApplications = applications.filter(
-      (item) => normalizeLower(item.status) === "approved"
-    ).length;
-
-    const activeCustomers = customers.filter(
-      (item) => normalizeLower(item.status) === "active"
-    ).length;
-
-    const inactiveCustomers = customers.filter(
-      (item) => normalizeLower(item.status) !== "active"
-    ).length;
-
-    const pendingOrders = orders.filter((item) =>
-      ["pending", "submitted", "reviewing"].includes(
-        normalizeLower(item.status)
-      )
-    ).length;
-
-    const processingOrders = orders.filter((item) =>
-      ["approved", "processing", "quoted"].includes(normalizeLower(item.status))
-    ).length;
-
-    const completedOrders = orders.filter(
-      (item) => normalizeLower(item.status) === "completed"
-    ).length;
-
-    const orderVolume = orders.reduce(
-      (sum, item) => sum + Number(item.subtotal || 0),
-      0
-    );
-
-    return {
-      productTotal,
-      pendingApplications,
-      approvedApplications,
-      activeCustomers,
-      inactiveCustomers,
-      pendingOrders,
-      processingOrders,
-      completedOrders,
-      orderVolume,
-    };
-  }, [applications, customers, orders, productTotal]);
-
-  const recentApplications = useMemo(() => {
-    return [...applications]
-      .sort((a, b) => {
-        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return bTime - aTime;
-      })
-      .slice(0, 5);
-  }, [applications]);
-
-  const recentOrders = useMemo(() => {
-    return [...orders]
-      .sort((a, b) => {
-        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return bTime - aTime;
-      })
-      .slice(0, 6);
-  }, [orders]);
-
-  const recentCustomers = useMemo(() => {
-    return [...customers]
-      .sort((a, b) => {
-        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return bTime - aTime;
-      })
-      .slice(0, 5);
-  }, [customers]);
 
   if (loading) {
     return <div style={cardStyle}>Loading dashboard...</div>;
@@ -420,7 +279,7 @@ export default function AdminDashboardPage() {
         <StatCard
           label="Pending Applications"
           value={String(stats.pendingApplications)}
-          helper="New companies awaiting review"
+          helper={`${stats.approvedApplications} approved applications`}
           warning
         />
         <StatCard

@@ -14,7 +14,135 @@ type CartItem = {
   quantity?: number | string;
   line_total?: number | string;
   sku?: string;
+
+  min_quantity?: number | string;
+  box_quantity?: number | string;
+  case_quantity?: number | string;
+  step_quantity?: number | string;
+
+  min_quantity_number?: number;
+  box_quantity_number?: number;
+  case_quantity_number?: number;
+  step_quantity_number?: number;
 };
+
+type QuantityRule = {
+  minQuantity: number;
+  boxQuantity: number;
+  caseQuantity: number;
+  stepQuantity: number;
+  message: string;
+};
+
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function toPositiveInteger(value: unknown, fallback: number) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const floored = Math.floor(parsed);
+
+  return floored > 0 ? floored : fallback;
+}
+
+function toSafeMoneyNumber(value: unknown) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return parsed;
+}
+
+function getQuantityRule(item: CartItem): QuantityRule {
+  const minQuantity =
+    toPositiveInteger(item.min_quantity_number, 0) ||
+    toPositiveInteger(item.min_quantity, 0) ||
+    1;
+
+  const boxQuantity =
+    toPositiveInteger(item.box_quantity_number, 0) ||
+    toPositiveInteger(item.box_quantity, 0) ||
+    0;
+
+  const caseQuantity =
+    toPositiveInteger(item.case_quantity_number, 0) ||
+    toPositiveInteger(item.case_quantity, 0) ||
+    0;
+
+  const stepQuantity =
+    toPositiveInteger(item.step_quantity_number, 0) ||
+    toPositiveInteger(item.step_quantity, 0) ||
+    caseQuantity ||
+    boxQuantity ||
+    minQuantity ||
+    1;
+
+  let message = "";
+
+  if (caseQuantity > 0) {
+    message = `Case multiple: ${caseQuantity}`;
+  } else if (boxQuantity > 0) {
+    message = `Box multiple: ${boxQuantity}`;
+  } else if (stepQuantity > 1) {
+    message = `Step: ${stepQuantity}`;
+  } else if (minQuantity > 1) {
+    message = `Minimum: ${minQuantity}`;
+  }
+
+  return {
+    minQuantity,
+    boxQuantity,
+    caseQuantity,
+    stepQuantity,
+    message,
+  };
+}
+
+function normalizeQuantityToRule(quantity: number, rule: QuantityRule) {
+  const safeQuantity = Math.max(
+    rule.minQuantity,
+    Math.floor(Number(quantity) || rule.minQuantity)
+  );
+
+  const remainder = (safeQuantity - rule.minQuantity) % rule.stepQuantity;
+
+  if (remainder === 0) {
+    return safeQuantity;
+  }
+
+  return safeQuantity + (rule.stepQuantity - remainder);
+}
+
+function getCurrentQuantity(item: CartItem, rule: QuantityRule) {
+  const current = Math.floor(Number(item.quantity || rule.minQuantity));
+
+  if (!Number.isFinite(current) || current <= 0) {
+    return rule.minQuantity;
+  }
+
+  return normalizeQuantityToRule(current, rule);
+}
+
+function getNextDecreaseQuantity(quantity: number, rule: QuantityRule) {
+  const next = quantity - rule.stepQuantity;
+
+  if (next < rule.minQuantity) {
+    return rule.minQuantity;
+  }
+
+  return normalizeQuantityToRule(next, rule);
+}
+
+function getNextIncreaseQuantity(quantity: number, rule: QuantityRule) {
+  return normalizeQuantityToRule(quantity + rule.stepQuantity, rule);
+}
 
 function isTechnicalCartError(message: string) {
   const normalized = String(message || "").toLowerCase();
@@ -145,128 +273,16 @@ export default function CartPageClient() {
             </div>
 
             <div style={{ display: "grid" }}>
-              {items.map((item, index) => {
-                const quantity = Math.max(1, Number(item.quantity || 1));
-                const unitPrice = Number(item.unit_price || 0);
-                const lineTotal = Number(
-                  item.line_total || unitPrice * quantity || 0
-                );
-
-                return (
-                  <div
-                    key={item.id}
-                    className="cart-page-item"
-                    style={{
-                      ...cartItemStyle,
-                      borderTop:
-                        index === 0 ? "none" : "1px solid #f0e7db",
-                    }}
-                  >
-                    <div style={imageWrapStyle}>
-                      {item.image ? (
-                        <img
-                          src={item.image}
-                          alt={item.product_title || "Product"}
-                          loading="lazy"
-                          decoding="async"
-                          style={imageStyle}
-                        />
-                      ) : (
-                        <div style={placeholderStyle}>No Image</div>
-                      )}
-                    </div>
-
-                    <div style={contentStyle}>
-                      <div style={productTitleStyle}>
-                        {item.product_title || "Product"}
-                      </div>
-
-                      {item.variant_title ? (
-                        <div style={variantStyle}>{item.variant_title}</div>
-                      ) : null}
-
-                      {item.sku ? (
-                        <div style={skuStyle}>SKU: {item.sku}</div>
-                      ) : null}
-
-                      <div style={priceGridStyle}>
-                        <div>
-                          <div style={priceLabelStyle}>Unit Price</div>
-                          <div style={priceValueStyle}>
-                            {formatMoney(unitPrice)}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div style={priceLabelStyle}>Line Total</div>
-                          <div style={priceValueStyle}>
-                            {formatMoney(lineTotal)}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={actionsRowStyle}>
-                        <div style={quantityWrapStyle}>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              safelyUpdateQuantity(item.id, quantity - 1)
-                            }
-                            disabled={isUpdating}
-                            style={{
-                              ...qtyButtonStyle,
-                              cursor: isUpdating ? "not-allowed" : "pointer",
-                              opacity: isUpdating ? 0.65 : 1,
-                            }}
-                          >
-                            -
-                          </button>
-
-                          <span style={qtyValueStyle}>{quantity}</span>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              safelyUpdateQuantity(item.id, quantity + 1)
-                            }
-                            disabled={isUpdating}
-                            style={{
-                              ...qtyButtonStyle,
-                              cursor: isUpdating ? "not-allowed" : "pointer",
-                              opacity: isUpdating ? 0.65 : 1,
-                            }}
-                          >
-                            +
-                          </button>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => safelyRemoveItem(item.id)}
-                          disabled={isUpdating}
-                          style={{
-                            ...removeButtonStyle,
-                            cursor: isUpdating ? "not-allowed" : "pointer",
-                            opacity: isUpdating ? 0.65 : 1,
-                          }}
-                        >
-                          Remove item
-                        </button>
-                      </div>
-                    </div>
-
-                    <div
-                      className="cart-page-desktop-total"
-                      style={desktopLineTotalStyle}
-                    >
-                      <div style={priceLabelStyle}>Line Total</div>
-                      <div style={desktopLineTotalValueStyle}>
-                        {formatMoney(lineTotal)}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {items.map((item, index) => (
+                <CartPageItem
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  isUpdating={isUpdating}
+                  onUpdateQuantity={safelyUpdateQuantity}
+                  onRemoveItem={safelyRemoveItem}
+                />
+              ))}
             </div>
           </div>
 
@@ -348,6 +364,146 @@ export default function CartPageClient() {
           }
         }
       `}</style>
+    </div>
+  );
+}
+
+function CartPageItem({
+  item,
+  index,
+  isUpdating,
+  onUpdateQuantity,
+  onRemoveItem,
+}: {
+  item: CartItem;
+  index: number;
+  isUpdating: boolean;
+  onUpdateQuantity: (itemId: string, quantity: number) => Promise<void>;
+  onRemoveItem: (itemId: string) => Promise<void>;
+}) {
+  const quantityRule = useMemo(() => getQuantityRule(item), [item]);
+  const quantity = getCurrentQuantity(item, quantityRule);
+
+  const unitPrice = toSafeMoneyNumber(item.unit_price);
+  const lineTotal = toSafeMoneyNumber(item.line_total || unitPrice * quantity);
+  const imageUrl = normalizeText(item.image);
+
+  const nextDecreaseQuantity = getNextDecreaseQuantity(quantity, quantityRule);
+  const nextIncreaseQuantity = getNextIncreaseQuantity(quantity, quantityRule);
+
+  async function handleDecrease() {
+    if (quantity <= quantityRule.minQuantity) {
+      return;
+    }
+
+    await onUpdateQuantity(item.id, nextDecreaseQuantity);
+  }
+
+  async function handleIncrease() {
+    await onUpdateQuantity(item.id, nextIncreaseQuantity);
+  }
+
+  return (
+    <div
+      className="cart-page-item"
+      style={{
+        ...cartItemStyle,
+        borderTop: index === 0 ? "none" : "1px solid #f0e7db",
+      }}
+    >
+      <div style={imageWrapStyle}>
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={item.product_title || "Product"}
+            loading="lazy"
+            decoding="async"
+            style={imageStyle}
+          />
+        ) : (
+          <div style={placeholderStyle}>No Image</div>
+        )}
+      </div>
+
+      <div style={contentStyle}>
+        <div style={productTitleStyle}>{item.product_title || "Product"}</div>
+
+        {item.variant_title ? (
+          <div style={variantStyle}>{item.variant_title}</div>
+        ) : null}
+
+        {item.sku ? <div style={skuStyle}>SKU: {item.sku}</div> : null}
+
+        <div style={priceGridStyle}>
+          <div>
+            <div style={priceLabelStyle}>Unit Price</div>
+            <div style={priceValueStyle}>{formatMoney(unitPrice)}</div>
+          </div>
+
+          <div>
+            <div style={priceLabelStyle}>Line Total</div>
+            <div style={priceValueStyle}>{formatMoney(lineTotal)}</div>
+          </div>
+        </div>
+
+        <div style={quantityRuleStyle}>
+          Min: {quantityRule.minQuantity} · Step: {quantityRule.stepQuantity}
+          {quantityRule.message ? <> · {quantityRule.message}</> : null}
+        </div>
+
+        <div style={actionsRowStyle}>
+          <div style={quantityWrapStyle}>
+            <button
+              type="button"
+              onClick={handleDecrease}
+              disabled={isUpdating || quantity <= quantityRule.minQuantity}
+              style={{
+                ...qtyButtonStyle,
+                cursor:
+                  isUpdating || quantity <= quantityRule.minQuantity
+                    ? "not-allowed"
+                    : "pointer",
+                opacity: isUpdating || quantity <= quantityRule.minQuantity ? 0.65 : 1,
+              }}
+            >
+              -
+            </button>
+
+            <span style={qtyValueStyle}>{quantity}</span>
+
+            <button
+              type="button"
+              onClick={handleIncrease}
+              disabled={isUpdating}
+              style={{
+                ...qtyButtonStyle,
+                cursor: isUpdating ? "not-allowed" : "pointer",
+                opacity: isUpdating ? 0.65 : 1,
+              }}
+            >
+              +
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onRemoveItem(item.id)}
+            disabled={isUpdating}
+            style={{
+              ...removeButtonStyle,
+              cursor: isUpdating ? "not-allowed" : "pointer",
+              opacity: isUpdating ? 0.65 : 1,
+            }}
+          >
+            Remove item
+          </button>
+        </div>
+      </div>
+
+      <div className="cart-page-desktop-total" style={desktopLineTotalStyle}>
+        <div style={priceLabelStyle}>Line Total</div>
+        <div style={desktopLineTotalValueStyle}>{formatMoney(lineTotal)}</div>
+      </div>
     </div>
   );
 }
@@ -564,6 +720,14 @@ const priceValueStyle: React.CSSProperties = {
   color: "#171717",
   fontSize: 15,
   fontWeight: 800,
+};
+
+const quantityRuleStyle: React.CSSProperties = {
+  color: "#7b7367",
+  fontSize: 13,
+  lineHeight: 1.5,
+  fontWeight: 700,
+  marginBottom: 14,
 };
 
 const actionsRowStyle: React.CSSProperties = {

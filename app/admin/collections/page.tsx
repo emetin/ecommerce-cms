@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type CollectionItem = {
   id?: string;
@@ -32,7 +32,15 @@ export default function AdminCollectionsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
+  const didLoadRef = useRef(false);
+
   useEffect(() => {
+    if (didLoadRef.current) {
+      return;
+    }
+
+    didLoadRef.current = true;
+
     async function loadCollections() {
       try {
         setLoading(true);
@@ -41,13 +49,14 @@ export default function AdminCollectionsPage() {
         const response = await fetch("/api/collections/list", {
           cache: "no-store",
         });
+
         const data = await response.json();
 
         if (!response.ok || !data.ok) {
           throw new Error(data?.error || "Failed to load collections.");
         }
 
-        setItems(data.items || []);
+        setItems(Array.isArray(data.items) ? data.items : []);
       } catch (error) {
         setErrorMessage(
           error instanceof Error ? error.message : "An unknown error occurred."
@@ -97,18 +106,21 @@ export default function AdminCollectionsPage() {
           <Link href="/admin/collections/new" style={primaryButtonStyle}>
             + New Collection
           </Link>
+
           <a
             href="/api/collections/export?format=csv"
             style={secondaryButtonStyle}
           >
             Export CSV
           </a>
+
           <a
             href="/api/collections/export?format=json"
             style={secondaryButtonStyle}
           >
             Export JSON
           </a>
+
           <a
             href="/api/collections/export?format=xml"
             style={secondaryButtonStyle}
@@ -136,7 +148,7 @@ export default function AdminCollectionsPage() {
             <label style={labelStyle}>Search</label>
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(event) => setSearch(event.target.value)}
               placeholder="Search by title, slug, or description"
               style={inputStyle}
             />
@@ -146,7 +158,7 @@ export default function AdminCollectionsPage() {
             <label style={labelStyle}>Status</label>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(event) => setStatusFilter(event.target.value)}
               style={inputStyle}
             >
               <option value="all">all</option>
@@ -182,6 +194,7 @@ export default function AdminCollectionsPage() {
                   <th style={thStyle}>Actions</th>
                 </tr>
               </thead>
+
               <tbody>
                 {filteredItems.map((item, index) => (
                   <tr key={item.id || item.slug || index}>
@@ -199,6 +212,7 @@ export default function AdminCollectionsPage() {
                           <div style={{ fontWeight: 800 }}>
                             {item.title || "-"}
                           </div>
+
                           <div
                             style={{
                               color: "#6f6559",

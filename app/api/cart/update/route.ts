@@ -47,6 +47,17 @@ function getItemCaseQuantity(item: any) {
   );
 }
 
+function getItemStepQuantity(item: any) {
+  return (
+    toPositiveInteger(item?.step_quantity_number, 0) ||
+    toPositiveInteger(item?.step_quantity, 0) ||
+    getItemCaseQuantity(item) ||
+    getItemBoxQuantity(item) ||
+    getItemMinQuantity(item) ||
+    1
+  );
+}
+
 function jsonError(message: string, status: number) {
   return NextResponse.json(
     {
@@ -114,6 +125,7 @@ export async function POST(req: Request) {
       minQuantity: getItemMinQuantity(currentItem),
       boxQuantity: getItemBoxQuantity(currentItem),
       caseQuantity: getItemCaseQuantity(currentItem),
+      stepQuantity: getItemStepQuantity(currentItem),
     });
 
     const cart = await updateCartItemQuantity(
@@ -125,6 +137,15 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       cart,
+      quantity_rule: {
+        quantity: quantityRule.quantity,
+        min_quantity: quantityRule.minQuantity,
+        box_quantity: quantityRule.boxQuantity,
+        case_quantity: quantityRule.caseQuantity,
+        step_quantity: quantityRule.stepQuantity,
+        adjusted: quantityRule.adjusted,
+        message: quantityRule.message,
+      },
     });
   } catch (error) {
     return jsonError(

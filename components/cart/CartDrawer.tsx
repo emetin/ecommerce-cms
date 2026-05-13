@@ -26,6 +26,18 @@ type CartItem = {
   step_quantity_number?: number;
 };
 
+type QuantityRule = {
+  minQuantity: number;
+  boxQuantity: number;
+  caseQuantity: number;
+  stepQuantity: number;
+  message: string;
+};
+
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
 function toPositiveInteger(value: unknown, fallback: number) {
   const parsed = Number(value);
 
@@ -38,26 +50,98 @@ function toPositiveInteger(value: unknown, fallback: number) {
   return floored > 0 ? floored : fallback;
 }
 
-function getStepQuantity(item: CartItem) {
-  return (
-    toPositiveInteger(item.step_quantity_number, 0) ||
-    toPositiveInteger(item.step_quantity, 0) ||
-    toPositiveInteger(item.case_quantity_number, 0) ||
-    toPositiveInteger(item.case_quantity, 0) ||
-    toPositiveInteger(item.box_quantity_number, 0) ||
-    toPositiveInteger(item.box_quantity, 0) ||
-    toPositiveInteger(item.min_quantity_number, 0) ||
-    toPositiveInteger(item.min_quantity, 0) ||
-    1
-  );
+function toSafeMoneyNumber(value: unknown) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return parsed;
 }
 
-function getMinQuantity(item: CartItem) {
-  return (
+function getQuantityRule(item: CartItem): QuantityRule {
+  const minQuantity =
     toPositiveInteger(item.min_quantity_number, 0) ||
     toPositiveInteger(item.min_quantity, 0) ||
-    1
+    1;
+
+  const boxQuantity =
+    toPositiveInteger(item.box_quantity_number, 0) ||
+    toPositiveInteger(item.box_quantity, 0) ||
+    0;
+
+  const caseQuantity =
+    toPositiveInteger(item.case_quantity_number, 0) ||
+    toPositiveInteger(item.case_quantity, 0) ||
+    0;
+
+  const stepQuantity =
+    toPositiveInteger(item.step_quantity_number, 0) ||
+    toPositiveInteger(item.step_quantity, 0) ||
+    caseQuantity ||
+    boxQuantity ||
+    minQuantity ||
+    1;
+
+  let message = "";
+
+  if (caseQuantity > 0) {
+    message = `Case multiple: ${caseQuantity}`;
+  } else if (boxQuantity > 0) {
+    message = `Box multiple: ${boxQuantity}`;
+  } else if (stepQuantity > 1) {
+    message = `Step: ${stepQuantity}`;
+  } else if (minQuantity > 1) {
+    message = `Minimum: ${minQuantity}`;
+  }
+
+  return {
+    minQuantity,
+    boxQuantity,
+    caseQuantity,
+    stepQuantity,
+    message,
+  };
+}
+
+function normalizeQuantityToRule(quantity: number, rule: QuantityRule) {
+  const safeQuantity = Math.max(
+    rule.minQuantity,
+    Math.floor(Number(quantity) || rule.minQuantity)
   );
+
+  const remainder = (safeQuantity - rule.minQuantity) % rule.stepQuantity;
+
+  if (remainder === 0) {
+    return safeQuantity;
+  }
+
+  return safeQuantity + (rule.stepQuantity - remainder);
+}
+
+function getCurrentQuantity(item: CartItem, rule: QuantityRule) {
+  const current = Math.floor(Number(item.quantity || rule.minQuantity));
+
+  if (!Number.isFinite(current) || current <= 0) {
+    return rule.minQuantity;
+  }
+
+  return normalizeQuantityToRule(current, rule);
+}
+
+function getNextDecreaseQuantity(quantity: number, rule: QuantityRule) {
+  const next = quantity - rule.stepQuantity;
+
+  if (next < rule.minQuantity) {
+    return rule.minQuantity;
+  }
+
+  return normalizeQuantityToRule(next, rule);
+}
+
+function getNextIncreaseQuantity(quantity: number, rule: QuantityRule) {
+  return normalizeQuantityToRule(quantity + rule.stepQuantity, rule);
 }
 
 function isTechnicalCartError(message: string) {
@@ -99,30 +183,30 @@ function CartDrawerComponent() {
 
   async function safelyClearCart() {
     try {
+      clearError();
       await handleClearCart();
     } catch {
       // Shared cart error is rendered inside drawer.
     }
   }
 
+  function closeCartDrawer() {
+    clearError();
+    closeDrawer();
+  }
+
   return (
     <>
-      {isDrawerOpen ? (
-        <div
-          onClick={() => {
-            clearError();
-            closeDrawer();
-          }}
-          style={overlayStyle}
-        />
-      ) : null}
+      {isDrawerOpen ? <div onClick={closeCartDrawer} style={overlayStyle} /> : null}
 
       <aside
         style={{
           ...drawerStyle,
           transform: isDrawerOpen ? "translateX(0)" : "translateX(100%)",
+          pointerEvents: isDrawerOpen ? "auto" : "none",
         }}
         aria-hidden={!isDrawerOpen}
+        aria-label="Quote cart drawer"
       >
         <div style={headerStyle}>
           <div>
@@ -135,10 +219,7 @@ function CartDrawerComponent() {
 
           <button
             type="button"
-            onClick={() => {
-              clearError();
-              closeDrawer();
-            }}
+            onClick={closeCartDrawer}
             aria-label="Close quote cart"
             style={closeButtonStyle}
           >
@@ -156,14 +237,7 @@ function CartDrawerComponent() {
                 catalog to start a wholesale request.
               </p>
 
-              <Link
-                href="/collections"
-                onClick={() => {
-                  clearError();
-                  closeDrawer();
-                }}
-                style={emptyLinkStyle}
-              >
+              <Link href="/collections" onClick={closeCartDrawer} style={emptyLinkStyle}>
                 Browse Collections
               </Link>
             </div>
@@ -176,6 +250,7 @@ function CartDrawerComponent() {
                   isUpdating={isUpdating}
                   onUpdateQuantity={handleUpdateQuantity}
                   onRemoveItem={handleRemoveItem}
+                  clearError={clearError}
                 />
               ))}
             </div>
@@ -201,31 +276,17 @@ function CartDrawerComponent() {
           </div>
 
           <div style={{ display: "grid", gap: 10 }}>
-            <Link
-              href="/cart"
-              onClick={() => {
-                clearError();
-                closeDrawer();
-              }}
-              style={secondaryLinkStyle}
-            >
+            <Link href="/cart" onClick={closeCartDrawer} style={secondaryLinkStyle}>
               View Quote Cart
             </Link>
 
-            {!!items.length ? (
-              <Link
-                href="/checkout"
-                onClick={() => {
-                  clearError();
-                  closeDrawer();
-                }}
-                style={primaryLinkStyle}
-              >
+            {items.length ? (
+              <Link href="/checkout" onClick={closeCartDrawer} style={primaryLinkStyle}>
                 Submit Quote Request
               </Link>
             ) : null}
 
-            {!!items.length ? (
+            {items.length ? (
               <button
                 type="button"
                 onClick={safelyClearCart}
@@ -251,23 +312,33 @@ function CartDrawerItemComponent({
   isUpdating,
   onUpdateQuantity,
   onRemoveItem,
+  clearError,
 }: {
   item: CartItem;
   isUpdating: boolean;
   onUpdateQuantity: (itemId: string, quantity: number) => Promise<void>;
   onRemoveItem: (itemId: string) => Promise<void>;
+  clearError: () => void;
 }) {
-  const quantity = Math.max(1, Number(item.quantity || 1));
-  const minQuantity = getMinQuantity(item);
-  const stepQuantity = getStepQuantity(item);
-  const itemPrice = Number(item.unit_price || 0);
-  const lineTotal = Number(item.line_total || itemPrice * quantity || 0);
+  const quantityRule = useMemo(() => getQuantityRule(item), [item]);
+  const quantity = getCurrentQuantity(item, quantityRule);
 
-  const nextDecreaseQuantity =
-    quantity - stepQuantity < minQuantity ? 0 : quantity - stepQuantity;
+  const itemPrice = toSafeMoneyNumber(item.unit_price);
+  const lineTotal = toSafeMoneyNumber(item.line_total || itemPrice * quantity);
+
+  const imageUrl = normalizeText(item.image);
+
+  const nextDecreaseQuantity = getNextDecreaseQuantity(quantity, quantityRule);
+  const nextIncreaseQuantity = getNextIncreaseQuantity(quantity, quantityRule);
 
   async function safelyUpdateQuantity(nextQuantity: number) {
     try {
+      clearError();
+
+      if (nextQuantity === quantity) {
+        return;
+      }
+
       await onUpdateQuantity(item.id, nextQuantity);
     } catch {
       // Shared cart error is rendered by drawer parent.
@@ -276,6 +347,7 @@ function CartDrawerItemComponent({
 
   async function safelyRemoveItem() {
     try {
+      clearError();
       await onRemoveItem(item.id);
     } catch {
       // Shared cart error is rendered by drawer parent.
@@ -285,9 +357,9 @@ function CartDrawerItemComponent({
   return (
     <div style={itemWrapStyle}>
       <div style={imageWrapStyle}>
-        {item.image ? (
+        {imageUrl ? (
           <img
-            src={item.image}
+            src={imageUrl}
             alt={item.product_title || "Product"}
             loading="lazy"
             decoding="async"
@@ -314,18 +386,22 @@ function CartDrawerItemComponent({
         </div>
 
         <div style={ruleTextStyle}>
-          Min: {minQuantity} · Step: {stepQuantity}
+          Min: {quantityRule.minQuantity} · Step: {quantityRule.stepQuantity}
+          {quantityRule.message ? <> · {quantityRule.message}</> : null}
         </div>
 
         <div style={quantityRowStyle}>
           <button
             type="button"
             onClick={() => safelyUpdateQuantity(nextDecreaseQuantity)}
-            disabled={isUpdating}
+            disabled={isUpdating || quantity <= quantityRule.minQuantity}
             style={{
               ...qtyButtonStyle,
-              opacity: isUpdating ? 0.65 : 1,
-              cursor: isUpdating ? "not-allowed" : "pointer",
+              opacity: isUpdating || quantity <= quantityRule.minQuantity ? 0.65 : 1,
+              cursor:
+                isUpdating || quantity <= quantityRule.minQuantity
+                  ? "not-allowed"
+                  : "pointer",
             }}
           >
             -
@@ -335,7 +411,7 @@ function CartDrawerItemComponent({
 
           <button
             type="button"
-            onClick={() => safelyUpdateQuantity(quantity + stepQuantity)}
+            onClick={() => safelyUpdateQuantity(nextIncreaseQuantity)}
             disabled={isUpdating}
             style={{
               ...qtyButtonStyle,

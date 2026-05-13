@@ -91,6 +91,7 @@ export default function AdminProductImagesPage({
 
   const createInputRef = useRef<HTMLInputElement | null>(null);
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
+  const hasLoadedInitialDataRef = useRef(false);
 
   const sortedItems = useMemo(() => sortImages(items), [items]);
 
@@ -134,6 +135,9 @@ export default function AdminProductImagesPage({
   }, [slug]);
 
   useEffect(() => {
+    if (hasLoadedInitialDataRef.current) return;
+
+    hasLoadedInitialDataRef.current = true;
     loadPage();
   }, [loadPage]);
 

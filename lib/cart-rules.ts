@@ -29,7 +29,7 @@ function toPositiveInteger(value: unknown, fallback: number) {
 }
 
 function getQuantityRule(input: QuantityRuleInput) {
-  const minQuantity = toPositiveInteger(input.minQuantity, 1);
+  const rawMinQuantity = toPositiveInteger(input.minQuantity, 1);
   const boxQuantity = toPositiveInteger(input.boxQuantity, 0);
   const caseQuantity = toPositiveInteger(input.caseQuantity, 0);
 
@@ -37,8 +37,15 @@ function getQuantityRule(input: QuantityRuleInput) {
     toPositiveInteger(input.stepQuantity, 0) ||
     caseQuantity ||
     boxQuantity ||
-    minQuantity ||
+    rawMinQuantity ||
     1;
+
+  const minQuantity =
+    caseQuantity > 0
+      ? Math.max(rawMinQuantity, caseQuantity)
+      : boxQuantity > 0
+        ? Math.max(rawMinQuantity, boxQuantity)
+        : rawMinQuantity;
 
   return {
     minQuantity,
@@ -60,23 +67,29 @@ function normalizeQuantity(quantity: unknown, fallback: number) {
   return floored > 0 ? floored : fallback;
 }
 
-function isValidStepQuantity(quantity: number, rule: {
-  minQuantity: number;
-  stepQuantity: number;
-}) {
+function isValidStepQuantity(
+  quantity: number,
+  rule: {
+    minQuantity: number;
+    stepQuantity: number;
+  }
+) {
   if (quantity < rule.minQuantity) {
     return false;
   }
 
-  return (quantity - rule.minQuantity) % rule.stepQuantity === 0;
+  return quantity % rule.stepQuantity === 0;
 }
 
-function adjustQuantityToRule(quantity: number, rule: {
-  minQuantity: number;
-  stepQuantity: number;
-}) {
+function adjustQuantityToRule(
+  quantity: number,
+  rule: {
+    minQuantity: number;
+    stepQuantity: number;
+  }
+) {
   const baseQuantity = Math.max(quantity, rule.minQuantity);
-  const remainder = (baseQuantity - rule.minQuantity) % rule.stepQuantity;
+  const remainder = baseQuantity % rule.stepQuantity;
 
   if (remainder === 0) {
     return baseQuantity;

@@ -47,6 +47,7 @@ function matchesQuery(item: ProductItem, query: string) {
 function compareByUpdatedAtDesc(a: ProductItem, b: ProductItem) {
   const aUpdated = normalizeText(a.updated_at);
   const bUpdated = normalizeText(b.updated_at);
+
   return bUpdated.localeCompare(aUpdated);
 }
 
@@ -80,9 +81,15 @@ export async function GET(req: Request) {
       );
     }
 
+    /*
+      Performance fix:
+      Previously this endpoint used forceFresh: true and ttlSeconds: 0.
+      That forced a fresh Google Sheets request on every admin/products load.
+      60 seconds cache is safer and much faster for list pages.
+      Sheet write operations already invalidate cache from lib/sheets.ts.
+    */
     const products = (await getSheetData(SHEET_NAME, {
-      forceFresh: true,
-      ttlSeconds: 0,
+      ttlSeconds: 60,
     })) as ProductItem[];
 
     let items = products.filter((item) => item && normalizeLower(item.slug));
@@ -118,7 +125,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+          "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
         },
       }
     );

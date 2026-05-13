@@ -61,6 +61,8 @@ export type ResolvedCartCatalogItem = {
   stepQuantity: number;
 };
 
+const CATALOG_LOOKUP_TTL_SECONDS = 60;
+
 function normalize(value?: string | number | null) {
   return String(value ?? "").trim();
 }
@@ -138,7 +140,10 @@ export async function resolveCartCatalogItem(
     "products",
     "slug",
     normalizedProductSlug,
-    { forceFresh: true, ttlSeconds: 0 }
+    {
+      forceFresh: false,
+      ttlSeconds: CATALOG_LOOKUP_TTL_SECONDS,
+    }
   );
 
   const product = productRaw as CatalogProduct | null;
@@ -155,7 +160,10 @@ export async function resolveCartCatalogItem(
     "product_variants",
     "product_slug",
     normalizedProductSlug,
-    { forceFresh: true, ttlSeconds: 0 }
+    {
+      forceFresh: false,
+      ttlSeconds: CATALOG_LOOKUP_TTL_SECONDS,
+    }
   );
 
   const variants = (variantsRaw as CatalogVariant[]) || [];

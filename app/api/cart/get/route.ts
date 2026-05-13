@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCartTokenFromCookies } from "../../../../lib/cart-cookie";
-import { getHydratedCartByToken, syncCartTotals } from "../../../../lib/cart";
+import { getHydratedCartByToken } from "../../../../lib/cart";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json(
@@ -47,19 +47,17 @@ export async function GET() {
       });
     }
 
-    try {
-      const synced = await syncCartTotals(hydrated.cart.id);
-
-      return NextResponse.json({
-        ok: true,
-        cart: synced,
-      });
-    } catch {
-      return NextResponse.json({
+    return NextResponse.json(
+      {
         ok: true,
         cart: hydrated,
-      });
-    }
+      },
+      {
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
+      }
+    );
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Failed to get cart.",

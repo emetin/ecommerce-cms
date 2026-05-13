@@ -4,6 +4,7 @@ import { getSheetData } from "../../../../lib/sheets";
 type CollectionItem = Record<string, string>;
 
 const ALLOWED_STATUS = ["published", "draft", "archived"];
+const COLLECTIONS_TTL_SECONDS = 300;
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -13,42 +14,47 @@ function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
+function toCollectionItem(item: CollectionItem) {
+  return {
+    id: normalizeText(item.id),
+    title: normalizeText(item.title),
+    slug: normalizeText(item.slug),
+    description: normalizeText(item.description),
+    image: normalizeText(item.image),
+    status: normalizeText(item.status),
+    created_at: normalizeText(item.created_at),
+    updated_at: normalizeText(item.updated_at),
+  };
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-
     const statusParam = normalizeLower(searchParams.get("status"));
 
-    /*
-      Performance fix:
-      getSheetData already uses cache when forceFresh is not enabled.
-      We keep the same behavior but explicitly set a 60-second TTL for clarity.
-    */
-    const collections = (await getSheetData("collections", {
-      ttlSeconds: 60,
-    })) as CollectionItem[];
-
-    let items = collections.filter((item) => item && item.slug);
-
-    if (statusParam) {
-      if (!ALLOWED_STATUS.includes(statusParam)) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: "Invalid status filter.",
-          },
-          { status: 400 }
-        );
-      }
-
-      items = items.filter(
-        (item) => normalizeLower(item.status) === statusParam
+    if (statusParam && !ALLOWED_STATUS.includes(statusParam)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid status filter.",
+        },
+        { status: 400 }
       );
     }
 
-    items = items.sort((a, b) =>
-      normalizeText(a.title).localeCompare(normalizeText(b.title))
-    );
+    const collections = (await getSheetData("collections", {
+      ttlSeconds: COLLECTIONS_TTL_SECONDS,
+    })) as CollectionItem[];
+
+    let items = collections.filter((item) => item && normalizeText(item.slug));
+
+    if (statusParam) {
+      items = items.filter((item) => normalizeLower(item.status) === statusParam);
+    }
+
+    items = items
+      .map(toCollectionItem)
+      .sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
 
     return NextResponse.json(
       {
@@ -58,7 +64,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+          "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
         },
       }
     );
@@ -67,9 +73,7 @@ export async function GET(req: Request) {
       {
         ok: false,
         error:
-          error instanceof Error
-            ? error.message
-            : "Failed to fetch collections.",
+          error instanceof Error ? error.message : "Failed to fetch collections.",
       },
       { status: 500 }
     );

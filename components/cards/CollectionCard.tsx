@@ -1,4 +1,3 @@
-import { memo } from "react";
 import Link from "next/link";
 
 type CollectionCardProps = {
@@ -17,7 +16,7 @@ function getSafeImageSrc(value?: string) {
   return src || FALLBACK_IMAGE;
 }
 
-function CollectionCardComponent({
+export default function CollectionCard({
   title,
   description,
   image,
@@ -45,8 +44,6 @@ function CollectionCardComponent({
           border: "1px solid #e5dbcf",
           background: "#fff",
           boxShadow: "0 8px 22px rgba(23,23,23,0.035)",
-          transition: "transform 180ms ease, box-shadow 180ms ease",
-          willChange: "transform",
         }}
       >
         <div
@@ -172,5 +169,3 @@ function CollectionCardComponent({
     </Link>
   );
 }
-
-export default memo(CollectionCardComponent);

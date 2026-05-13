@@ -1,4 +1,4 @@
-import { memo } from "react";
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { normalizeImageUrl } from "../../lib/image-url";
 
@@ -16,7 +16,15 @@ type ProductCardProps = {
 const FALLBACK_IMAGE =
   "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1200&q=80";
 
-function ProductCardComponent({
+function getSafeText(value?: string) {
+  return String(value || "").trim();
+}
+
+function getSafeImageSrc(value?: string) {
+  return normalizeImageUrl(getSafeText(value)) || FALLBACK_IMAGE;
+}
+
+export default function ProductCard({
   title,
   description,
   image,
@@ -26,8 +34,8 @@ function ProductCardComponent({
   productCategory,
   prefetch = false,
 }: ProductCardProps) {
-  const finalImage =
-    normalizeImageUrl(String(image || "").trim()) || FALLBACK_IMAGE;
+  const finalImage = getSafeImageSrc(image);
+  const hasBadges = Boolean(collectionLabel || vendor || productCategory);
 
   return (
     <Link
@@ -48,8 +56,6 @@ function ProductCardComponent({
           border: "1px solid #e5dbcf",
           background: "#fff",
           boxShadow: "0 8px 22px rgba(23,23,23,0.035)",
-          transition: "transform 180ms ease, box-shadow 180ms ease",
-          willChange: "transform",
         }}
       >
         <div
@@ -82,7 +88,7 @@ function ProductCardComponent({
             minHeight: 210,
           }}
         >
-          {collectionLabel || vendor || productCategory ? (
+          {hasBadges ? (
             <div
               style={{
                 display: "flex",
@@ -177,7 +183,7 @@ function ProductCardComponent({
   );
 }
 
-const badgeStyle: React.CSSProperties = {
+const badgeStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   minHeight: 28,
@@ -191,7 +197,7 @@ const badgeStyle: React.CSSProperties = {
   textTransform: "uppercase",
 };
 
-const badgeStyleAlt: React.CSSProperties = {
+const badgeStyleAlt: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   minHeight: 28,
@@ -204,5 +210,3 @@ const badgeStyleAlt: React.CSSProperties = {
   letterSpacing: "0.04em",
   textTransform: "uppercase",
 };
-
-export default memo(ProductCardComponent);

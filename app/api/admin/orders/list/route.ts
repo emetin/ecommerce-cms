@@ -1,10 +1,19 @@
 import { NextResponse } from "next/server";
 import { getAllOrders } from "../../../../../lib/order";
-import { verifyAdminSessionToken } from "../../../../../lib/admin-auth";
+import {
+  ADMIN_COOKIE_NAME,
+  verifyAdminSessionToken,
+} from "../../../../../lib/admin-auth";
 import { toNumber } from "../../../../../lib/money";
 
-function parseAdminTokenFromCookie(cookieHeader: string) {
-  const match = cookieHeader.match(/ptx_admin_auth=([^;]+)/);
+const ORDERS_TTL_SECONDS = 300;
+
+function parseCookieValue(cookieHeader: string, cookieName: string) {
+  const escapedCookieName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = cookieHeader.match(
+    new RegExp(`(?:^|;\\s*)${escapedCookieName}=([^;]+)`)
+  );
+
   return match ? decodeURIComponent(match[1]) : null;
 }
 
@@ -19,7 +28,7 @@ function normalizeEmail(value: unknown) {
 export async function GET(req: Request) {
   try {
     const cookieHeader = req.headers.get("cookie") || "";
-    const token = parseAdminTokenFromCookie(cookieHeader);
+    const token = parseCookieValue(cookieHeader, ADMIN_COOKIE_NAME);
     const isAdmin = await verifyAdminSessionToken(token);
 
     if (!isAdmin) {
@@ -29,7 +38,10 @@ export async function GET(req: Request) {
       );
     }
 
-    const orders = await getAllOrders();
+    const orders = await getAllOrders({
+      forceFresh: false,
+      ttlSeconds: ORDERS_TTL_SECONDS,
+    });
 
     const items = orders.map((order) => ({
       id: normalizeText(order.id),
@@ -64,18 +76,22 @@ export async function GET(req: Request) {
       updated_at: normalizeText(order.updated_at),
     }));
 
-    return NextResponse.json({
-      ok: true,
-      total: items.length,
-      items,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        total: items.length,
+        items,
+      },
+      {
+        headers: {
+          "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
+        },
+      }
+    );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to load orders.";
 
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

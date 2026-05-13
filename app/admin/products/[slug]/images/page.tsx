@@ -61,6 +61,17 @@ function sortImages(items: ProductImageItem[]) {
   });
 }
 
+function getLoadUrl(slug: string, forceFresh = false) {
+  const url = new URL("/api/admin/products/image-manager", window.location.origin);
+  url.searchParams.set("slug", slug);
+
+  if (forceFresh) {
+    url.searchParams.set("t", String(Date.now()));
+  }
+
+  return url.toString();
+}
+
 export default function AdminProductImagesPage({
   params,
 }: {
@@ -95,44 +106,34 @@ export default function AdminProductImagesPage({
 
   const sortedItems = useMemo(() => sortImages(items), [items]);
 
-  const loadPage = useCallback(async () => {
-    try {
-      setLoading(true);
-      setPageError("");
+  const loadPage = useCallback(
+    async (options?: { forceFresh?: boolean }) => {
+      try {
+        setLoading(true);
+        setPageError("");
 
-      const [productResponse, imagesResponse] = await Promise.all([
-        fetch(`/api/products/get?slug=${encodeURIComponent(slug)}`, {
-          cache: "no-store",
-        }),
-        fetch(
-          `/api/product-images/list?product_slug=${encodeURIComponent(slug)}`,
-          {
-            cache: "no-store",
-          }
-        ),
-      ]);
+        const response = await fetch(getLoadUrl(slug, options?.forceFresh), {
+          credentials: "same-origin",
+        });
 
-      const productData = await productResponse.json();
-      const imagesData = await imagesResponse.json();
+        const data = await response.json();
 
-      if (!productResponse.ok || !productData.ok) {
-        throw new Error(productData?.error || "Failed to load product.");
+        if (!response.ok || !data.ok) {
+          throw new Error(data?.error || "Failed to load image manager data.");
+        }
+
+        setProduct(data.product || null);
+        setItems(Array.isArray(data.images) ? data.images : []);
+      } catch (error) {
+        setPageError(
+          error instanceof Error ? error.message : "An unknown error occurred."
+        );
+      } finally {
+        setLoading(false);
       }
-
-      if (!imagesResponse.ok || !imagesData.ok) {
-        throw new Error(imagesData?.error || "Failed to load product images.");
-      }
-
-      setProduct(productData.item || null);
-      setItems(Array.isArray(imagesData.items) ? imagesData.items : []);
-    } catch (error) {
-      setPageError(
-        error instanceof Error ? error.message : "An unknown error occurred."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [slug]);
+    },
+    [slug]
+  );
 
   useEffect(() => {
     if (hasLoadedInitialDataRef.current) return;
@@ -140,6 +141,10 @@ export default function AdminProductImagesPage({
     hasLoadedInitialDataRef.current = true;
     loadPage();
   }, [loadPage]);
+
+  async function refreshAfterMutation() {
+    await loadPage({ forceFresh: true });
+  }
 
   async function uploadToStorage(file: File, altText = "") {
     const formData = new FormData();
@@ -164,9 +169,7 @@ export default function AdminProductImagesPage({
     return uploadData;
   }
 
-  async function handleCreateImage(
-    e: React.ChangeEvent<HTMLInputElement>
-  ) {
+  async function handleCreateImage(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
@@ -225,7 +228,7 @@ export default function AdminProductImagesPage({
           : `${files.length} gallery images added successfully.`
       );
 
-      await loadPage();
+      await refreshAfterMutation();
     } catch (error) {
       setUploadError(
         error instanceof Error ? error.message : "Failed to add gallery images."
@@ -238,9 +241,7 @@ export default function AdminProductImagesPage({
     }
   }
 
-  async function handleReplaceImage(
-    e: React.ChangeEvent<HTMLInputElement>
-  ) {
+  async function handleReplaceImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !replacingId) return;
 
@@ -303,7 +304,7 @@ export default function AdminProductImagesPage({
       }
 
       setResultMessage("Gallery image replaced successfully.");
-      await loadPage();
+      await refreshAfterMutation();
     } catch (error) {
       setUploadError(
         error instanceof Error ? error.message : "Failed to replace gallery image."
@@ -347,7 +348,7 @@ export default function AdminProductImagesPage({
       }
 
       setResultMessage("Gallery image deleted successfully.");
-      await loadPage();
+      await refreshAfterMutation();
     } catch (error) {
       setResultError(
         error instanceof Error ? error.message : "Failed to delete gallery image."
@@ -387,7 +388,7 @@ export default function AdminProductImagesPage({
       }
 
       setResultMessage("Gallery image updated successfully.");
-      await loadPage();
+      await refreshAfterMutation();
     } catch (error) {
       setResultError(
         error instanceof Error ? error.message : "Failed to update gallery image."
@@ -435,7 +436,7 @@ export default function AdminProductImagesPage({
       }
 
       setResultMessage("Main image updated successfully.");
-      await loadPage();
+      await refreshAfterMutation();
     } catch (error) {
       setResultError(
         error instanceof Error ? error.message : "Failed to set main image."
@@ -467,7 +468,7 @@ export default function AdminProductImagesPage({
         throw new Error(data?.error || "Failed to fix image alt texts.");
       }
 
-      await loadPage();
+      await refreshAfterMutation();
       setResultMessage(data?.message || "Image alt texts fixed successfully.");
     } catch (error) {
       setResultError(

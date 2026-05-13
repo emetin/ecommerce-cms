@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSheetData } from "../../../../../lib/sheets";
-import { verifyAdminSessionToken } from "../../../../../lib/admin-auth";
+import {
+  ADMIN_COOKIE_NAME,
+  verifyAdminSessionToken,
+} from "../../../../../lib/admin-auth";
 
 type ProductRecord = Record<string, string>;
 
@@ -18,8 +21,13 @@ type ProductImageRecord = {
 };
 
 const ALLOWED_STATUS = ["published", "draft", "archived"] as const;
+
 const PRODUCTS_SHEET_NAME = "products";
 const PRODUCT_IMAGES_SHEET_NAME = "product_images";
+
+const DASHBOARD_TTL_SECONDS = 300;
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -38,8 +46,12 @@ function toSafeOrder(value: unknown) {
   return Number.isFinite(num) ? num : 999999;
 }
 
-function parseAdminTokenFromCookie(cookieHeader: string) {
-  const match = cookieHeader.match(/ptx_admin_auth=([^;]+)/);
+function parseCookieValue(cookieHeader: string, cookieName: string) {
+  const escapedCookieName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = cookieHeader.match(
+    new RegExp(`(?:^|;\\s*)${escapedCookieName}=([^;]+)`)
+  );
+
   return match ? decodeURIComponent(match[1]) : null;
 }
 
@@ -79,13 +91,18 @@ function sortImages(images: ProductImageRecord[]) {
   });
 }
 
-function buildImageMap(images: ProductImageRecord[]) {
+function buildImageMapForVisibleProducts(
+  images: ProductImageRecord[],
+  visibleProductSlugs: Set<string>
+) {
   const map = new Map<string, ProductImageRecord[]>();
 
   images.forEach((image) => {
     const slug = normalizeLower(image.product_slug);
 
-    if (!slug) return;
+    if (!slug || !visibleProductSlugs.has(slug)) {
+      return;
+    }
 
     if (!map.has(slug)) {
       map.set(slug, []);
@@ -101,13 +118,10 @@ function buildImageMap(images: ProductImageRecord[]) {
   return map;
 }
 
-function buildGalleryState(
+function getGalleryStateFromImages(
   product: ProductRecord,
-  imageMap: Map<string, ProductImageRecord[]>
+  images: ProductImageRecord[]
 ) {
-  const slug = normalizeLower(product.slug);
-  const images = imageMap.get(slug) || [];
-
   const mainImage = images.find((item) => isTrue(item.is_main)) || null;
   const firstImage = images[0] || null;
   const altCount = images.filter((item) => normalizeText(item.alt_text)).length;
@@ -156,7 +170,9 @@ function toDashboardItem(
   product: ProductRecord,
   imageMap: Map<string, ProductImageRecord[]>
 ) {
-  const gallery = buildGalleryState(product, imageMap);
+  const slug = normalizeLower(product.slug);
+  const images = imageMap.get(slug) || [];
+  const gallery = getGalleryStateFromImages(product, images);
 
   return {
     id: normalizeText(product.id),
@@ -178,10 +194,65 @@ function toDashboardItem(
   };
 }
 
+function getBasicSummary(products: ProductRecord[]) {
+  return products.reduce(
+    (acc, item) => {
+      const status = normalizeLower(item.status);
+
+      if (status === "published") {
+        acc.publishedCount += 1;
+      }
+
+      if (status === "draft") {
+        acc.draftCount += 1;
+      }
+
+      return acc;
+    },
+    {
+      publishedCount: 0,
+      draftCount: 0,
+    }
+  );
+}
+
+function getGallerySummary(items: ReturnType<typeof toDashboardItem>[]) {
+  return items.reduce(
+    (acc, item) => {
+      if (item.gallery_image_count === 0) {
+        acc.missingGallery += 1;
+      }
+
+      if (item.gallery_image_count > 0 && !item.gallery_main_image_exists) {
+        acc.missingMainImage += 1;
+      }
+
+      if (
+        item.gallery_image_count > 0 &&
+        item.gallery_alt_count < item.gallery_image_count
+      ) {
+        acc.missingAltText += 1;
+      }
+
+      if (item.gallery_image_count > 0 && item.gallery_image_count < 3) {
+        acc.lowImageCount += 1;
+      }
+
+      return acc;
+    },
+    {
+      missingGallery: 0,
+      missingMainImage: 0,
+      missingAltText: 0,
+      lowImageCount: 0,
+    }
+  );
+}
+
 export async function GET(req: Request) {
   try {
     const cookieHeader = req.headers.get("cookie") || "";
-    const token = parseAdminTokenFromCookie(cookieHeader);
+    const token = parseCookieValue(cookieHeader, ADMIN_COOKIE_NAME);
     const isAdmin = await verifyAdminSessionToken(token);
 
     if (!isAdmin) {
@@ -196,13 +267,13 @@ export async function GET(req: Request) {
     const statusParam = normalizeLower(searchParams.get("status"));
     const queryParam = normalizeLower(searchParams.get("q"));
 
-    const limitParam = Number(searchParams.get("limit") || "50");
+    const limitParam = Number(searchParams.get("limit") || DEFAULT_LIMIT);
     const pageParam = Number(searchParams.get("page") || "1");
 
     const limit =
       Number.isFinite(limitParam) && limitParam > 0
-        ? Math.min(limitParam, 200)
-        : 50;
+        ? Math.min(limitParam, MAX_LIMIT)
+        : DEFAULT_LIMIT;
 
     const page = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
 
@@ -216,16 +287,9 @@ export async function GET(req: Request) {
       );
     }
 
-    const [products, productImages] = await Promise.all([
-      getSheetData(PRODUCTS_SHEET_NAME, {
-        ttlSeconds: 60,
-      }) as Promise<ProductRecord[]>,
-      getSheetData(PRODUCT_IMAGES_SHEET_NAME, {
-        ttlSeconds: 60,
-      }) as Promise<ProductImageRecord[]>,
-    ]);
-
-    const imageMap = buildImageMap(productImages);
+    const products = (await getSheetData(PRODUCTS_SHEET_NAME, {
+      ttlSeconds: DASHBOARD_TTL_SECONDS,
+    })) as ProductRecord[];
 
     let filteredProducts = products.filter(
       (item) => item && normalizeLower(item.slug)
@@ -252,58 +316,30 @@ export async function GET(req: Request) {
     const end = start + limit;
 
     const paginatedProducts = filteredProducts.slice(start, end);
+
+    const visibleProductSlugs = new Set(
+      paginatedProducts
+        .map((product) => normalizeLower(product.slug))
+        .filter(Boolean)
+    );
+
+    const productImages = visibleProductSlugs.size
+      ? ((await getSheetData(PRODUCT_IMAGES_SHEET_NAME, {
+          ttlSeconds: DASHBOARD_TTL_SECONDS,
+        })) as ProductImageRecord[])
+      : [];
+
+    const imageMap = buildImageMapForVisibleProducts(
+      productImages,
+      visibleProductSlugs
+    );
+
     const items = paginatedProducts.map((product) =>
       toDashboardItem(product, imageMap)
     );
 
-    const summary = items.reduce(
-      (acc, item) => {
-        const status = normalizeLower(item.status);
-
-        if (status === "published") {
-          acc.publishedCount += 1;
-        }
-
-        if (status === "draft") {
-          acc.draftCount += 1;
-        }
-
-        if (item.gallery_image_count === 0) {
-          acc.missingGallery += 1;
-        }
-
-        if (
-          item.gallery_image_count > 0 &&
-          !item.gallery_main_image_exists
-        ) {
-          acc.missingMainImage += 1;
-        }
-
-        if (
-          item.gallery_image_count > 0 &&
-          item.gallery_alt_count < item.gallery_image_count
-        ) {
-          acc.missingAltText += 1;
-        }
-
-        if (
-          item.gallery_image_count > 0 &&
-          item.gallery_image_count < 3
-        ) {
-          acc.lowImageCount += 1;
-        }
-
-        return acc;
-      },
-      {
-        publishedCount: 0,
-        draftCount: 0,
-        missingGallery: 0,
-        missingMainImage: 0,
-        missingAltText: 0,
-        lowImageCount: 0,
-      }
-    );
+    const basicSummary = getBasicSummary(filteredProducts);
+    const gallerySummary = getGallerySummary(items);
 
     return NextResponse.json(
       {
@@ -313,11 +349,14 @@ export async function GET(req: Request) {
         limit,
         totalPages,
         items,
-        summary,
+        summary: {
+          ...basicSummary,
+          ...gallerySummary,
+        },
       },
       {
         headers: {
-          "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+          "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
         },
       }
     );

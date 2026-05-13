@@ -57,18 +57,23 @@ export async function GET(req: Request) {
 
     const items = await getAllDraftOrders();
 
-    return NextResponse.json({
-      ok: true,
-      items,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        total: Array.isArray(items) ? items.length : 0,
+        items,
+      },
+      {
+        headers: {
+          "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
+        },
+      }
+    );
   } catch (error) {
     return NextResponse.json(
       {
         ok: false,
-        error: getAdminApiErrorMessage(
-          error,
-          "Failed to load draft orders."
-        ),
+        error: getAdminApiErrorMessage(error, "Failed to load draft orders."),
       },
       { status: getAdminApiErrorStatus(error) }
     );
@@ -105,10 +110,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         ok: false,
-        error: getAdminApiErrorMessage(
-          error,
-          "Failed to create draft order."
-        ),
+        error: getAdminApiErrorMessage(error, "Failed to create draft order."),
       },
       { status: getAdminApiErrorStatus(error) }
     );

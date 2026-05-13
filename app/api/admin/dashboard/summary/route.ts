@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { verifyAdminSessionToken } from "../../../../../lib/admin-auth";
+import {
+  ADMIN_COOKIE_NAME,
+  verifyAdminSessionToken,
+} from "../../../../../lib/admin-auth";
 import { getSheetData } from "../../../../../lib/sheets";
 import { getAllOrders } from "../../../../../lib/order";
 import { toNumber } from "../../../../../lib/money";
@@ -41,7 +44,6 @@ type CustomerRow = {
   last_login_at?: string;
   tax_exempt?: string;
   approved_at?: string;
-
   company_name?: string;
   contact_name?: string;
   customer_code?: string;
@@ -63,8 +65,14 @@ type OrderSummaryItem = {
   updated_at: string;
 };
 
-function parseAdminTokenFromCookie(cookieHeader: string) {
-  const match = cookieHeader.match(/ptx_admin_auth=([^;]+)/);
+const SUMMARY_TTL_SECONDS = 300;
+
+function parseCookieValue(cookieHeader: string, cookieName: string) {
+  const escapedCookieName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = cookieHeader.match(
+    new RegExp(`(?:^|;\\s*)${escapedCookieName}=([^;]+)`)
+  );
+
   return match ? decodeURIComponent(match[1]) : null;
 }
 
@@ -132,7 +140,7 @@ function mapCustomer(row: CustomerRow) {
 export async function GET(req: Request) {
   try {
     const cookieHeader = req.headers.get("cookie") || "";
-    const token = parseAdminTokenFromCookie(cookieHeader);
+    const token = parseCookieValue(cookieHeader, ADMIN_COOKIE_NAME);
     const isAdmin = await verifyAdminSessionToken(token);
 
     if (!isAdmin) {
@@ -146,28 +154,28 @@ export async function GET(req: Request) {
       await Promise.all([
         getSheetData("products", {
           forceFresh: false,
-          ttlSeconds: 60,
+          ttlSeconds: SUMMARY_TTL_SECONDS,
         }) as Promise<ProductRow[]>,
 
         getSheetData("customer_applications", {
           forceFresh: false,
-          ttlSeconds: 60,
+          ttlSeconds: SUMMARY_TTL_SECONDS,
         }) as Promise<ApplicationRow[]>,
 
         getSheetData("customers", {
           forceFresh: false,
-          ttlSeconds: 60,
+          ttlSeconds: SUMMARY_TTL_SECONDS,
         }) as Promise<CustomerRow[]>,
 
         getAllOrders({
           forceFresh: false,
-          ttlSeconds: 60,
+          ttlSeconds: SUMMARY_TTL_SECONDS,
         }),
       ]);
 
-    const productTotal = productsRaw.filter((item) =>
-      normalizeText(item.slug)
-    ).length;
+    const productTotal = productsRaw.reduce((count, item) => {
+      return normalizeText(item.slug) ? count + 1 : count;
+    }, 0);
 
     const applications = sortByCreatedAtDesc(
       applicationsRaw.map(mapApplication)
@@ -187,38 +195,45 @@ export async function GET(req: Request) {
       updated_at: normalizeText(order.updated_at),
     }));
 
-    const pendingApplications = applications.filter(
-      (item) => normalizeLower(item.status) === "pending"
-    ).length;
+    const pendingApplications = applications.reduce((count, item) => {
+      return normalizeLower(item.status) === "pending" ? count + 1 : count;
+    }, 0);
 
-    const approvedApplications = applications.filter(
-      (item) => normalizeLower(item.status) === "approved"
-    ).length;
+    const approvedApplications = applications.reduce((count, item) => {
+      return normalizeLower(item.status) === "approved" ? count + 1 : count;
+    }, 0);
 
-    const activeCustomers = customers.filter(
-      (item) => normalizeLower(item.status) === "active"
-    ).length;
+    const activeCustomers = customers.reduce((count, item) => {
+      return normalizeLower(item.status) === "active" ? count + 1 : count;
+    }, 0);
 
-    const inactiveCustomers = customers.filter(
-      (item) => normalizeLower(item.status) !== "active"
-    ).length;
+    const inactiveCustomers = customers.length - activeCustomers;
 
-    const pendingOrders = orders.filter((item) =>
-      ["pending", "submitted", "reviewing"].includes(normalizeLower(item.status))
-    ).length;
+    const pendingOrderStatuses = new Set(["pending", "submitted", "reviewing"]);
+    const processingOrderStatuses = new Set(["approved", "processing", "quoted"]);
 
-    const processingOrders = orders.filter((item) =>
-      ["approved", "processing", "quoted"].includes(normalizeLower(item.status))
-    ).length;
+    let pendingOrders = 0;
+    let processingOrders = 0;
+    let completedOrders = 0;
+    let orderVolume = 0;
 
-    const completedOrders = orders.filter(
-      (item) => normalizeLower(item.status) === "completed"
-    ).length;
+    orders.forEach((item) => {
+      const status = normalizeLower(item.status);
 
-    const orderVolume = orders.reduce(
-      (sum, item) => sum + Number(item.subtotal || 0),
-      0
-    );
+      if (pendingOrderStatuses.has(status)) {
+        pendingOrders += 1;
+      }
+
+      if (processingOrderStatuses.has(status)) {
+        processingOrders += 1;
+      }
+
+      if (status === "completed") {
+        completedOrders += 1;
+      }
+
+      orderVolume += Number(item.subtotal || 0);
+    });
 
     return NextResponse.json(
       {
@@ -240,7 +255,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+          "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
         },
       }
     );

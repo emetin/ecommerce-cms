@@ -5,17 +5,30 @@ type BlogCardProps = {
   excerpt: string;
   image: string;
   href: string;
+  prefetch?: boolean;
 };
+
+const FALLBACK_IMAGE =
+  "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1400&q=80";
+
+function getSafeImageSrc(value?: string) {
+  const src = String(value || "").trim();
+  return src || FALLBACK_IMAGE;
+}
 
 export default function BlogCard({
   title,
   excerpt,
   image,
   href,
+  prefetch = false,
 }: BlogCardProps) {
+  const imageSrc = getSafeImageSrc(image);
+
   return (
     <Link
       href={href}
+      prefetch={prefetch}
       style={{
         textDecoration: "none",
         color: "inherit",
@@ -41,11 +54,11 @@ export default function BlogCard({
           }}
         >
           <img
-            src={
-              image?.trim() ||
-              "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1400&q=80"
-            }
+            src={imageSrc}
             alt={title}
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
             style={{
               width: "100%",
               aspectRatio: "1 / 1.08",

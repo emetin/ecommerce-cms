@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import { ADMIN_COOKIE_NAME, isAuthenticatedAdmin } from "./lib/admin-auth";
-import {
-  CUSTOMER_COOKIE_NAME,
-  isAuthenticatedCustomer,
-} from "./lib/customer-auth";
+import { ADMIN_COOKIE_NAME } from "./lib/admin-auth";
+import { CUSTOMER_COOKIE_NAME } from "./lib/customer-auth";
 
 import {
   isAdminPageRoute,
@@ -20,7 +17,7 @@ import {
   isPublicOrderRoute,
 } from "./lib/route-access";
 
-export async function proxy(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
   const isAdminRoute = isAdminPageRoute(pathname);
@@ -56,18 +53,19 @@ export async function proxy(request: NextRequest) {
   }
 
   if (shouldCheckAdmin) {
-    const adminAuthCookie = request.cookies.get(ADMIN_COOKIE_NAME)?.value;
-    const isAdminLoggedIn = await isAuthenticatedAdmin(adminAuthCookie);
+    const hasAdminCookie = Boolean(
+      request.cookies.get(ADMIN_COOKIE_NAME)?.value
+    );
 
     if (isPortalRoute) {
-      if (isAdminLoggedIn) {
+      if (hasAdminCookie) {
         return NextResponse.redirect(new URL("/admin/products", request.url));
       }
 
       return NextResponse.next();
     }
 
-    if ((isAdminRoute || protectedAdminApiRoute) && !isAdminLoggedIn) {
+    if ((isAdminRoute || protectedAdminApiRoute) && !hasAdminCookie) {
       if (protectedAdminApiRoute) {
         return NextResponse.json(
           { ok: false, error: "Yetkisiz admin erişimi." },
@@ -77,25 +75,25 @@ export async function proxy(request: NextRequest) {
 
       const loginUrl = new URL("/portal-ptx-admin", request.url);
       loginUrl.searchParams.set("redirect", `${pathname}${search}`);
+
       return NextResponse.redirect(loginUrl);
     }
   }
 
   if (shouldCheckCustomer) {
-    const customerAuthCookie = request.cookies.get(CUSTOMER_COOKIE_NAME)?.value;
-    const isCustomerLoggedIn = await isAuthenticatedCustomer(
-      customerAuthCookie
+    const hasCustomerCookie = Boolean(
+      request.cookies.get(CUSTOMER_COOKIE_NAME)?.value
     );
 
     if (isCustomerPortalLogin) {
-      if (isCustomerLoggedIn) {
+      if (hasCustomerCookie) {
         return NextResponse.redirect(new URL("/account", request.url));
       }
 
       return NextResponse.next();
     }
 
-    if (customerProtectedRoute && !isCustomerLoggedIn) {
+    if (customerProtectedRoute && !hasCustomerCookie) {
       if (pathname.startsWith("/api/")) {
         return NextResponse.json(
           { ok: false, error: "Müşteri girişi gerekli." },
@@ -105,6 +103,7 @@ export async function proxy(request: NextRequest) {
 
       const loginUrl = new URL("/portal-login", request.url);
       loginUrl.searchParams.set("redirect", `${pathname}${search}`);
+
       return NextResponse.redirect(loginUrl);
     }
   }

@@ -401,14 +401,19 @@ function ProductDetailClientComponent({
               </div>
 
               <ProductPurchasePanel
-                product={{
-                  title: product.title,
-                  slug: product.slug,
-                  image: primaryImage || product.image,
-                }}
-                variants={variants}
-                onVariantChange={setSelectedVariant}
-              />
+  product={{
+    id: product.id,
+    title: product.title,
+    slug: product.slug,
+    image: primaryImage || product.image,
+    sku: (product as any).sku,
+    price: (product as any).price,
+    compare_at_price: (product as any).compare_at_price,
+    box_quantity: (product as any).box_quantity,
+  }}
+  variants={variants}
+  onVariantChange={setSelectedVariant}
+/>
             </div>
           </div>
         </Container>

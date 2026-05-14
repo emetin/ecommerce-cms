@@ -200,26 +200,13 @@ async function validateCartItemsForQuote(
 
   for (const cartItem of cartItems) {
     const productSlug = normalize(cartItem.product_slug);
-    const variantId = normalize(cartItem.variant_id);
     const requestedQuantity = toNumber(cartItem.quantity);
 
     if (!productSlug) {
       throw new Error("A cart item is missing product information.");
     }
 
-    if (!variantId) {
-      throw new Error(
-        "A cart item is missing variant information. Please remove it and add the product again."
-      );
-    }
-
-    const resolved = await resolveCartCatalogItem(productSlug, variantId);
-
-    if (!resolved.variant?.id) {
-      throw new Error(
-        `${resolved.productTitle} does not have a purchasable variant anymore.`
-      );
-    }
+    const resolved = await resolveCartCatalogItem(productSlug);
 
     if (resolved.unitPrice <= 0) {
       throw new Error(
@@ -229,9 +216,7 @@ async function validateCartItemsForQuote(
 
     const quantityRule = assertValidQuantityRule({
       quantity: requestedQuantity,
-      minQuantity: resolved.minQuantity,
       boxQuantity: resolved.boxQuantity,
-      caseQuantity: resolved.caseQuantity,
     });
 
     const lineTotal = Number(
@@ -240,7 +225,7 @@ async function validateCartItemsForQuote(
 
     validatedItems.push({
       product_slug: productSlug,
-      variant_id: resolved.variant.id,
+      variant_id: resolved.variantId,
       product_title: resolved.productTitle,
       variant_title: resolved.variantTitle,
       sku: resolved.sku,

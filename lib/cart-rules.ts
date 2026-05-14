@@ -1,9 +1,9 @@
 export type QuantityRuleInput = {
   quantity: number;
-  minQuantity?: number;
-  boxQuantity?: number;
-  caseQuantity?: number;
-  stepQuantity?: number;
+  minQuantity?: number | string | null;
+  boxQuantity?: number | string | null;
+  caseQuantity?: number | string | null;
+  stepQuantity?: number | string | null;
 };
 
 export type QuantityRuleResult = {
@@ -28,33 +28,6 @@ function toPositiveInteger(value: unknown, fallback: number) {
   return floored > 0 ? floored : fallback;
 }
 
-function getQuantityRule(input: QuantityRuleInput) {
-  const rawMinQuantity = toPositiveInteger(input.minQuantity, 1);
-  const boxQuantity = toPositiveInteger(input.boxQuantity, 0);
-  const caseQuantity = toPositiveInteger(input.caseQuantity, 0);
-
-  const stepQuantity =
-    toPositiveInteger(input.stepQuantity, 0) ||
-    caseQuantity ||
-    boxQuantity ||
-    rawMinQuantity ||
-    1;
-
-  const minQuantity =
-    caseQuantity > 0
-      ? Math.max(rawMinQuantity, caseQuantity)
-      : boxQuantity > 0
-        ? Math.max(rawMinQuantity, boxQuantity)
-        : rawMinQuantity;
-
-  return {
-    minQuantity,
-    boxQuantity,
-    caseQuantity,
-    stepQuantity,
-  };
-}
-
 function normalizeQuantity(quantity: unknown, fallback: number) {
   const parsed = Number(quantity);
 
@@ -67,21 +40,18 @@ function normalizeQuantity(quantity: unknown, fallback: number) {
   return floored > 0 ? floored : fallback;
 }
 
-function isValidStepQuantity(
-  quantity: number,
-  rule: {
-    minQuantity: number;
-    stepQuantity: number;
-  }
-) {
-  if (quantity < rule.minQuantity) {
-    return false;
-  }
+function getBoxBasedRule(input: QuantityRuleInput) {
+  const boxQuantity = toPositiveInteger(input.boxQuantity, 1);
 
-  return quantity % rule.stepQuantity === 0;
+  return {
+    minQuantity: boxQuantity,
+    boxQuantity,
+    caseQuantity: 0,
+    stepQuantity: boxQuantity,
+  };
 }
 
-function adjustQuantityToRule(
+function adjustQuantityToBoxMultiple(
   quantity: number,
   rule: {
     minQuantity: number;
@@ -98,26 +68,9 @@ function adjustQuantityToRule(
   return baseQuantity + (rule.stepQuantity - remainder);
 }
 
-function buildRuleMessage(rule: {
-  minQuantity: number;
-  boxQuantity: number;
-  caseQuantity: number;
-  stepQuantity: number;
-}) {
-  if (rule.caseQuantity > 0) {
-    return `Quantity must be ordered in case multiples of ${rule.caseQuantity}.`;
-  }
-
-  if (rule.boxQuantity > 0) {
+function buildRuleMessage(rule: { boxQuantity: number }) {
+  if (rule.boxQuantity > 1) {
     return `Quantity must be ordered in box multiples of ${rule.boxQuantity}.`;
-  }
-
-  if (rule.stepQuantity > 1) {
-    return `Quantity must be ordered in increments of ${rule.stepQuantity}.`;
-  }
-
-  if (rule.minQuantity > 1) {
-    return `Minimum quantity is ${rule.minQuantity}.`;
   }
 
   return "";
@@ -126,10 +79,14 @@ function buildRuleMessage(rule: {
 export function resolveQuantityRule(
   input: QuantityRuleInput
 ): QuantityRuleResult {
-  const rule = getQuantityRule(input);
-
+  const rule = getBoxBasedRule(input);
   const requestedQuantity = normalizeQuantity(input.quantity, rule.minQuantity);
-  const resolvedQuantity = adjustQuantityToRule(requestedQuantity, rule);
+  const resolvedQuantity = adjustQuantityToBoxMultiple(
+    requestedQuantity,
+    rule
+  );
+
+  const adjusted = resolvedQuantity !== requestedQuantity;
 
   return {
     quantity: resolvedQuantity,
@@ -137,23 +94,26 @@ export function resolveQuantityRule(
     boxQuantity: rule.boxQuantity,
     caseQuantity: rule.caseQuantity,
     stepQuantity: rule.stepQuantity,
-    adjusted: resolvedQuantity !== requestedQuantity,
-    message:
-      resolvedQuantity !== requestedQuantity ? buildRuleMessage(rule) : "",
+    adjusted,
+    message: adjusted ? buildRuleMessage(rule) : "",
   };
 }
 
 export function assertValidQuantityRule(
   input: QuantityRuleInput
 ): QuantityRuleResult {
-  const rule = getQuantityRule(input);
+  const rule = getBoxBasedRule(input);
   const requestedQuantity = normalizeQuantity(input.quantity, rule.minQuantity);
+  const resolvedQuantity = adjustQuantityToBoxMultiple(
+    requestedQuantity,
+    rule
+  );
 
   if (requestedQuantity < rule.minQuantity) {
     throw new Error(`Minimum quantity for this item is ${rule.minQuantity}.`);
   }
 
-  if (!isValidStepQuantity(requestedQuantity, rule)) {
+  if (requestedQuantity !== resolvedQuantity) {
     throw new Error(buildRuleMessage(rule));
   }
 

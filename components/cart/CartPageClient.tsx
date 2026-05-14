@@ -1,7 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo } from "react";
+import type { CSSProperties } from "react";
+import Link from "next/link";
 import { useCart } from "./CartContext";
 import { formatMoney } from "../../lib/money";
 
@@ -27,10 +28,7 @@ type CartItem = {
 };
 
 type QuantityRule = {
-  minQuantity: number;
   boxQuantity: number;
-  caseQuantity: number;
-  stepQuantity: number;
   message: string;
 };
 
@@ -61,87 +59,54 @@ function toSafeMoneyNumber(value: unknown) {
 }
 
 function getQuantityRule(item: CartItem): QuantityRule {
-  const minQuantity =
-    toPositiveInteger(item.min_quantity_number, 0) ||
-    toPositiveInteger(item.min_quantity, 0) ||
-    1;
-
   const boxQuantity =
     toPositiveInteger(item.box_quantity_number, 0) ||
     toPositiveInteger(item.box_quantity, 0) ||
-    0;
-
-  const caseQuantity =
-    toPositiveInteger(item.case_quantity_number, 0) ||
-    toPositiveInteger(item.case_quantity, 0) ||
-    0;
-
-  const stepQuantity =
-    toPositiveInteger(item.step_quantity_number, 0) ||
-    toPositiveInteger(item.step_quantity, 0) ||
-    caseQuantity ||
-    boxQuantity ||
-    minQuantity ||
     1;
 
-  let message = "";
-
-  if (caseQuantity > 0) {
-    message = `Case multiple: ${caseQuantity}`;
-  } else if (boxQuantity > 0) {
-    message = `Box multiple: ${boxQuantity}`;
-  } else if (stepQuantity > 1) {
-    message = `Step: ${stepQuantity}`;
-  } else if (minQuantity > 1) {
-    message = `Minimum: ${minQuantity}`;
-  }
-
   return {
-    minQuantity,
     boxQuantity,
-    caseQuantity,
-    stepQuantity,
-    message,
+    message: boxQuantity > 1 ? `Box Quantity: ${boxQuantity}` : "",
   };
 }
 
 function normalizeQuantityToRule(quantity: number, rule: QuantityRule) {
   const safeQuantity = Math.max(
-    rule.minQuantity,
-    Math.floor(Number(quantity) || rule.minQuantity)
+    rule.boxQuantity,
+    Math.floor(Number(quantity) || rule.boxQuantity)
   );
 
-  const remainder = (safeQuantity - rule.minQuantity) % rule.stepQuantity;
+  const remainder = safeQuantity % rule.boxQuantity;
 
   if (remainder === 0) {
     return safeQuantity;
   }
 
-  return safeQuantity + (rule.stepQuantity - remainder);
+  return safeQuantity + (rule.boxQuantity - remainder);
 }
 
 function getCurrentQuantity(item: CartItem, rule: QuantityRule) {
-  const current = Math.floor(Number(item.quantity || rule.minQuantity));
+  const current = Math.floor(Number(item.quantity || rule.boxQuantity));
 
   if (!Number.isFinite(current) || current <= 0) {
-    return rule.minQuantity;
+    return rule.boxQuantity;
   }
 
   return normalizeQuantityToRule(current, rule);
 }
 
 function getNextDecreaseQuantity(quantity: number, rule: QuantityRule) {
-  const next = quantity - rule.stepQuantity;
+  const next = quantity - rule.boxQuantity;
 
-  if (next < rule.minQuantity) {
-    return rule.minQuantity;
+  if (next < rule.boxQuantity) {
+    return rule.boxQuantity;
   }
 
   return normalizeQuantityToRule(next, rule);
 }
 
 function getNextIncreaseQuantity(quantity: number, rule: QuantityRule) {
-  return normalizeQuantityToRule(quantity + rule.stepQuantity, rule);
+  return normalizeQuantityToRule(quantity + rule.boxQuantity, rule);
 }
 
 function isTechnicalCartError(message: string) {
@@ -160,7 +125,9 @@ export default function CartPageClient() {
     isBootstrapping,
     isUpdating,
     error,
+    lastQuantityRule,
     clearError,
+    clearLastQuantityRule,
     refreshCart,
     handleUpdateQuantity,
     handleRemoveItem,
@@ -177,113 +144,105 @@ export default function CartPageClient() {
 
   const subtotal = Number(cart?.totals?.subtotal || 0);
   const itemCount = Number(cart?.totals?.item_count || 0);
+
   const visibleError = error && !isTechnicalCartError(error) ? error : "";
 
-  async function safelyUpdateQuantity(itemId: string, quantity: number) {
-    try {
-      clearError();
-      await handleUpdateQuantity(itemId, quantity);
-    } catch {
-      // Shared cart error is rendered below header.
-    }
-  }
-
-  async function safelyRemoveItem(itemId: string) {
-    try {
-      clearError();
-      await handleRemoveItem(itemId);
-    } catch {
-      // Shared cart error is rendered below header.
-    }
-  }
+  const quantityNotice =
+    lastQuantityRule?.adjusted && lastQuantityRule.message
+      ? `${lastQuantityRule.message} Quantity was adjusted to ${lastQuantityRule.quantity}.`
+      : "";
 
   async function safelyClearCart() {
     try {
       clearError();
+      clearLastQuantityRule();
       await handleClearCart();
     } catch {
-      // Shared cart error is rendered below header.
+      // Shared cart error is rendered on this page.
     }
   }
 
   if (isBootstrapping) {
     return (
-      <div style={pageStyle}>
-        <div style={emptyBoxStyle}>
-          <div style={eyebrowStyle}>B2B Quote Request</div>
-          <h1 style={titleStyle}>Quote Cart</h1>
-          <p style={introTextStyle}>Loading your quote cart...</p>
-        </div>
-      </div>
+      <main style={pageStyle}>
+        <section style={emptyCardStyle}>
+          <div style={eyebrowStyle}>Quote Cart</div>
+          <h1 style={titleStyle}>Loading your quote cart...</h1>
+          <p style={textStyle}>
+            Please wait while we prepare your selected hospitality products.
+          </p>
+        </section>
+      </main>
     );
   }
 
   return (
-    <div style={pageStyle}>
-      <div style={headerStyle}>
+    <main style={pageStyle}>
+      <section style={headerStyle}>
         <div>
-          <div style={eyebrowStyle}>B2B Quote Request</div>
+          <div style={eyebrowStyle}>B2B Quote Cart</div>
 
-          <h1 style={titleStyle}>Quote Cart</h1>
+          <h1 style={titleStyle}>Review Your Quote Cart</h1>
 
-          <p style={introTextStyle}>
-            Review selected hospitality products before submitting your quote
-            request. Final pricing, freight, availability, and payment terms are
-            reviewed by the Globaltex Fine Linens sales team.
+          <p style={textStyle}>
+            Confirm selected products and quantities before submitting a
+            wholesale quote request. Final pricing, freight, payment terms, and
+            availability will be reviewed by the Globaltex sales team.
           </p>
         </div>
 
-        <Link href="/collections" style={secondaryButtonStyle}>
-          Continue Browsing
-        </Link>
-      </div>
+        <div style={headerActionsStyle}>
+          <Link href="/products" style={secondaryLinkStyle}>
+            Continue Browsing
+          </Link>
+
+          {items.length ? (
+            <Link href="/checkout" style={primaryLinkStyle}>
+              Submit Quote Request
+            </Link>
+          ) : null}
+        </div>
+      </section>
 
       {visibleError ? <div style={errorBoxStyle}>{visibleError}</div> : null}
 
+      {quantityNotice ? (
+        <div style={noticeBoxStyle}>{quantityNotice}</div>
+      ) : null}
+
       {!items.length ? (
-        <div style={emptyBoxStyle}>
-          <div>
-            <h2 style={emptyTitleStyle}>Your quote cart is empty.</h2>
+        <section style={emptyCardStyle}>
+          <h2 style={emptyTitleStyle}>Your quote cart is empty.</h2>
 
-            <p style={emptyTextStyle}>
-              Add products from the catalog to start a wholesale quote request
-              for your hotel, hospitality project, or bulk procurement needs.
-            </p>
+          <p style={textStyle}>
+            Add products from the catalog to start a B2B quote request for your
+            hotel, resort, residence, or project-based sourcing needs.
+          </p>
+
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <Link href="/collections" style={primaryLinkStyle}>
+              Browse Collections
+            </Link>
+
+            <Link href="/products" style={secondaryLinkStyle}>
+              View Products
+            </Link>
           </div>
-
-          <Link href="/collections" style={primaryLinkStyle}>
-            Browse Collections
-          </Link>
-        </div>
+        </section>
       ) : (
-        <div className="cart-page-layout" style={layoutStyle}>
-          <div style={itemsCardStyle}>
-            <div style={itemsHeaderStyle}>
-              <div>
-                <h2 style={sectionTitleStyle}>Selected Products</h2>
-
-                <p style={sectionTextStyle}>
-                  Quantities can be adjusted before submitting your request.
-                </p>
-              </div>
-
-              <div style={itemBadgeStyle}>
-                {itemCount} {itemCount === 1 ? "item" : "items"}
-              </div>
-            </div>
-
-            <div style={{ display: "grid" }}>
-              {items.map((item, index) => (
-                <CartPageItem
-                  key={item.id}
-                  item={item}
-                  index={index}
-                  isUpdating={isUpdating}
-                  onUpdateQuantity={safelyUpdateQuantity}
-                  onRemoveItem={safelyRemoveItem}
-                />
-              ))}
-            </div>
+        <section className="cart-page-layout" style={layoutStyle}>
+          <div style={itemsWrapStyle}>
+            {items.map((item) => (
+              <CartPageItem
+                key={item.id}
+                item={item}
+                isUpdating={isUpdating}
+                onUpdateQuantity={handleUpdateQuantity}
+                onRemoveItem={handleRemoveItem}
+                clearError={clearError}
+                clearLastQuantityRule={clearLastQuantityRule}
+              />
+            ))}
           </div>
 
           <aside style={summaryCardStyle}>
@@ -299,26 +258,26 @@ export default function CartPageClient() {
                 <span>Estimated Subtotal</span>
                 <strong>{formatMoney(subtotal)}</strong>
               </div>
+
+              <div style={grandTotalRowStyle}>
+                <span>Estimated Total</span>
+                <strong>{formatMoney(subtotal)}</strong>
+              </div>
             </div>
 
-            <div style={summaryTotalStyle}>
-              <span>Estimated Total</span>
-              <strong>{formatMoney(subtotal)}</strong>
+            <div style={summaryNoticeStyle}>
+              This is not an online payment checkout. Your request will be
+              reviewed for final wholesale pricing, freight, lead time, and
+              availability.
             </div>
 
-            <div style={noticeStyle}>
-              This is not a final invoice. Your submitted request will be
-              reviewed for B2B pricing, availability, freight, lead time, and
-              payment terms.
-            </div>
-
-            <div style={buttonGridStyle}>
-              <Link href="/checkout" style={primaryButtonStyle}>
+            <div style={{ display: "grid", gap: 10 }}>
+              <Link href="/checkout" style={primaryLinkStyle}>
                 Submit Quote Request
               </Link>
 
-              <Link href="/collections" style={secondaryButtonStyle}>
-                Continue Browsing
+              <Link href="/products" style={secondaryLinkStyle}>
+                Add More Products
               </Link>
 
               <button
@@ -327,15 +286,15 @@ export default function CartPageClient() {
                 disabled={isUpdating}
                 style={{
                   ...clearButtonStyle,
-                  cursor: isUpdating ? "not-allowed" : "pointer",
                   opacity: isUpdating ? 0.65 : 1,
+                  cursor: isUpdating ? "not-allowed" : "pointer",
                 }}
               >
                 {isUpdating ? "Updating..." : "Clear Quote Cart"}
               </button>
             </div>
           </aside>
-        </div>
+        </section>
       )}
 
       <style jsx>{`
@@ -343,75 +302,81 @@ export default function CartPageClient() {
           .cart-page-layout {
             grid-template-columns: 1fr !important;
           }
-
-          .cart-page-item {
-            grid-template-columns: 112px minmax(0, 1fr) !important;
-          }
-
-          .cart-page-desktop-total {
-            grid-column: 2 !important;
-            text-align: left !important;
-          }
         }
 
-        @media (max-width: 620px) {
+        @media (max-width: 720px) {
           .cart-page-item {
             grid-template-columns: 1fr !important;
           }
 
-          .cart-page-desktop-total {
-            grid-column: auto !important;
+          .cart-page-image {
+            width: 100% !important;
+            height: 240px !important;
+          }
+
+          .cart-item-meta-grid {
+            grid-template-columns: 1fr !important;
           }
         }
       `}</style>
-    </div>
+    </main>
   );
 }
 
 function CartPageItem({
   item,
-  index,
   isUpdating,
   onUpdateQuantity,
   onRemoveItem,
+  clearError,
+  clearLastQuantityRule,
 }: {
   item: CartItem;
-  index: number;
   isUpdating: boolean;
-  onUpdateQuantity: (itemId: string, quantity: number) => Promise<void>;
-  onRemoveItem: (itemId: string) => Promise<void>;
+  onUpdateQuantity: (itemId: string, quantity: number) => Promise<unknown>;
+  onRemoveItem: (itemId: string) => Promise<unknown>;
+  clearError: () => void;
+  clearLastQuantityRule: () => void;
 }) {
   const quantityRule = useMemo(() => getQuantityRule(item), [item]);
   const quantity = getCurrentQuantity(item, quantityRule);
 
-  const unitPrice = toSafeMoneyNumber(item.unit_price);
-  const lineTotal = toSafeMoneyNumber(item.line_total || unitPrice * quantity);
+  const itemPrice = toSafeMoneyNumber(item.unit_price);
+  const lineTotal = toSafeMoneyNumber(item.line_total || itemPrice * quantity);
+
   const imageUrl = normalizeText(item.image);
 
   const nextDecreaseQuantity = getNextDecreaseQuantity(quantity, quantityRule);
   const nextIncreaseQuantity = getNextIncreaseQuantity(quantity, quantityRule);
 
-  async function handleDecrease() {
-    if (quantity <= quantityRule.minQuantity) {
-      return;
-    }
+  async function safelyUpdateQuantity(nextQuantity: number) {
+    try {
+      clearError();
+      clearLastQuantityRule();
 
-    await onUpdateQuantity(item.id, nextDecreaseQuantity);
+      if (nextQuantity === quantity) {
+        return;
+      }
+
+      await onUpdateQuantity(item.id, nextQuantity);
+    } catch {
+      // Shared cart error is rendered by parent page.
+    }
   }
 
-  async function handleIncrease() {
-    await onUpdateQuantity(item.id, nextIncreaseQuantity);
+  async function safelyRemoveItem() {
+    try {
+      clearError();
+      clearLastQuantityRule();
+      await onRemoveItem(item.id);
+    } catch {
+      // Shared cart error is rendered by parent page.
+    }
   }
 
   return (
-    <div
-      className="cart-page-item"
-      style={{
-        ...cartItemStyle,
-        borderTop: index === 0 ? "none" : "1px solid #f0e7db",
-      }}
-    >
-      <div style={imageWrapStyle}>
+    <article className="cart-page-item" style={itemCardStyle}>
+      <div className="cart-page-image" style={imageWrapStyle}>
         {imageUrl ? (
           <img
             src={imageUrl}
@@ -421,49 +386,48 @@ function CartPageItem({
             style={imageStyle}
           />
         ) : (
-          <div style={placeholderStyle}>No Image</div>
+          <div style={imagePlaceholderStyle}>No Image</div>
         )}
       </div>
 
-      <div style={contentStyle}>
-        <div style={productTitleStyle}>{item.product_title || "Product"}</div>
+      <div style={itemContentStyle}>
+        <div>
+          <h2 style={itemTitleStyle}>{item.product_title || "Product"}</h2>
 
-        {item.variant_title ? (
-          <div style={variantStyle}>{item.variant_title}</div>
+          {item.variant_title ? (
+            <p style={variantTextStyle}>{item.variant_title}</p>
+          ) : null}
+
+          {item.sku ? <p style={skuTextStyle}>SKU: {item.sku}</p> : null}
+        </div>
+
+        <div className="cart-item-meta-grid" style={itemMetaGridStyle}>
+          <InfoBlock label="Unit Price" value={formatMoney(itemPrice)} />
+          <InfoBlock label="Line Total" value={formatMoney(lineTotal)} />
+          <InfoBlock
+            label="Box Quantity"
+            value={String(quantityRule.boxQuantity)}
+          />
+        </div>
+
+        {quantityRule.message ? (
+          <div style={ruleNoteStyle}>{quantityRule.message}</div>
         ) : null}
 
-        {item.sku ? <div style={skuStyle}>SKU: {item.sku}</div> : null}
-
-        <div style={priceGridStyle}>
-          <div>
-            <div style={priceLabelStyle}>Unit Price</div>
-            <div style={priceValueStyle}>{formatMoney(unitPrice)}</div>
-          </div>
-
-          <div>
-            <div style={priceLabelStyle}>Line Total</div>
-            <div style={priceValueStyle}>{formatMoney(lineTotal)}</div>
-          </div>
-        </div>
-
-        <div style={quantityRuleStyle}>
-          Min: {quantityRule.minQuantity} · Step: {quantityRule.stepQuantity}
-          {quantityRule.message ? <> · {quantityRule.message}</> : null}
-        </div>
-
-        <div style={actionsRowStyle}>
-          <div style={quantityWrapStyle}>
+        <div style={itemActionsStyle}>
+          <div style={quantityRowStyle}>
             <button
               type="button"
-              onClick={handleDecrease}
-              disabled={isUpdating || quantity <= quantityRule.minQuantity}
+              onClick={() => safelyUpdateQuantity(nextDecreaseQuantity)}
+              disabled={isUpdating || quantity <= quantityRule.boxQuantity}
               style={{
                 ...qtyButtonStyle,
+                opacity:
+                  isUpdating || quantity <= quantityRule.boxQuantity ? 0.65 : 1,
                 cursor:
-                  isUpdating || quantity <= quantityRule.minQuantity
+                  isUpdating || quantity <= quantityRule.boxQuantity
                     ? "not-allowed"
                     : "pointer",
-                opacity: isUpdating || quantity <= quantityRule.minQuantity ? 0.65 : 1,
               }}
             >
               -
@@ -473,12 +437,12 @@ function CartPageItem({
 
             <button
               type="button"
-              onClick={handleIncrease}
+              onClick={() => safelyUpdateQuantity(nextIncreaseQuantity)}
               disabled={isUpdating}
               style={{
                 ...qtyButtonStyle,
-                cursor: isUpdating ? "not-allowed" : "pointer",
                 opacity: isUpdating ? 0.65 : 1,
+                cursor: isUpdating ? "not-allowed" : "pointer",
               }}
             >
               +
@@ -487,43 +451,47 @@ function CartPageItem({
 
           <button
             type="button"
-            onClick={() => onRemoveItem(item.id)}
+            onClick={safelyRemoveItem}
             disabled={isUpdating}
             style={{
               ...removeButtonStyle,
-              cursor: isUpdating ? "not-allowed" : "pointer",
               opacity: isUpdating ? 0.65 : 1,
+              cursor: isUpdating ? "not-allowed" : "pointer",
             }}
           >
-            Remove item
+            Remove
           </button>
         </div>
       </div>
+    </article>
+  );
+}
 
-      <div className="cart-page-desktop-total" style={desktopLineTotalStyle}>
-        <div style={priceLabelStyle}>Line Total</div>
-        <div style={desktopLineTotalValueStyle}>{formatMoney(lineTotal)}</div>
-      </div>
+function InfoBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={infoBlockStyle}>
+      <span style={infoLabelStyle}>{label}</span>
+      <strong style={infoValueStyle}>{value}</strong>
     </div>
   );
 }
 
-const pageStyle: React.CSSProperties = {
-  maxWidth: 1240,
+const pageStyle: CSSProperties = {
+  maxWidth: 1280,
   margin: "0 auto",
-  padding: "44px 20px 84px",
+  padding: "48px 20px 90px",
 };
 
-const headerStyle: React.CSSProperties = {
-  marginBottom: 28,
+const headerStyle: CSSProperties = {
   display: "flex",
-  alignItems: "flex-start",
   justifyContent: "space-between",
-  gap: 18,
+  gap: 24,
   flexWrap: "wrap",
+  alignItems: "flex-end",
+  marginBottom: 28,
 };
 
-const eyebrowStyle: React.CSSProperties = {
+const eyebrowStyle: CSSProperties = {
   width: "fit-content",
   padding: "7px 12px",
   borderRadius: 999,
@@ -531,372 +499,330 @@ const eyebrowStyle: React.CSSProperties = {
   border: "1px solid #ece3d7",
   color: "#6b6256",
   fontSize: 12,
-  fontWeight: 800,
+  fontWeight: 850,
   letterSpacing: "0.08em",
   textTransform: "uppercase",
-  marginBottom: 10,
+  marginBottom: 12,
 };
 
-const titleStyle: React.CSSProperties = {
+const titleStyle: CSSProperties = {
   margin: 0,
-  fontSize: "clamp(2.2rem, 4vw, 4rem)",
-  lineHeight: 1,
   color: "#171717",
+  fontSize: "clamp(2.2rem, 4vw, 4rem)",
+  lineHeight: 1.02,
   fontWeight: 850,
   letterSpacing: "-0.04em",
 };
 
-const introTextStyle: React.CSSProperties = {
-  margin: "12px 0 0",
-  maxWidth: 820,
+const textStyle: CSSProperties = {
+  margin: "14px 0 0",
   color: "#5d554a",
-  fontSize: 16,
   lineHeight: 1.8,
-};
-
-const errorBoxStyle: React.CSSProperties = {
-  padding: "12px 14px",
-  borderRadius: 14,
-  border: "1px solid #f1c7c7",
-  background: "#fff4f4",
-  color: "#9b2c2c",
-  fontSize: 14,
-  fontWeight: 700,
-  lineHeight: 1.6,
-  marginBottom: 16,
-};
-
-const emptyBoxStyle: React.CSSProperties = {
-  border: "1px solid #ece3d7",
-  borderRadius: 24,
-  padding: 32,
-  background: "#fffaf4",
-  display: "grid",
-  gap: 20,
-};
-
-const emptyTitleStyle: React.CSSProperties = {
-  margin: 0,
-  color: "#171717",
-  fontSize: 26,
-  lineHeight: 1.2,
-  fontWeight: 800,
-};
-
-const emptyTextStyle: React.CSSProperties = {
-  margin: "10px 0 0",
-  color: "#5d554a",
   fontSize: 15,
-  lineHeight: 1.8,
-  maxWidth: 720,
+  maxWidth: 760,
 };
 
-const layoutStyle: React.CSSProperties = {
+const headerActionsStyle: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
+const layoutStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) 390px",
   gap: 24,
   alignItems: "start",
 };
 
-const itemsCardStyle: React.CSSProperties = {
-  border: "1px solid #ece3d7",
-  borderRadius: 24,
-  background: "#fff",
-  overflow: "hidden",
-};
-
-const itemsHeaderStyle: React.CSSProperties = {
-  padding: 22,
-  background: "#fffaf4",
-  borderBottom: "1px solid #ece3d7",
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
+const itemsWrapStyle: CSSProperties = {
+  display: "grid",
   gap: 16,
 };
 
-const sectionTitleStyle: React.CSSProperties = {
-  margin: 0,
-  color: "#171717",
-  fontSize: 22,
-  lineHeight: 1.2,
-  fontWeight: 800,
-};
-
-const sectionTextStyle: React.CSSProperties = {
-  margin: "7px 0 0",
-  color: "#6b6256",
-  fontSize: 14,
-  lineHeight: 1.6,
-};
-
-const itemBadgeStyle: React.CSSProperties = {
-  flex: "0 0 auto",
-  padding: "8px 12px",
-  borderRadius: 999,
+const itemCardStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "150px minmax(0, 1fr)",
+  gap: 18,
+  padding: 18,
+  borderRadius: 24,
   background: "#fff",
   border: "1px solid #ece3d7",
-  color: "#171717",
-  fontSize: 13,
-  fontWeight: 800,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.035)",
 };
 
-const cartItemStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "132px minmax(0, 1fr) 140px",
-  gap: 18,
-  padding: 22,
-  alignItems: "start",
-};
-
-const imageWrapStyle: React.CSSProperties = {
-  width: 132,
-  height: 132,
+const imageWrapStyle: CSSProperties = {
+  width: 150,
+  minHeight: 150,
   borderRadius: 18,
-  background: "#f7f4ef",
   overflow: "hidden",
+  background: "#f4efe7",
 };
 
-const imageStyle: React.CSSProperties = {
+const imageStyle: CSSProperties = {
   width: "100%",
   height: "100%",
   objectFit: "cover",
   display: "block",
 };
 
-const placeholderStyle: React.CSSProperties = {
+const imagePlaceholderStyle: CSSProperties = {
   width: "100%",
   height: "100%",
+  minHeight: 150,
   display: "grid",
   placeItems: "center",
-  color: "#9b9288",
-  fontSize: 12,
-  fontWeight: 700,
-};
-
-const contentStyle: React.CSSProperties = {
-  minWidth: 0,
-};
-
-const productTitleStyle: React.CSSProperties = {
-  color: "#171717",
-  fontSize: 18,
-  lineHeight: 1.35,
-  fontWeight: 800,
-  marginBottom: 6,
-};
-
-const variantStyle: React.CSSProperties = {
-  color: "#7b7367",
-  fontSize: 14,
-  lineHeight: 1.5,
-  marginBottom: 6,
-};
-
-const skuStyle: React.CSSProperties = {
-  color: "#8a8176",
+  color: "#8a8175",
   fontSize: 13,
-  lineHeight: 1.5,
-  marginBottom: 14,
+  fontWeight: 800,
 };
 
-const priceGridStyle: React.CSSProperties = {
+const itemContentStyle: CSSProperties = {
+  minWidth: 0,
   display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 12,
-  marginBottom: 14,
+  gap: 14,
 };
 
-const priceLabelStyle: React.CSSProperties = {
+const itemTitleStyle: CSSProperties = {
+  margin: 0,
+  color: "#171717",
+  fontSize: 22,
+  lineHeight: 1.22,
+  fontWeight: 850,
+};
+
+const variantTextStyle: CSSProperties = {
+  margin: "7px 0 0",
+  color: "#5d554a",
+  lineHeight: 1.5,
+  fontSize: 14,
+};
+
+const skuTextStyle: CSSProperties = {
+  margin: "6px 0 0",
   color: "#7b7367",
   fontSize: 12,
-  fontWeight: 800,
-  letterSpacing: "0.04em",
+  fontWeight: 750,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+};
+
+const itemMetaGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 10,
+};
+
+const infoBlockStyle: CSSProperties = {
+  padding: 12,
+  borderRadius: 16,
+  background: "#faf7f1",
+  border: "1px solid #eee5d9",
+};
+
+const infoLabelStyle: CSSProperties = {
+  display: "block",
+  color: "#7b7367",
+  fontSize: 11,
+  fontWeight: 850,
+  letterSpacing: "0.05em",
   textTransform: "uppercase",
   marginBottom: 5,
 };
 
-const priceValueStyle: React.CSSProperties = {
+const infoValueStyle: CSSProperties = {
   color: "#171717",
-  fontSize: 15,
-  fontWeight: 800,
+  fontSize: 14,
+  lineHeight: 1.35,
 };
 
-const quantityRuleStyle: React.CSSProperties = {
-  color: "#7b7367",
+const ruleNoteStyle: CSSProperties = {
+  padding: 12,
+  borderRadius: 14,
+  background: "#fff8e7",
+  border: "1px solid #eadbb5",
+  color: "#6b5530",
   fontSize: 13,
-  lineHeight: 1.5,
+  lineHeight: 1.6,
   fontWeight: 700,
-  marginBottom: 14,
 };
 
-const actionsRowStyle: React.CSSProperties = {
+const itemActionsStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
   flexWrap: "wrap",
-  gap: 14,
 };
 
-const quantityWrapStyle: React.CSSProperties = {
-  display: "inline-flex",
+const quantityRowStyle: CSSProperties = {
+  display: "inline-grid",
+  gridTemplateColumns: "42px 64px 42px",
   alignItems: "center",
-  gap: 10,
-  padding: 6,
+  border: "1px solid #ded4c7",
   borderRadius: 999,
-  border: "1px solid #ddd3c5",
+  overflow: "hidden",
   background: "#fff",
 };
 
-const qtyButtonStyle: React.CSSProperties = {
-  width: 34,
-  height: 34,
-  borderRadius: 999,
-  border: "1px solid #ddd3c5",
-  background: "#fffaf4",
+const qtyButtonStyle: CSSProperties = {
+  width: 42,
+  height: 42,
+  border: 0,
+  background: "#f8f5ef",
   color: "#171717",
-  fontSize: 17,
-  lineHeight: 1,
+  fontSize: 18,
+  fontWeight: 850,
 };
 
-const qtyValueStyle: React.CSSProperties = {
-  minWidth: 34,
+const qtyValueStyle: CSSProperties = {
+  minWidth: 64,
   textAlign: "center",
   color: "#171717",
-  fontSize: 15,
-  fontWeight: 800,
-};
-
-const removeButtonStyle: React.CSSProperties = {
-  border: "none",
-  background: "transparent",
-  padding: 0,
-  color: "#7b7367",
+  fontWeight: 850,
   fontSize: 14,
-  textDecoration: "underline",
 };
 
-const desktopLineTotalStyle: React.CSSProperties = {
-  textAlign: "right",
-};
-
-const desktopLineTotalValueStyle: React.CSSProperties = {
-  color: "#171717",
-  fontSize: 17,
+const removeButtonStyle: CSSProperties = {
+  border: "1px solid #e5c9c9",
+  background: "#fff5f5",
+  color: "#8f2d2d",
+  minHeight: 42,
+  padding: "0 14px",
+  borderRadius: 999,
+  fontSize: 13,
   fontWeight: 850,
 };
 
-const summaryCardStyle: React.CSSProperties = {
-  border: "1px solid #ece3d7",
-  borderRadius: 24,
-  background: "#fff",
-  padding: 24,
+const summaryCardStyle: CSSProperties = {
   position: "sticky",
   top: 20,
+  display: "grid",
+  gap: 16,
+  padding: 24,
+  borderRadius: 24,
+  background: "#fff",
+  border: "1px solid #ece3d7",
+  boxShadow: "0 10px 30px rgba(23,23,23,0.035)",
 };
 
-const summaryTitleStyle: React.CSSProperties = {
-  margin: "0 0 18px",
+const summaryTitleStyle: CSSProperties = {
+  margin: 0,
   color: "#171717",
   fontSize: 22,
-  lineHeight: 1.2,
   fontWeight: 850,
 };
 
-const summaryRowsStyle: React.CSSProperties = {
+const summaryRowsStyle: CSSProperties = {
   display: "grid",
-  gap: 12,
-  marginBottom: 16,
+  gap: 10,
 };
 
-const summaryRowStyle: React.CSSProperties = {
+const summaryRowStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   gap: 12,
   color: "#5d554a",
-  fontSize: 15,
+  fontSize: 14,
 };
 
-const summaryTotalStyle: React.CSSProperties = {
+const grandTotalRowStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   gap: 12,
-  paddingTop: 16,
-  borderTop: "1px solid #ece3d7",
+  paddingTop: 12,
+  borderTop: "1px solid #eee5d9",
   color: "#171717",
-  fontSize: 18,
+  fontSize: 17,
   fontWeight: 850,
-  marginBottom: 16,
 };
 
-const noticeStyle: React.CSSProperties = {
-  padding: "13px 14px",
+const summaryNoticeStyle: CSSProperties = {
+  padding: 13,
   borderRadius: 16,
-  background: "#f8f5ef",
-  border: "1px solid #eee5d9",
-  color: "#6b6256",
+  border: "1px solid #eadbb5",
+  background: "#fff8e7",
+  color: "#6b5530",
   fontSize: 13,
-  lineHeight: 1.7,
-  marginBottom: 16,
-};
-
-const buttonGridStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 10,
-};
-
-const primaryButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 54,
-  padding: "0 20px",
-  borderRadius: 999,
-  background: "#171717",
-  color: "#fff",
-  textDecoration: "none",
-  fontWeight: 850,
-  fontSize: 14,
-  border: "1px solid #171717",
-};
-
-const secondaryButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 52,
-  padding: "0 20px",
-  borderRadius: 999,
-  background: "#fff",
-  color: "#171717",
-  textDecoration: "none",
-  fontWeight: 800,
-  fontSize: 14,
-  border: "1px solid #ddd3c5",
-};
-
-const clearButtonStyle: React.CSSProperties = {
-  minHeight: 52,
-  padding: "0 20px",
-  borderRadius: 999,
-  background: "#fff",
-  color: "#171717",
-  border: "1px solid #ddd3c5",
+  lineHeight: 1.65,
   fontWeight: 700,
-  fontSize: 14,
 };
 
-const primaryLinkStyle: React.CSSProperties = {
-  width: "fit-content",
+const emptyCardStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+  padding: 32,
+  borderRadius: 26,
+  background: "#fff",
+  border: "1px solid #ece3d7",
+  boxShadow: "0 10px 30px rgba(23,23,23,0.035)",
+};
+
+const emptyTitleStyle: CSSProperties = {
+  margin: 0,
+  color: "#171717",
+  fontSize: "clamp(1.8rem, 3vw, 2.8rem)",
+  lineHeight: 1.08,
+  fontWeight: 850,
+};
+
+const errorBoxStyle: CSSProperties = {
+  marginBottom: 18,
+  padding: 14,
+  borderRadius: 16,
+  background: "#fff1f1",
+  border: "1px solid #efc9c9",
+  color: "#7a2222",
+  fontSize: 14,
+  lineHeight: 1.6,
+  fontWeight: 700,
+};
+
+const noticeBoxStyle: CSSProperties = {
+  marginBottom: 18,
+  padding: 14,
+  borderRadius: 16,
+  background: "#fff8e7",
+  border: "1px solid #eadbb5",
+  color: "#6b5530",
+  fontSize: 14,
+  lineHeight: 1.6,
+  fontWeight: 700,
+};
+
+const primaryLinkStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 52,
+  minHeight: 50,
   padding: "0 20px",
   borderRadius: 999,
   background: "#171717",
   color: "#fff",
   textDecoration: "none",
   fontWeight: 850,
-  fontSize: 14,
   border: "1px solid #171717",
+};
+
+const secondaryLinkStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 50,
+  padding: "0 20px",
+  borderRadius: 999,
+  background: "#fff",
+  color: "#171717",
+  textDecoration: "none",
+  fontWeight: 850,
+  border: "1px solid #ded4c7",
+};
+
+const clearButtonStyle: CSSProperties = {
+  minHeight: 48,
+  borderRadius: 999,
+  background: "#fff",
+  color: "#8f2d2d",
+  fontWeight: 850,
+  border: "1px solid #e5c9c9",
 };

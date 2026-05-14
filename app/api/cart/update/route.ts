@@ -23,37 +23,10 @@ function toPositiveInteger(value: unknown, fallback: number) {
   return floored > 0 ? floored : fallback;
 }
 
-function getItemMinQuantity(item: any) {
-  return (
-    toPositiveInteger(item?.min_quantity_number, 0) ||
-    toPositiveInteger(item?.min_quantity, 0) ||
-    1
-  );
-}
-
 function getItemBoxQuantity(item: any) {
   return (
     toPositiveInteger(item?.box_quantity_number, 0) ||
     toPositiveInteger(item?.box_quantity, 0) ||
-    0
-  );
-}
-
-function getItemCaseQuantity(item: any) {
-  return (
-    toPositiveInteger(item?.case_quantity_number, 0) ||
-    toPositiveInteger(item?.case_quantity, 0) ||
-    0
-  );
-}
-
-function getItemStepQuantity(item: any) {
-  return (
-    toPositiveInteger(item?.step_quantity_number, 0) ||
-    toPositiveInteger(item?.step_quantity, 0) ||
-    getItemCaseQuantity(item) ||
-    getItemBoxQuantity(item) ||
-    getItemMinQuantity(item) ||
     1
   );
 }
@@ -122,10 +95,7 @@ export async function POST(req: Request) {
 
     const quantityRule = assertValidQuantityRule({
       quantity: requestedQuantity,
-      minQuantity: getItemMinQuantity(currentItem),
       boxQuantity: getItemBoxQuantity(currentItem),
-      caseQuantity: getItemCaseQuantity(currentItem),
-      stepQuantity: getItemStepQuantity(currentItem),
     });
 
     const cart = await updateCartItemQuantity(

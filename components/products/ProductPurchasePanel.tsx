@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { useCart } from "../cart/CartContext";
 import { formatMoney } from "../../lib/money";
@@ -8,65 +9,57 @@ import { formatMoney } from "../../lib/money";
 export type VariantItem = {
   id?: string;
   product_slug?: string;
-  title?: string;
-  name?: string;
-  option1_name?: string;
-  option1_value?: string;
-  option2_name?: string;
-  option2_value?: string;
-  option3_name?: string;
-  option3_value?: string;
-  sku?: string;
-  barcode?: string;
-  price?: string;
-  compare_at_price?: string;
-  inventory_tracker?: string;
-  inventory_policy?: string;
-  fulfillment_service?: string;
-  requires_shipping?: string;
-  taxable?: string;
-  variant_image?: string;
-  image_id?: string;
-  weight?: string;
-  weight_unit?: string;
-  min_quantity?: string;
-  box_quantity?: string;
-  case_quantity?: string;
-  step_quantity?: string;
-  status?: string;
+  product_id?: string;
+  title?: string | null;
+  name?: string | null;
+  option1_name?: string | null;
+  option1_value?: string | null;
+  option2_name?: string | null;
+  option2_value?: string | null;
+  option3_name?: string | null;
+  option3_value?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
+  price?: string | number | null;
+  compare_at_price?: string | number | null;
+  status?: string | null;
+  variant_image?: string | null;
+  variant_image_url?: string | null;
+  image_id?: string | null;
+  variant_image_file_id?: string | null;
+  variant_image_legacy_id?: string | null;
+  box_quantity?: string | number | null;
+  sort_order?: string | number | null;
   created_at?: string;
   updated_at?: string;
 };
 
 type ProductPurchasePanelProps = {
   product: {
+    id?: string;
     title?: string;
     slug?: string;
     image?: string;
+    sku?: string | number | null;
+    price?: string | number | null;
+    compare_at_price?: string | number | null;
+    box_quantity?: string | number | null;
   };
   variants?: VariantItem[];
   onVariantChange?: (variant: VariantItem | null) => void;
 };
 
 type QuantityRule = {
-  minQuantity: number;
   boxQuantity: number;
-  caseQuantity: number;
-  stepQuantity: number;
   message: string;
 };
 
-function normalize(value?: string) {
-  return String(value || "").trim();
+function normalize(value?: string | number | boolean | null) {
+  return String(value ?? "").trim();
 }
 
-function normalizeLower(value?: string) {
+function normalizeLower(value?: string | number | boolean | null) {
   return normalize(value).toLowerCase();
-}
-
-function isMeaningfulValue(value?: string) {
-  const v = normalizeLower(value);
-  return Boolean(v) && v !== "default";
 }
 
 function toPositiveInteger(value: unknown, fallback: number) {
@@ -81,7 +74,17 @@ function toPositiveInteger(value: unknown, fallback: number) {
   return floored > 0 ? floored : fallback;
 }
 
-function parsePrice(value?: string) {
+function toSafeOrder(value: unknown) {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : 999999;
+}
+
+function parsePrice(value?: string | number | null) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+
   const raw = normalize(value);
   if (!raw) return 0;
 
@@ -104,167 +107,82 @@ function parsePrice(value?: string) {
   }
 
   const parsed = Number(normalizedNumber);
+
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function buildVariantLabel(variant: VariantItem | null) {
+function isActiveStatus(value: unknown) {
+  const status = normalizeLower(value);
+
+  return status === "" || status === "published" || status === "active";
+}
+
+function getUsableVariants(variants: VariantItem[]) {
+  return [...variants]
+    .filter((variant) => isActiveStatus(variant.status))
+    .sort((a, b) => toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order));
+}
+
+function getBackendVariant(variants: VariantItem[]) {
+  const usableVariants = getUsableVariants(variants);
+
+  return usableVariants[0] || null;
+}
+
+function getVariantImage(variant: VariantItem | null) {
   if (!variant) return "";
 
-  const titled = normalize(variant.title || variant.name);
-  if (titled) return titled;
-
-  const values = [
-    normalize(variant.option1_value),
-    normalize(variant.option2_value),
-    normalize(variant.option3_value),
-  ].filter((item) => item && item.toLowerCase() !== "default");
-
-  if (values.length) return values.join(" / ");
-
-  return normalize(variant.sku) || "Default";
-}
-
-function getOptionMeta(
-  variants: VariantItem[],
-  optionNameKey: "option1_name" | "option2_name" | "option3_name",
-  optionValueKey: "option1_value" | "option2_value" | "option3_value"
-) {
-  const optionName =
-    normalize(
-      variants.find((variant) => isMeaningfulValue(variant[optionValueKey]))?.[
-        optionNameKey
-      ]
-    ) || "";
-
-  const values = Array.from(
-    new Set(
-      variants
-        .map((variant) => normalize(variant[optionValueKey]))
-        .filter((value) => isMeaningfulValue(value))
-    )
-  );
-
-  return {
-    optionName,
-    values,
-  };
-}
-
-function filterOutDefaultVariantsWhenRealOnesExist(variants: VariantItem[]) {
-  const hasRealVariant = variants.some(
-    (variant) =>
-      isMeaningfulValue(variant.option1_value) ||
-      isMeaningfulValue(variant.option2_value) ||
-      isMeaningfulValue(variant.option3_value)
-  );
-
-  if (!hasRealVariant) {
-    return variants;
-  }
-
-  return variants.filter(
-    (variant) =>
-      isMeaningfulValue(variant.option1_value) ||
-      isMeaningfulValue(variant.option2_value) ||
-      isMeaningfulValue(variant.option3_value)
-  );
-}
-
-function getInitialVariant(variants: VariantItem[]) {
-  return variants[0] || null;
-}
-
-function findMatchingVariant(
-  variants: VariantItem[],
-  option1Values: string[],
-  option2Values: string[],
-  option3Values: string[],
-  selectedOption1: string,
-  selectedOption2: string,
-  selectedOption3: string
-) {
   return (
-    variants.find((variant) => {
-      const v1 = normalize(variant.option1_value);
-      const v2 = normalize(variant.option2_value);
-      const v3 = normalize(variant.option3_value);
-
-      const option1Matches = !option1Values.length || v1 === selectedOption1;
-      const option2Matches = !option2Values.length || v2 === selectedOption2;
-      const option3Matches = !option3Values.length || v3 === selectedOption3;
-
-      return option1Matches && option2Matches && option3Matches;
-    }) || getInitialVariant(variants)
+    normalize(variant.variant_image_url) ||
+    normalize(variant.variant_image) ||
+    normalize(variant.variant_image_file_id) ||
+    normalize(variant.variant_image_legacy_id) ||
+    normalize(variant.image_id)
   );
 }
 
-function getQuantityRule(variant: VariantItem | null): QuantityRule {
-  const rawMinQuantity = toPositiveInteger(variant?.min_quantity, 1);
-  const boxQuantity = toPositiveInteger(variant?.box_quantity, 0);
-  const caseQuantity = toPositiveInteger(variant?.case_quantity, 0);
-
-  const stepQuantity =
-    toPositiveInteger(variant?.step_quantity, 0) ||
-    caseQuantity ||
-    boxQuantity ||
-    rawMinQuantity ||
-    1;
-
-  const minQuantity =
-    caseQuantity > 0
-      ? Math.max(rawMinQuantity, caseQuantity)
-      : boxQuantity > 0
-        ? Math.max(rawMinQuantity, boxQuantity)
-        : rawMinQuantity;
-
-  let message = "";
-
-  if (caseQuantity > 0) {
-    message = `This product is ordered in case multiples of ${caseQuantity}.`;
-  } else if (boxQuantity > 0) {
-    message = `This product is ordered in box multiples of ${boxQuantity}.`;
-  } else if (stepQuantity > 1) {
-    message = `This product is ordered in increments of ${stepQuantity}.`;
-  } else if (minQuantity > 1) {
-    message = `Minimum quantity is ${minQuantity}.`;
-  }
+function getQuantityRule(
+  product: ProductPurchasePanelProps["product"]
+): QuantityRule {
+  const boxQuantity = toPositiveInteger(product.box_quantity, 0) || 1;
 
   return {
-    minQuantity,
     boxQuantity,
-    caseQuantity,
-    stepQuantity,
-    message,
+    message:
+      boxQuantity > 1
+        ? `This product is ordered in box multiples of ${boxQuantity}.`
+        : "",
   };
 }
 
-function normalizeQuantityToRule(quantity: number, rule: QuantityRule) {
-  const safeQuantity = Math.max(
-    rule.minQuantity,
-    Math.floor(Number(quantity) || rule.minQuantity)
-  );
+function normalizeQuantityToBox(quantity: unknown, rule: QuantityRule) {
+  const parsed = Number(quantity);
+  const requested = Number.isFinite(parsed)
+    ? Math.floor(parsed)
+    : rule.boxQuantity;
 
-  const remainder = safeQuantity % rule.stepQuantity;
+  const safeQuantity = Math.max(rule.boxQuantity, requested);
+  const remainder = safeQuantity % rule.boxQuantity;
 
   if (remainder === 0) {
     return safeQuantity;
   }
 
-  return safeQuantity + (rule.stepQuantity - remainder);
+  return safeQuantity + (rule.boxQuantity - remainder);
 }
 
 function getNextDecreaseQuantity(quantity: number, rule: QuantityRule) {
-  const next = quantity - rule.stepQuantity;
+  const next = quantity - rule.boxQuantity;
 
-  if (next < rule.minQuantity) {
-    return rule.minQuantity;
+  if (next < rule.boxQuantity) {
+    return rule.boxQuantity;
   }
 
-  return normalizeQuantityToRule(next, rule);
+  return normalizeQuantityToBox(next, rule);
 }
 
 function getNextIncreaseQuantity(quantity: number, rule: QuantityRule) {
-  return normalizeQuantityToRule(quantity + rule.stepQuantity, rule);
+  return normalizeQuantityToBox(quantity + rule.boxQuantity, rule);
 }
 
 function ProductPurchasePanelComponent({
@@ -274,183 +192,82 @@ function ProductPurchasePanelComponent({
 }: ProductPurchasePanelProps) {
   const { handleAddToCart, isAdding } = useCart();
 
-  const [selectedOption1, setSelectedOption1] = useState("");
-  const [selectedOption2, setSelectedOption2] = useState("");
-  const [selectedOption3, setSelectedOption3] = useState("");
   const [quantity, setQuantity] = useState(1);
+  const [quantityInput, setQuantityInput] = useState("1");
   const [localError, setLocalError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  const activeVariants = useMemo(() => {
-    const published = variants.filter((variant) =>
-      ["", "published", "active"].includes(normalizeLower(variant.status))
-    );
-
-    const pool = published.length ? published : variants;
-    return filterOutDefaultVariantsWhenRealOnesExist(pool);
+  const backendVariant = useMemo(() => {
+    return getBackendVariant(variants);
   }, [variants]);
 
-  const option1 = useMemo(
-    () => getOptionMeta(activeVariants, "option1_name", "option1_value"),
-    [activeVariants]
-  );
-
-  const option2 = useMemo(
-    () => getOptionMeta(activeVariants, "option2_name", "option2_value"),
-    [activeVariants]
-  );
-
-  const option3 = useMemo(
-    () => getOptionMeta(activeVariants, "option3_name", "option3_value"),
-    [activeVariants]
-  );
-
-  useEffect(() => {
-    setSelectedOption1((prev) =>
-      option1.values.includes(prev) ? prev : option1.values[0] || ""
-    );
-  }, [option1.values]);
-
-  const availableOption2Values = useMemo(() => {
-    if (!option2.values.length) return [];
-
-    const scoped = activeVariants.filter((variant) => {
-      if (!option1.values.length) return true;
-      return normalize(variant.option1_value) === selectedOption1;
-    });
-
-    return Array.from(
-      new Set(
-        scoped
-          .map((variant) => normalize(variant.option2_value))
-          .filter((value) => isMeaningfulValue(value))
-      )
-    );
-  }, [activeVariants, option1.values, option2.values.length, selectedOption1]);
-
-  const availableOption3Values = useMemo(() => {
-    if (!option3.values.length) return [];
-
-    const scoped = activeVariants.filter((variant) => {
-      const option1Matches =
-        !option1.values.length ||
-        normalize(variant.option1_value) === selectedOption1;
-
-      const option2Matches =
-        !option2.values.length ||
-        normalize(variant.option2_value) === selectedOption2;
-
-      return option1Matches && option2Matches;
-    });
-
-    return Array.from(
-      new Set(
-        scoped
-          .map((variant) => normalize(variant.option3_value))
-          .filter((value) => isMeaningfulValue(value))
-      )
-    );
-  }, [
-    activeVariants,
-    option1.values,
-    option2.values,
-    option3.values.length,
-    selectedOption1,
-    selectedOption2,
-  ]);
-
-  useEffect(() => {
-    if (!option2.values.length) {
-      setSelectedOption2("");
-      return;
-    }
-
-    setSelectedOption2((prev) =>
-      availableOption2Values.includes(prev)
-        ? prev
-        : availableOption2Values[0] || ""
-    );
-  }, [option2.values.length, availableOption2Values]);
-
-  useEffect(() => {
-    if (!option3.values.length) {
-      setSelectedOption3("");
-      return;
-    }
-
-    setSelectedOption3((prev) =>
-      availableOption3Values.includes(prev)
-        ? prev
-        : availableOption3Values[0] || ""
-    );
-  }, [option3.values.length, availableOption3Values]);
-
-  const selectedVariant = useMemo(() => {
-    if (!activeVariants.length) return null;
-
-    return findMatchingVariant(
-      activeVariants,
-      option1.values,
-      option2.values,
-      option3.values,
-      selectedOption1,
-      selectedOption2,
-      selectedOption3
-    );
-  }, [
-    activeVariants,
-    option1.values,
-    option2.values,
-    option3.values,
-    selectedOption1,
-    selectedOption2,
-    selectedOption3,
-  ]);
-
   const quantityRule = useMemo(() => {
-    return getQuantityRule(selectedVariant);
-  }, [selectedVariant]);
+    return getQuantityRule(product);
+  }, [product]);
 
   useEffect(() => {
-    onVariantChange?.(selectedVariant);
-  }, [selectedVariant, onVariantChange]);
+    onVariantChange?.(backendVariant);
+  }, [backendVariant, onVariantChange]);
 
   useEffect(() => {
-    setQuantity(quantityRule.minQuantity);
+    const initialQuantity = quantityRule.boxQuantity;
+
+    setQuantity(initialQuantity);
+    setQuantityInput(String(initialQuantity));
     setLocalError("");
     setSuccessMessage("");
-  }, [selectedVariant?.id, quantityRule.minQuantity]);
+  }, [quantityRule.boxQuantity]);
 
-  const price = parsePrice(selectedVariant?.price);
-  const compareAtPrice = parsePrice(selectedVariant?.compare_at_price);
+  const price =
+    parsePrice(product.price) || parsePrice(backendVariant?.price) || 0;
+
+  const compareAtPrice =
+    parsePrice(product.compare_at_price) ||
+    parsePrice(backendVariant?.compare_at_price) ||
+    0;
+
   const hasDiscount = compareAtPrice > price && price > 0;
 
   const discountPercent = hasDiscount
     ? Math.round(((compareAtPrice - price) / compareAtPrice) * 100)
     : 0;
 
+  const effectiveSku =
+    normalize(product.sku) || normalize(backendVariant?.sku) || "";
+
+  const effectiveImage =
+    getVariantImage(backendVariant) || normalize(product.image) || "";
+
   const inquiryHref = `/contact-us?product=${encodeURIComponent(
     product.title || "Product"
-  )}&variant=${encodeURIComponent(buildVariantLabel(selectedVariant))}`;
+  )}`;
 
   const canAddToCart =
-    Boolean(product.slug) &&
-    Boolean(selectedVariant?.id) &&
-    price > 0 &&
-    quantity >= quantityRule.minQuantity;
+    Boolean(product.slug) && price > 0 && quantity >= quantityRule.boxQuantity;
+
+  function commitQuantity(rawValue: unknown) {
+    const next = normalizeQuantityToBox(rawValue, quantityRule);
+
+    setQuantity(next);
+    setQuantityInput(String(next));
+  }
 
   function decreaseQuantity() {
     setLocalError("");
     setSuccessMessage("");
 
-    setQuantity((prev) => getNextDecreaseQuantity(prev, quantityRule));
+    const next = getNextDecreaseQuantity(quantity, quantityRule);
+    setQuantity(next);
+    setQuantityInput(String(next));
   }
 
   function increaseQuantity() {
     setLocalError("");
     setSuccessMessage("");
 
-    setQuantity((prev) => getNextIncreaseQuantity(prev, quantityRule));
+    const next = getNextIncreaseQuantity(quantity, quantityRule);
+    setQuantity(next);
+    setQuantityInput(String(next));
   }
 
   async function onAddToCart() {
@@ -458,31 +275,42 @@ function ProductPurchasePanelComponent({
       setLocalError("");
       setSuccessMessage("");
 
-      if (!canAddToCart || !selectedVariant) {
+      if (!canAddToCart) {
         setLocalError("This product is currently available for quote request only.");
         return;
       }
 
-      const normalizedQuantity = normalizeQuantityToRule(quantity, quantityRule);
+      const normalizedQuantity = normalizeQuantityToBox(quantity, quantityRule);
 
-      await handleAddToCart({
+      setQuantity(normalizedQuantity);
+      setQuantityInput(String(normalizedQuantity));
+
+      const result = await handleAddToCart({
         product_slug: product.slug || "",
-        variant_id: selectedVariant.id || "",
+        variant_id: "",
         product_title: product.title || "",
-        variant_title: buildVariantLabel(selectedVariant),
-        sku: selectedVariant.sku || "",
-        image:
-          selectedVariant.variant_image ||
-          selectedVariant.image_id ||
-          product.image ||
-          "",
+        variant_title: "",
+        sku: effectiveSku,
+        image: effectiveImage,
         unit_price: price,
         compare_at_price: compareAtPrice,
         quantity: normalizedQuantity,
       });
 
-      setQuantity(normalizedQuantity);
-      setSuccessMessage("Added to quote cart.");
+      const finalQuantity =
+        Number(result.quantityRule?.quantity || normalizedQuantity) ||
+        normalizedQuantity;
+
+      setQuantity(finalQuantity);
+      setQuantityInput(String(finalQuantity));
+
+      if (result.quantityRule?.adjusted && result.quantityRule.message) {
+        setSuccessMessage(
+          `${result.quantityRule.message} Quantity was adjusted to ${finalQuantity} and added to quote cart.`
+        );
+      } else {
+        setSuccessMessage("Added to quote cart.");
+      }
     } catch (error) {
       setLocalError(
         error instanceof Error ? error.message : "Failed to add this item to cart."
@@ -490,39 +318,11 @@ function ProductPurchasePanelComponent({
     }
   }
 
-  if (!activeVariants.length) {
-    return (
-      <div style={panelStyle}>
-        <div style={{ display: "grid", gap: 16 }}>
-          <div>
-            <div style={panelTitleStyle}>Request Quote</div>
-            <p style={panelTextStyle}>
-              This product is currently presented as part of the catalog
-              structure. Contact our team for pricing, quantities, and
-              project-based inquiries.
-            </p>
-          </div>
-
-          <Link href={inquiryHref} style={primaryLinkStyle}>
-            Contact Sales
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={panelStyle}>
       <div style={{ display: "grid", gap: 18 }}>
         <div>
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "baseline",
-              flexWrap: "wrap",
-            }}
-          >
+          <div style={priceRowStyle}>
             <span style={priceStyle}>
               {price > 0 ? formatMoney(price) : "Request Quote"}
             </span>
@@ -543,66 +343,47 @@ function ProductPurchasePanelComponent({
           </p>
         </div>
 
-        {option1.optionName ? (
-          <VariantSelectBlock
-            label={option1.optionName}
-            values={option1.values}
-            value={selectedOption1}
-            onChange={(value) => {
-              setSelectedOption1(value);
-              setLocalError("");
-              setSuccessMessage("");
-            }}
-          />
-        ) : null}
-
-        {option2.optionName ? (
-          <VariantSelectBlock
-            label={option2.optionName}
-            values={availableOption2Values}
-            value={selectedOption2}
-            onChange={(value) => {
-              setSelectedOption2(value);
-              setLocalError("");
-              setSuccessMessage("");
-            }}
-          />
-        ) : null}
-
-        {option3.optionName ? (
-          <VariantSelectBlock
-            label={option3.optionName}
-            values={availableOption3Values}
-            value={selectedOption3}
-            onChange={(value) => {
-              setSelectedOption3(value);
-              setLocalError("");
-              setSuccessMessage("");
-            }}
-          />
-        ) : null}
-
         <div style={{ display: "grid", gap: 10 }}>
           <label style={labelStyle}>Quantity</label>
 
-          <div style={qtyWrapperStyle}>
+          <div style={quantityControlStyle}>
             <button
               type="button"
               onClick={decreaseQuantity}
-              disabled={isAdding || quantity <= quantityRule.minQuantity}
+              disabled={isAdding || quantity <= quantityRule.boxQuantity}
               style={{
                 ...qtyButtonStyle,
                 cursor:
-                  isAdding || quantity <= quantityRule.minQuantity
+                  isAdding || quantity <= quantityRule.boxQuantity
                     ? "not-allowed"
                     : "pointer",
-                opacity: isAdding || quantity <= quantityRule.minQuantity ? 0.65 : 1,
+                opacity:
+                  isAdding || quantity <= quantityRule.boxQuantity ? 0.65 : 1,
               }}
             >
               -
             </button>
 
-            <span style={qtyValueStyle}>{quantity}</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={quantityRule.boxQuantity}
+              step={quantityRule.boxQuantity}
+              value={quantityInput}
+              disabled={isAdding}
+              onChange={(event) => {
+                setLocalError("");
+                setSuccessMessage("");
+                setQuantityInput(event.target.value);
+              }}
+              onBlur={() => commitQuantity(quantityInput)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.currentTarget.blur();
+                }
+              }}
+              style={qtyInputStyle}
+            />
 
             <button
               type="button"
@@ -624,16 +405,11 @@ function ProductPurchasePanelComponent({
         </div>
 
         <div style={infoGridStyle}>
+          <InfoRow label="SKU" value={effectiveSku || "-"} />
           <InfoRow
-            label="Selected Variant"
-            value={buildVariantLabel(selectedVariant) || "-"}
+            label="Box Quantity"
+            value={String(quantityRule.boxQuantity)}
           />
-          <InfoRow label="SKU" value={normalize(selectedVariant?.sku) || "-"} />
-          <InfoRow
-            label="Minimum Quantity"
-            value={String(quantityRule.minQuantity)}
-          />
-          <InfoRow label="Step Quantity" value={String(quantityRule.stepQuantity)} />
         </div>
 
         {localError ? (
@@ -665,63 +441,9 @@ function ProductPurchasePanelComponent({
   );
 }
 
-function VariantSelectBlock({
-  label,
-  values,
-  value,
-  onChange,
-}: {
-  label: string;
-  values: string[];
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  if (!values.length) return null;
-
-  return (
-    <div style={{ display: "grid", gap: 10 }}>
-      <label style={labelStyle}>{label}</label>
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        {values.map((item) => {
-          const active = item === value;
-
-          return (
-            <button
-              key={item}
-              type="button"
-              onClick={() => onChange(item)}
-              style={{
-                minHeight: 42,
-                padding: "0 16px",
-                borderRadius: 999,
-                border: active ? "1px solid #171717" : "1px solid #ddd3c5",
-                background: active ? "#f8f5ef" : "#fff",
-                color: "#171717",
-                fontWeight: 800,
-                cursor: "pointer",
-              }}
-            >
-              {item}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 12,
-        paddingBottom: 10,
-        borderBottom: "1px solid #eee5d9",
-      }}
-    >
+    <div style={infoRowStyle}>
       <span style={{ color: "#7b7367", fontWeight: 700 }}>{label}</span>
       <span style={{ color: "#171717", fontWeight: 850, textAlign: "right" }}>
         {value}
@@ -730,48 +452,42 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-const panelStyle: React.CSSProperties = {
+const panelStyle: CSSProperties = {
   border: "1px solid #e8dfd2",
-  borderRadius: 24,
+  borderRadius: 26,
   padding: 24,
   background: "#fffaf4",
+  boxShadow: "0 12px 32px rgba(23,23,23,0.04)",
 };
 
-const panelTitleStyle: React.CSSProperties = {
-  fontSize: 24,
-  fontWeight: 850,
-  color: "#171717",
-  marginBottom: 8,
+const priceRowStyle: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  alignItems: "baseline",
+  flexWrap: "wrap",
 };
 
-const panelTextStyle: React.CSSProperties = {
-  margin: 0,
-  color: "#5d554a",
-  fontSize: 15,
-  lineHeight: 1.8,
-};
-
-const priceStyle: React.CSSProperties = {
+const priceStyle: CSSProperties = {
   fontSize: 32,
   lineHeight: 1,
   fontWeight: 850,
   color: "#171717",
 };
 
-const priceNoteStyle: React.CSSProperties = {
+const priceNoteStyle: CSSProperties = {
   margin: "10px 0 0",
   color: "#6b6256",
   fontSize: 13,
   lineHeight: 1.7,
 };
 
-const comparePriceStyle: React.CSSProperties = {
+const comparePriceStyle: CSSProperties = {
   textDecoration: "line-through",
   color: "#8c8378",
   fontWeight: 700,
 };
 
-const discountBadgeStyle: React.CSSProperties = {
+const discountBadgeStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   minHeight: 28,
@@ -783,7 +499,7 @@ const discountBadgeStyle: React.CSSProperties = {
   fontWeight: 850,
 };
 
-const labelStyle: React.CSSProperties = {
+const labelStyle: CSSProperties = {
   display: "block",
   fontSize: 13,
   fontWeight: 850,
@@ -792,107 +508,111 @@ const labelStyle: React.CSSProperties = {
   textTransform: "uppercase",
 };
 
-const qtyWrapperStyle: React.CSSProperties = {
-  display: "inline-flex",
+const quantityControlStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "48px minmax(90px, 1fr) 48px",
   alignItems: "center",
-  gap: 10,
+  width: "100%",
+  maxWidth: 260,
+  minHeight: 50,
+  border: "1px solid #ddd3c5",
+  borderRadius: 999,
+  overflow: "hidden",
+  background: "#fff",
 };
 
-const qtyButtonStyle: React.CSSProperties = {
-  width: 42,
-  height: 42,
-  borderRadius: 12,
-  border: "1px solid #ddd3c5",
-  background: "#fff",
+const qtyButtonStyle: CSSProperties = {
+  height: 50,
+  border: 0,
+  background: "#f8f5ef",
   color: "#171717",
   fontSize: 18,
-  fontWeight: 800,
+  fontWeight: 850,
 };
 
-const qtyValueStyle: React.CSSProperties = {
-  minWidth: 42,
+const qtyInputStyle: CSSProperties = {
+  height: 50,
+  border: 0,
+  outline: "none",
   textAlign: "center",
+  fontSize: 16,
   fontWeight: 850,
   color: "#171717",
+  background: "#fff",
 };
 
-const ruleNoteStyle: React.CSSProperties = {
-  margin: 0,
-  color: "#6b6256",
+const ruleNoteStyle: CSSProperties = {
+  color: "#6b5530",
+  background: "#fff8e7",
+  border: "1px solid #eadbb5",
+  borderRadius: 14,
+  padding: "10px 12px",
   fontSize: 13,
   lineHeight: 1.6,
   fontWeight: 700,
 };
 
-const infoGridStyle: React.CSSProperties = {
+const infoGridStyle: CSSProperties = {
   display: "grid",
-  gap: 12,
-  padding: 18,
+  gap: 10,
+  padding: 16,
   borderRadius: 18,
   background: "#fff",
   border: "1px solid #eee5d9",
 };
 
-const errorBoxStyle: React.CSSProperties = {
-  padding: "12px 14px",
-  borderRadius: 14,
-  border: "1px solid #f1c7c7",
-  background: "#fff4f4",
-  color: "#9b2c2c",
-  fontSize: 14,
-  fontWeight: 600,
+const infoRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  paddingBottom: 10,
+  borderBottom: "1px solid #eee5d9",
 };
 
-const successBoxStyle: React.CSSProperties = {
-  padding: "12px 14px",
+const errorBoxStyle: CSSProperties = {
+  padding: 12,
   borderRadius: 14,
-  border: "1px solid #cfe6d5",
-  background: "#f3fbf5",
-  color: "#1f6b3b",
-  fontSize: 14,
-  fontWeight: 600,
+  background: "#fff1f1",
+  border: "1px solid #efc9c9",
+  color: "#7a2222",
+  fontSize: 13,
+  lineHeight: 1.6,
+  fontWeight: 700,
 };
 
-const primaryButtonStyle: React.CSSProperties = {
-  minHeight: 52,
+const successBoxStyle: CSSProperties = {
+  padding: 12,
+  borderRadius: 14,
+  background: "#eef8f0",
+  border: "1px solid #cfe7d8",
+  color: "#1d6a43",
+  fontSize: 13,
+  lineHeight: 1.6,
+  fontWeight: 700,
+};
+
+const primaryButtonStyle: CSSProperties = {
+  minHeight: 54,
   borderRadius: 999,
   border: "1px solid #171717",
   background: "#171717",
   color: "#fff",
-  fontWeight: 850,
   fontSize: 15,
+  fontWeight: 850,
 };
 
-const primaryLinkStyle: React.CSSProperties = {
+const secondaryLinkStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
   minHeight: 52,
-  borderRadius: 999,
-  border: "1px solid #171717",
-  background: "#171717",
-  color: "#fff",
-  fontWeight: 850,
-  cursor: "pointer",
-  fontSize: 15,
-  textDecoration: "none",
   padding: "0 20px",
-};
-
-const secondaryLinkStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 52,
   borderRadius: 999,
-  border: "1px solid #d8cebf",
   background: "#fff",
   color: "#171717",
-  fontWeight: 850,
-  cursor: "pointer",
-  fontSize: 15,
   textDecoration: "none",
-  padding: "0 20px",
+  fontWeight: 850,
+  border: "1px solid #ddd3c5",
 };
 
 export default memo(ProductPurchasePanelComponent);

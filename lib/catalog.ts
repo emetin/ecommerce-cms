@@ -1,73 +1,31 @@
 import {
-  findSheetItemByField,
-  findSheetItemsByField,
-} from "./sheets";
+  getCatalogBundle,
+  type ProductItem,
+  type ProductVariantItem,
+} from "./product-data";
 import { toNumber } from "./money";
 
-export type CatalogProduct = {
-  id?: string;
-  title?: string;
-  slug?: string;
-  description?: string;
-  short_description?: string;
-  image?: string;
-  gallery?: string;
-  collection_slug?: string;
-  status?: string;
-  featured?: string;
-  seo_title?: string;
-  seo_description?: string;
-  vendor?: string;
-  product_category?: string;
-  type?: string;
-  tags?: string;
-};
-
-export type CatalogVariant = {
-  id?: string;
-  product_slug?: string;
-  title?: string;
-  name?: string;
-  option1_name?: string;
-  option1_value?: string;
-  option2_name?: string;
-  option2_value?: string;
-  option3_name?: string;
-  option3_value?: string;
-  sku?: string;
-  price?: string;
-  compare_at_price?: string;
-  variant_image?: string;
-  image_id?: string;
-  min_quantity?: string;
-  box_quantity?: string;
-  case_quantity?: string;
-  step_quantity?: string;
-  status?: string;
-};
+export type CatalogProduct = ProductItem;
+export type CatalogVariant = ProductVariantItem;
 
 export type ResolvedCartCatalogItem = {
   product: CatalogProduct;
   variant: CatalogVariant | null;
+  variantId: string;
   productTitle: string;
   variantTitle: string;
   sku: string;
   image: string;
   unitPrice: number;
   compareAtPrice: number;
-  minQuantity: number;
   boxQuantity: number;
-  caseQuantity: number;
-  stepQuantity: number;
 };
 
-const CATALOG_LOOKUP_TTL_SECONDS = 60;
-
-function normalize(value?: string | number | null) {
+function normalize(value?: string | number | boolean | null) {
   return String(value ?? "").trim();
 }
 
-function normalizeLower(value?: string | number | null) {
+function normalizeLower(value?: string | number | boolean | null) {
   return normalize(value).toLowerCase();
 }
 
@@ -83,129 +41,168 @@ function toPositiveInteger(value: unknown, fallback: number) {
   return floored > 0 ? floored : fallback;
 }
 
+function toSafeOrder(value: unknown) {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : 999999;
+}
+
+function isActiveStatus(value: unknown) {
+  const status = normalizeLower(value);
+
+  return status === "" || status === "published" || status === "active";
+}
+
+function getVariantProductSlug(variant: CatalogVariant) {
+  return normalizeLower((variant as any).product_slug);
+}
+
 function buildVariantTitle(variant: CatalogVariant | null) {
   if (!variant) return "";
 
-  const directTitle = normalize(variant.title || variant.name);
+  const directTitle = normalize((variant as any).title || (variant as any).name);
 
-  if (directTitle) {
-    return directTitle;
+  if (!directTitle) return "";
+
+  const lowered = directTitle.toLowerCase();
+
+  if (
+    lowered === "default" ||
+    lowered === "default title" ||
+    lowered === "default variant"
+  ) {
+    return "";
   }
 
-  const values = [
-    normalize(variant.option1_value),
-    normalize(variant.option2_value),
-    normalize(variant.option3_value),
-  ].filter((item) => item && item.toLowerCase() !== "default");
-
-  if (values.length) {
-    return values.join(" / ");
-  }
-
-  return normalize(variant.sku) || "Default";
+  return directTitle;
 }
 
-function getVariantQuantityRules(variant: CatalogVariant | null) {
-  const minQuantity = toPositiveInteger(variant?.min_quantity, 1);
-  const boxQuantity = toPositiveInteger(variant?.box_quantity, 0);
-  const caseQuantity = toPositiveInteger(variant?.case_quantity, 0);
+function getProductBoxQuantity(product: CatalogProduct) {
+  return toPositiveInteger((product as any).box_quantity, 0) || 1;
+}
 
-  const stepQuantity =
-    toPositiveInteger(variant?.step_quantity, 0) ||
-    caseQuantity ||
-    boxQuantity ||
-    minQuantity ||
-    1;
+function getVariantImage(variant: CatalogVariant | null) {
+  if (!variant) return "";
 
-  return {
-    minQuantity,
-    boxQuantity,
-    caseQuantity,
-    stepQuantity,
-  };
+  return (
+    normalize((variant as any).variant_image_url) ||
+    normalize((variant as any).variant_image) ||
+    normalize((variant as any).variant_image_file_id) ||
+    normalize((variant as any).variant_image_legacy_id) ||
+    normalize((variant as any).image_id)
+  );
+}
+
+function getProductImage(product: CatalogProduct) {
+  return (
+    normalize((product as any).image_url) ||
+    normalize((product as any).image) ||
+    ""
+  );
+}
+
+function getProductPrice(product: CatalogProduct) {
+  return toNumber((product as any).price ?? "0");
+}
+
+function getProductCompareAtPrice(product: CatalogProduct) {
+  return toNumber((product as any).compare_at_price ?? "0");
+}
+
+function getProductSku(product: CatalogProduct) {
+  return normalize((product as any).sku);
+}
+
+function getBackendVariant(options: {
+  allVariants: CatalogVariant[];
+  variantsBySlug: Map<string, CatalogVariant[]>;
+  product: CatalogProduct;
+  productSlug: string;
+}) {
+  const { allVariants, variantsBySlug, product, productSlug } = options;
+
+  const productId = normalize((product as any).id);
+  const normalizedProductSlug = normalizeLower(productSlug);
+
+  const fromMap = variantsBySlug.get(normalizedProductSlug) || [];
+
+  const scoped = fromMap.length
+    ? fromMap
+    : allVariants.filter((variant) => {
+        const variantProductId = normalize((variant as any).product_id);
+        const variantSlug = getVariantProductSlug(variant);
+
+        return (
+          (productId && variantProductId === productId) ||
+          variantSlug === normalizedProductSlug
+        );
+      });
+
+  const active = scoped
+    .filter((variant) => isActiveStatus((variant as any).status))
+    .sort((a, b) => toSafeOrder((a as any).sort_order) - toSafeOrder((b as any).sort_order));
+
+  return active[0] || scoped[0] || null;
 }
 
 export async function resolveCartCatalogItem(
   productSlug: string,
-  variantId?: string
+  _variantId?: string
 ): Promise<ResolvedCartCatalogItem> {
   const normalizedProductSlug = normalizeLower(productSlug);
-  const normalizedVariantId = normalize(variantId);
 
   if (!normalizedProductSlug) {
     throw new Error("product_slug is required.");
   }
 
-  const productRaw = await findSheetItemByField(
-    "products",
-    "slug",
-    normalizedProductSlug,
-    {
-      forceFresh: false,
-      ttlSeconds: CATALOG_LOOKUP_TTL_SECONDS,
-    }
-  );
+  const { products, allVariants, variantsBySlug } = await getCatalogBundle();
 
-  const product = productRaw as CatalogProduct | null;
+  const product =
+    products.find(
+      (item) =>
+        normalizeLower((item as any).slug) === normalizedProductSlug &&
+        normalizeLower((item as any).status) === "published"
+    ) || null;
 
   if (!product) {
     throw new Error("Product not found.");
   }
 
-  if (normalizeLower(product.status) !== "published") {
-    throw new Error("Product is not available.");
-  }
+  const backendVariant = getBackendVariant({
+    allVariants,
+    variantsBySlug,
+    product,
+    productSlug: normalizedProductSlug,
+  });
 
-  const variantsRaw = await findSheetItemsByField(
-    "product_variants",
-    "product_slug",
-    normalizedProductSlug,
-    {
-      forceFresh: false,
-      ttlSeconds: CATALOG_LOOKUP_TTL_SECONDS,
-    }
+  const productPrice = getProductPrice(product);
+  const variantPrice = toNumber((backendVariant as any)?.price ?? "0");
+
+  const productCompareAtPrice = getProductCompareAtPrice(product);
+  const variantCompareAtPrice = toNumber(
+    (backendVariant as any)?.compare_at_price ?? "0"
   );
 
-  const variants = (variantsRaw as CatalogVariant[]) || [];
+  const unitPrice = productPrice || variantPrice;
+  const compareAtPrice = productCompareAtPrice || variantCompareAtPrice;
 
-  const activeVariants = variants.filter((variant) =>
-    ["", "published", "active"].includes(normalizeLower(variant.status))
-  );
-
-  let selectedVariant: CatalogVariant | null = null;
-
-  if (normalizedVariantId) {
-    selectedVariant =
-      activeVariants.find(
-        (variant) => normalize(variant.id) === normalizedVariantId
-      ) || null;
-
-    if (!selectedVariant) {
-      throw new Error("Selected variant could not be found.");
-    }
-  } else if (activeVariants.length > 0) {
-    selectedVariant = activeVariants[0];
-  }
-
-  const unitPrice = toNumber(selectedVariant?.price ?? "0");
-  const compareAtPrice = toNumber(selectedVariant?.compare_at_price ?? "0");
-  const quantityRules = getVariantQuantityRules(selectedVariant);
+  const sku = getProductSku(product) || normalize((backendVariant as any)?.sku);
+  const image = getProductImage(product) || getVariantImage(backendVariant);
+  const boxQuantity = getProductBoxQuantity(product);
 
   return {
     product,
-    variant: selectedVariant,
-    productTitle: normalize(product.title) || "Product",
-    variantTitle: buildVariantTitle(selectedVariant),
-    sku: normalize(selectedVariant?.sku),
-    image:
-      normalize(selectedVariant?.variant_image) ||
-      normalize(selectedVariant?.image_id) ||
-      normalize(product.image),
+    variant: backendVariant,
+    variantId:
+      normalize((backendVariant as any)?.id) ||
+      normalize((product as any).id) ||
+      normalizedProductSlug,
+    productTitle: normalize((product as any).title) || "Product",
+    variantTitle: buildVariantTitle(backendVariant),
+    sku,
+    image,
     unitPrice,
     compareAtPrice,
-    minQuantity: quantityRules.minQuantity,
-    boxQuantity: quantityRules.boxQuantity,
-    caseQuantity: quantityRules.caseQuantity,
-    stepQuantity: quantityRules.stepQuantity,
+    boxQuantity,
   };
 }

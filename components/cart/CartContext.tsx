@@ -14,6 +14,7 @@ import {
   fetchCart,
   removeCartItemRequest,
   updateCartItem,
+  type CartQuantityRuleResponse,
 } from "./cart-storage";
 
 type CartPayload = {
@@ -28,6 +29,11 @@ type CartPayload = {
   quantity?: number;
 };
 
+type CartMutationResult = {
+  cart: any;
+  quantityRule: CartQuantityRuleResponse | null;
+};
+
 type CartContextType = {
   cart: any | null;
   isLoading: boolean;
@@ -37,14 +43,19 @@ type CartContextType = {
   isUpdating: boolean;
   isDrawerOpen: boolean;
   error: string;
+  lastQuantityRule: CartQuantityRuleResponse | null;
   openDrawer: () => void;
   closeDrawer: () => void;
   clearError: () => void;
+  clearLastQuantityRule: () => void;
   refreshCart: () => Promise<void>;
-  handleAddToCart: (payload: CartPayload) => Promise<void>;
-  handleUpdateQuantity: (itemId: string, quantity: number) => Promise<void>;
-  handleRemoveItem: (itemId: string) => Promise<void>;
-  handleClearCart: () => Promise<void>;
+  handleAddToCart: (payload: CartPayload) => Promise<CartMutationResult>;
+  handleUpdateQuantity: (
+    itemId: string,
+    quantity: number
+  ) => Promise<CartMutationResult>;
+  handleRemoveItem: (itemId: string) => Promise<CartMutationResult>;
+  handleClearCart: () => Promise<CartMutationResult>;
   itemCount: number;
 };
 
@@ -84,6 +95,16 @@ function normalizeCart(nextCart: any) {
   };
 }
 
+function createMutationResult(
+  cart: any,
+  quantityRule: CartQuantityRuleResponse | null = null
+): CartMutationResult {
+  return {
+    cart: normalizeCart(cart),
+    quantityRule,
+  };
+}
+
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = useState<any | null>(createEmptyCartFallback());
   const [isBootstrapping, setIsBootstrapping] = useState(false);
@@ -91,6 +112,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [error, setError] = useState("");
+  const [lastQuantityRule, setLastQuantityRule] =
+    useState<CartQuantityRuleResponse | null>(null);
 
   const mountedRef = useRef(true);
   const hasLoadedCartRef = useRef(false);
@@ -102,6 +125,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const clearError = useCallback(() => {
     setError("");
+  }, []);
+
+  const clearLastQuantityRule = useCallback(() => {
+    setLastQuantityRule(null);
   }, []);
 
   const refreshCart = useCallback(async () => {
@@ -145,21 +172,25 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const handleAddToCart = useCallback(
-    async (payload: CartPayload) => {
+    async (payload: CartPayload): Promise<CartMutationResult> => {
       try {
         if (mountedRef.current) {
           setIsAdding(true);
           setError("");
+          setLastQuantityRule(null);
         }
 
-        const nextCart = await addToCart(payload);
+        const result = await addToCart(payload);
 
-        safeSetCart(nextCart);
+        safeSetCart(result.cart);
+        setLastQuantityRule(result.quantityRule);
         hasLoadedCartRef.current = true;
 
         if (mountedRef.current) {
           setIsDrawerOpen(true);
         }
+
+        return createMutationResult(result.cart, result.quantityRule);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Failed to add to cart.";
@@ -179,20 +210,27 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
 
   const handleUpdateQuantity = useCallback(
-    async (itemId: string, quantity: number) => {
+    async (
+      itemId: string,
+      quantity: number
+    ): Promise<CartMutationResult> => {
       try {
         if (mountedRef.current) {
           setIsUpdating(true);
           setError("");
+          setLastQuantityRule(null);
         }
 
-        const nextCart = await updateCartItem({
+        const result = await updateCartItem({
           item_id: itemId,
           quantity,
         });
 
-        safeSetCart(nextCart);
+        safeSetCart(result.cart);
+        setLastQuantityRule(result.quantityRule);
         hasLoadedCartRef.current = true;
+
+        return createMutationResult(result.cart, result.quantityRule);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Failed to update cart item.";
@@ -212,19 +250,22 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
 
   const handleRemoveItem = useCallback(
-    async (itemId: string) => {
+    async (itemId: string): Promise<CartMutationResult> => {
       try {
         if (mountedRef.current) {
           setIsUpdating(true);
           setError("");
+          setLastQuantityRule(null);
         }
 
-        const nextCart = await removeCartItemRequest({
+        const result = await removeCartItemRequest({
           item_id: itemId,
         });
 
-        safeSetCart(nextCart);
+        safeSetCart(result.cart);
         hasLoadedCartRef.current = true;
+
+        return createMutationResult(result.cart, result.quantityRule);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Failed to remove cart item.";
@@ -243,17 +284,20 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     [safeSetCart]
   );
 
-  const handleClearCart = useCallback(async () => {
+  const handleClearCart = useCallback(async (): Promise<CartMutationResult> => {
     try {
       if (mountedRef.current) {
         setIsUpdating(true);
         setError("");
+        setLastQuantityRule(null);
       }
 
-      const nextCart = await clearCart();
+      const result = await clearCart();
 
-      safeSetCart(nextCart);
+      safeSetCart(result.cart);
       hasLoadedCartRef.current = true;
+
+      return createMutationResult(result.cart, result.quantityRule);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to clear cart.";
@@ -287,9 +331,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       isUpdating,
       isDrawerOpen,
       error,
+      lastQuantityRule,
       openDrawer,
       closeDrawer,
       clearError,
+      clearLastQuantityRule,
       refreshCart,
       handleAddToCart,
       handleUpdateQuantity,
@@ -306,9 +352,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       isUpdating,
       isDrawerOpen,
       error,
+      lastQuantityRule,
       openDrawer,
       closeDrawer,
       clearError,
+      clearLastQuantityRule,
       refreshCart,
       handleAddToCart,
       handleUpdateQuantity,

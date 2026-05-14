@@ -2,6 +2,22 @@ export type CartApiResponse = {
   ok: boolean;
   error?: string;
   cart?: any;
+  quantity_rule?: CartQuantityRuleResponse;
+};
+
+export type CartQuantityRuleResponse = {
+  quantity?: number;
+  min_quantity?: number;
+  box_quantity?: number;
+  case_quantity?: number;
+  step_quantity?: number;
+  adjusted?: boolean;
+  message?: string;
+};
+
+export type CartRequestResult = {
+  cart: any;
+  quantityRule: CartQuantityRuleResponse | null;
 };
 
 async function parseJsonSafe(response: Response) {
@@ -27,6 +43,13 @@ function createEmptyCartFallback() {
   };
 }
 
+function normalizeCartResponse(data: CartApiResponse | null): CartRequestResult {
+  return {
+    cart: data?.cart || createEmptyCartFallback(),
+    quantityRule: data?.quantity_rule || null,
+  };
+}
+
 async function requestCart<TPayload = unknown>(
   url: string,
   options?: {
@@ -34,7 +57,7 @@ async function requestCart<TPayload = unknown>(
     payload?: TPayload;
     signal?: AbortSignal;
   }
-) {
+): Promise<CartRequestResult> {
   const response = await fetch(url, {
     method: options?.method || "GET",
     credentials: "include",
@@ -58,14 +81,16 @@ async function requestCart<TPayload = unknown>(
     throw new Error(data?.error || "Cart request failed.");
   }
 
-  return data.cart || createEmptyCartFallback();
+  return normalizeCartResponse(data);
 }
 
 export async function fetchCart(signal?: AbortSignal) {
-  return requestCart("/api/cart/get", {
+  const result = await requestCart("/api/cart/get", {
     method: "GET",
     signal,
   });
+
+  return result.cart;
 }
 
 export async function addToCart(payload: {

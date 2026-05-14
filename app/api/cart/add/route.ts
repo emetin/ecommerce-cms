@@ -65,21 +65,13 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
 
     const productSlug = normalizeText(body?.product_slug);
-    const variantId = normalizeText(body?.variant_id);
     const requestedQuantity = toPositiveNumber(body?.quantity, 1);
 
     if (!productSlug) {
       return jsonError("product_slug is required.", 400);
     }
 
-    const resolved = await resolveCartCatalogItem(productSlug, variantId);
-
-    if (!resolved.variant?.id) {
-      return jsonError(
-        "This product does not have a purchasable variant yet. Please contact sales.",
-        400
-      );
-    }
+    const resolved = await resolveCartCatalogItem(productSlug);
 
     if (resolved.unitPrice <= 0) {
       return jsonError(
@@ -90,10 +82,7 @@ export async function POST(req: Request) {
 
     const quantityRule = resolveQuantityRule({
       quantity: requestedQuantity,
-      minQuantity: resolved.minQuantity,
       boxQuantity: resolved.boxQuantity,
-      caseQuantity: resolved.caseQuantity,
-      stepQuantity: resolved.stepQuantity,
     });
 
     const existingCartToken = await getCartTokenFromCookies();
@@ -101,7 +90,7 @@ export async function POST(req: Request) {
 
     const cart = await addItemToCart(cartToken, {
       product_slug: productSlug,
-      variant_id: resolved.variant.id,
+      variant_id: resolved.variantId,
       product_title: resolved.productTitle,
       variant_title: resolved.variantTitle,
       sku: resolved.sku,

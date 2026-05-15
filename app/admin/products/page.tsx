@@ -8,12 +8,30 @@ type ProductDashboardItem = {
   id?: string;
   title?: string;
   slug?: string;
+  handle?: string;
   image?: string;
+  image_url?: string;
+  image_alt?: string;
+  collection_id?: string;
   collection_slug?: string;
   status?: string;
-  featured?: string;
+  featured?: boolean | string;
   short_description?: string;
   updated_at?: string;
+  created_at?: string;
+  vendor?: string;
+  product_category?: string;
+  product_type?: string;
+  tags?: string;
+  base_price?: number | null;
+  compare_at_price?: number | null;
+  currency?: string;
+  box_quantity?: number;
+  min_order_quantity?: number;
+  quantity_step?: number;
+  is_wholesale_only?: boolean;
+  allow_quote_request?: boolean;
+  allow_online_checkout?: boolean;
 
   gallery_image_count?: number;
   gallery_main_image_exists?: boolean;
@@ -26,10 +44,22 @@ type ProductDashboardItem = {
 type DashboardSummary = {
   publishedCount: number;
   draftCount: number;
+  archivedCount: number;
   missingGallery: number;
   missingMainImage: number;
   missingAltText: number;
   lowImageCount: number;
+  missingPrice: number;
+};
+
+type ProductsApiResponse = {
+  ok?: boolean;
+  total?: number;
+  page?: number;
+  limit?: number;
+  totalPages?: number;
+  items?: ProductDashboardItem[];
+  error?: string;
 };
 
 const PAGE_SIZE = 50;
@@ -37,10 +67,12 @@ const PAGE_SIZE = 50;
 const EMPTY_SUMMARY: DashboardSummary = {
   publishedCount: 0,
   draftCount: 0,
+  archivedCount: 0,
   missingGallery: 0,
   missingMainImage: 0,
   missingAltText: 0,
   lowImageCount: 0,
+  missingPrice: 0,
 };
 
 function normalizeText(value: unknown) {
@@ -52,12 +84,121 @@ function normalizeLower(value: unknown) {
 }
 
 function isFeatured(value: unknown) {
+  if (typeof value === "boolean") return value;
   return normalizeLower(value) === "true";
 }
 
 function getNumber(value: unknown) {
   const num = Number(value);
   return Number.isFinite(num) ? num : 0;
+}
+
+function formatMoney(value: unknown, currency = "USD") {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) return "-";
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(number);
+}
+
+function formatDate(value: unknown) {
+  const text = normalizeText(value);
+
+  if (!text) return "-";
+
+  const date = new Date(text);
+
+  if (Number.isNaN(date.getTime())) return text;
+
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+}
+
+function getPrimaryImage(item: ProductDashboardItem) {
+  return normalizeImageUrl(
+    item.gallery_primary_image || item.image_url || item.image || ""
+  );
+}
+
+function buildGalleryIssues(item: ProductDashboardItem) {
+  const issues: string[] = [];
+
+  const primaryImage = getPrimaryImage(item);
+  const imageCount = getNumber(item.gallery_image_count);
+  const altCount = getNumber(item.gallery_alt_count);
+
+  const hasExplicitGalleryData =
+    item.gallery_image_count !== undefined ||
+    item.gallery_main_image_exists !== undefined ||
+    item.gallery_alt_count !== undefined;
+
+  if (hasExplicitGalleryData) {
+    if (imageCount <= 0) issues.push("No gallery");
+    if (!item.gallery_main_image_exists) issues.push("No main image");
+    if (imageCount > 0 && altCount < imageCount) issues.push("Missing alt text");
+    if (imageCount > 0 && imageCount < 3) issues.push("Low image count");
+  } else {
+    if (!primaryImage) issues.push("No image");
+  }
+
+  if (item.base_price === null || item.base_price === undefined) {
+    issues.push("Missing price");
+  }
+
+  return issues;
+}
+
+function getGalleryScore(item: ProductDashboardItem) {
+  if (typeof item.gallery_score === "number") {
+    return item.gallery_score;
+  }
+
+  const issues = buildGalleryIssues(item);
+
+  if (issues.length === 0) return 100;
+  if (issues.length === 1) return 75;
+  if (issues.length === 2) return 50;
+  return 25;
+}
+
+function buildSummary(items: ProductDashboardItem[]): DashboardSummary {
+  return items.reduce<DashboardSummary>((acc, item) => {
+    const status = normalizeLower(item.status);
+    const issues = buildGalleryIssues(item);
+
+    if (status === "published") acc.publishedCount += 1;
+    if (status === "draft") acc.draftCount += 1;
+    if (status === "archived") acc.archivedCount += 1;
+
+    if (issues.includes("No gallery") || issues.includes("No image")) {
+      acc.missingGallery += 1;
+    }
+
+    if (issues.includes("No main image")) {
+      acc.missingMainImage += 1;
+    }
+
+    if (issues.includes("Missing alt text")) {
+      acc.missingAltText += 1;
+    }
+
+    if (issues.includes("Low image count")) {
+      acc.lowImageCount += 1;
+    }
+
+    if (issues.includes("Missing price")) {
+      acc.missingPrice += 1;
+    }
+
+    return acc;
+  }, { ...EMPTY_SUMMARY });
 }
 
 function StatusBadge({ value }: { value: string }) {
@@ -77,6 +218,13 @@ function StatusBadge({ value }: { value: string }) {
           background: "#fff7e8",
           color: "#8a6418",
           border: "1px solid #ecd8ad",
+        }
+      : normalized === "archived"
+      ? {
+          ...badgeStyle,
+          background: "#f3f3f3",
+          color: "#5e5e5e",
+          border: "1px solid #dddddd",
         }
       : {
           ...badgeStyle,
@@ -145,21 +293,20 @@ export default function AdminProductsPage() {
         params.set("q", search.trim());
       }
 
-      const response = await fetch(
-        `/api/admin/products/dashboard?${params.toString()}`,
-        {
-          cache: "no-store",
-        }
-      );
+      const response = await fetch(`/api/products/list?${params.toString()}`, {
+        cache: "no-store",
+      });
 
-      const data = await response.json();
+      const data = (await response.json()) as ProductsApiResponse;
 
       if (!response.ok || !data.ok) {
         throw new Error(data?.error || "Failed to load products.");
       }
 
-      setItems(Array.isArray(data.items) ? data.items : []);
-      setSummary(data.summary || EMPTY_SUMMARY);
+      const apiItems = Array.isArray(data.items) ? data.items : [];
+
+      setItems(apiItems);
+      setSummary(buildSummary(apiItems));
       setTotal(Number(data.total || 0));
       setTotalPages(Number(data.totalPages || 1));
     } catch (error) {
@@ -223,8 +370,8 @@ export default function AdminProductsPage() {
         <div>
           <h1 style={titleStyle}>Products</h1>
           <p style={subtitleStyle}>
-            Review products, monitor gallery quality, and manage all bulk changes
-            from the dedicated Shopify-style bulk editor.
+            Manage Shopify-style wholesale products, variants, pricing, images,
+            and catalog readiness from one admin screen.
           </p>
         </div>
 
@@ -273,8 +420,13 @@ export default function AdminProductsPage() {
             <div style={statValueStyle}>{summary.draftCount}</div>
           </div>
 
+          <div style={statBoxStyle}>
+            <div style={statLabelStyle}>Archived</div>
+            <div style={statValueStyle}>{summary.archivedCount}</div>
+          </div>
+
           <div style={warningStatBoxStyle}>
-            <div style={statLabelStyle}>No Gallery</div>
+            <div style={statLabelStyle}>No Image</div>
             <div style={warningStatValueStyle}>{summary.missingGallery}</div>
           </div>
 
@@ -289,8 +441,8 @@ export default function AdminProductsPage() {
           </div>
 
           <div style={warningStatBoxStyle}>
-            <div style={statLabelStyle}>Low Image Count</div>
-            <div style={warningStatValueStyle}>{summary.lowImageCount}</div>
+            <div style={statLabelStyle}>Missing Price</div>
+            <div style={warningStatValueStyle}>{summary.missingPrice}</div>
           </div>
         </div>
 
@@ -300,7 +452,7 @@ export default function AdminProductsPage() {
             <input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Search by title, slug, collection, short description"
+              placeholder="Search by title, slug, vendor, type, category, tags"
               style={inputStyle}
             />
           </div>
@@ -339,11 +491,11 @@ export default function AdminProductsPage() {
               <thead>
                 <tr>
                   <th style={thStyle}>Product</th>
-                  <th style={thStyle}>Slug</th>
-                  <th style={thStyle}>Collection</th>
+                  <th style={thStyle}>Price</th>
+                  <th style={thStyle}>Wholesale Rule</th>
+                  <th style={thStyle}>Type</th>
                   <th style={thStyle}>Status</th>
-                  <th style={thStyle}>Gallery</th>
-                  <th style={thStyle}>Warnings</th>
+                  <th style={thStyle}>Readiness</th>
                   <th style={thStyle}>Updated</th>
                   <th style={thStyle}>Actions</th>
                 </tr>
@@ -352,17 +504,16 @@ export default function AdminProductsPage() {
               <tbody>
                 {items.map((item, index) => {
                   const featured = isFeatured(item.featured);
-                  const primaryImage = normalizeImageUrl(
-                    item.gallery_primary_image || item.image || ""
-                  );
+                  const primaryImage = getPrimaryImage(item);
+                  const issues = buildGalleryIssues(item);
+                  const score = getGalleryScore(item);
+                  const currency = item.currency || "USD";
 
-                  const imageCount = getNumber(item.gallery_image_count);
-                  const altCount = getNumber(item.gallery_alt_count);
-                  const score = getNumber(item.gallery_score);
-                  const mainImageExists = Boolean(item.gallery_main_image_exists);
-                  const issues = Array.isArray(item.gallery_issues)
-                    ? item.gallery_issues
-                    : [];
+                  const boxQuantity = getNumber(item.box_quantity) || 1;
+                  const minOrderQuantity =
+                    getNumber(item.min_order_quantity) || boxQuantity;
+                  const quantityStep =
+                    getNumber(item.quantity_step) || boxQuantity;
 
                   return (
                     <tr key={item.id || item.slug || index}>
@@ -372,7 +523,7 @@ export default function AdminProductsPage() {
                             {primaryImage ? (
                               <img
                                 src={primaryImage}
-                                alt={item.title || "Product"}
+                                alt={item.image_alt || item.title || "Product"}
                                 style={thumbStyle}
                               />
                             ) : (
@@ -389,24 +540,62 @@ export default function AdminProductsPage() {
                               {featured ? (
                                 <span style={featuredBadgeStyle}>Featured</span>
                               ) : null}
+
+                              {item.is_wholesale_only ? (
+                                <span style={wholesaleBadgeStyle}>Wholesale</span>
+                              ) : null}
                             </div>
 
-                            <div
-                              style={{
-                                color: "#6f6559",
-                                fontSize: 13,
-                                lineHeight: 1.6,
-                              }}
-                            >
+                            <div style={mutedTextStyle}>
                               {item.short_description ||
                                 "No short description added yet."}
+                            </div>
+
+                            <div style={tinyMetaStyle}>
+                              <span>Slug: {item.slug || "-"}</span>
+                              <span>Vendor: {item.vendor || "-"}</span>
                             </div>
                           </div>
                         </div>
                       </td>
 
-                      <td style={tdStyle}>{item.slug || "-"}</td>
-                      <td style={tdStyle}>{item.collection_slug || "-"}</td>
+                      <td style={tdStyle}>
+                        <div style={{ display: "grid", gap: 6 }}>
+                          <strong>{formatMoney(item.base_price, currency)}</strong>
+
+                          {item.compare_at_price ? (
+                            <span style={comparePriceStyle}>
+                              Compare:{" "}
+                              {formatMoney(item.compare_at_price, currency)}
+                            </span>
+                          ) : (
+                            <span style={comparePriceStyle}>No compare price</span>
+                          )}
+                        </div>
+                      </td>
+
+                      <td style={tdStyle}>
+                        <div style={quantityRuleStyle}>
+                          <div>
+                            <strong>Box:</strong> {boxQuantity}
+                          </div>
+                          <div>
+                            <strong>Min:</strong> {minOrderQuantity}
+                          </div>
+                          <div>
+                            <strong>Step:</strong> {quantityStep}
+                          </div>
+                        </div>
+                      </td>
+
+                      <td style={tdStyle}>
+                        <div style={{ display: "grid", gap: 6 }}>
+                          <div>{item.product_type || "-"}</div>
+                          <div style={mutedTextStyle}>
+                            {item.product_category || "-"}
+                          </div>
+                        </div>
+                      </td>
 
                       <td style={tdStyle}>
                         <StatusBadge value={item.status || "-"} />
@@ -419,38 +608,21 @@ export default function AdminProductsPage() {
                             <div style={galleryScoreValueStyle}>{score}%</div>
                           </div>
 
-                          <div style={galleryMetaStyle}>
-                            <div>
-                              <strong>Images:</strong> {imageCount}
+                          {issues.length === 0 ? (
+                            <span style={okBadgeStyle}>Looks good</span>
+                          ) : (
+                            <div style={warningListStyle}>
+                              {issues.map((issue) => (
+                                <span key={issue} style={warningBadgeStyle}>
+                                  {issue}
+                                </span>
+                              ))}
                             </div>
-
-                            <div>
-                              <strong>Main:</strong>{" "}
-                              {mainImageExists ? "Yes" : "No"}
-                            </div>
-
-                            <div>
-                              <strong>Alt:</strong> {altCount}/{imageCount}
-                            </div>
-                          </div>
+                          )}
                         </div>
                       </td>
 
-                      <td style={tdStyle}>
-                        {issues.length === 0 ? (
-                          <span style={okBadgeStyle}>Gallery looks good</span>
-                        ) : (
-                          <div style={warningListStyle}>
-                            {issues.map((issue) => (
-                              <span key={issue} style={warningBadgeStyle}>
-                                {issue}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-
-                      <td style={tdStyle}>{item.updated_at || "-"}</td>
+                      <td style={tdStyle}>{formatDate(item.updated_at)}</td>
 
                       <td style={tdStyle}>
                         <div style={actionColumnStyle}>
@@ -583,7 +755,7 @@ const statsRowStyle: React.CSSProperties = {
 };
 
 const statBoxStyle: React.CSSProperties = {
-  minWidth: 180,
+  minWidth: 170,
   background: "#f8f5ef",
   border: "1px solid #e3dbcf",
   borderRadius: 18,
@@ -591,7 +763,7 @@ const statBoxStyle: React.CSSProperties = {
 };
 
 const warningStatBoxStyle: React.CSSProperties = {
-  minWidth: 180,
+  minWidth: 170,
   background: "#fff7e8",
   border: "1px solid #ecd8ad",
   borderRadius: 18,
@@ -680,6 +852,7 @@ const productCellStyle: React.CSSProperties = {
   gridTemplateColumns: "82px 1fr",
   gap: 14,
   alignItems: "start",
+  minWidth: 420,
 };
 
 const thumbWrapStyle: React.CSSProperties = {
@@ -733,6 +906,48 @@ const featuredBadgeStyle: React.CSSProperties = {
   fontSize: 12,
 };
 
+const wholesaleBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 28,
+  padding: "0 10px",
+  borderRadius: 999,
+  background: "#f8f5ef",
+  color: "#5f564b",
+  border: "1px solid #e3dbcf",
+  fontWeight: 800,
+  fontSize: 12,
+};
+
+const mutedTextStyle: React.CSSProperties = {
+  color: "#6f6559",
+  fontSize: 13,
+  lineHeight: 1.6,
+};
+
+const tinyMetaStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  color: "#8a8178",
+  fontSize: 12,
+  lineHeight: 1.5,
+};
+
+const comparePriceStyle: React.CSSProperties = {
+  color: "#7a7067",
+  fontSize: 13,
+};
+
+const quantityRuleStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 6,
+  color: "#5f564b",
+  fontSize: 13,
+  lineHeight: 1.5,
+};
+
 const galleryScoreWrapStyle: React.CSSProperties = {
   display: "grid",
   gap: 4,
@@ -750,14 +965,6 @@ const galleryScoreValueStyle: React.CSSProperties = {
   fontSize: 24,
   fontWeight: 800,
   color: "#171717",
-};
-
-const galleryMetaStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 6,
-  fontSize: 13,
-  color: "#5f564c",
-  lineHeight: 1.5,
 };
 
 const okBadgeStyle: React.CSSProperties = {
@@ -809,6 +1016,7 @@ const actionColumnStyle: React.CSSProperties = {
   display: "flex",
   gap: 8,
   flexWrap: "wrap",
+  minWidth: 210,
 };
 
 const primaryButtonStyle: React.CSSProperties = {

@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 
-export function createAdminClient() {
+export function createSupabaseAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -14,8 +14,23 @@ export function createAdminClient() {
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
-      autoRefreshToken: false,
       persistSession: false,
+      autoRefreshToken: false,
     },
   });
+}
+
+/**
+ * Backward-compatible alias.
+ * Some older files still import createAdminClient.
+ */
+export function createAdminClient() {
+  return createSupabaseAdminClient();
+}
+
+/**
+ * Optional backward-compatible alias for older helper names.
+ */
+export function createSupabaseServiceClient() {
+  return createSupabaseAdminClient();
 }

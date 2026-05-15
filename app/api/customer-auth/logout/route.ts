@@ -4,11 +4,8 @@ import {
   getExpiredCustomerCookieOptions,
 } from "../../../../lib/customer-auth";
 
-export async function POST() {
-  const response = NextResponse.json({
-    ok: true,
-    message: "Çıkış yapıldı.",
-  });
+export async function POST(req: Request) {
+  const response = NextResponse.redirect(new URL("/portal-login", req.url));
 
   response.cookies.set({
     name: CUSTOMER_COOKIE_NAME,

@@ -1,191 +1,147 @@
 import { NextResponse } from "next/server";
-import { getSheetData } from "../../../../../lib/sheets";
-
-type ProductRecord = Record<string, string>;
-type VariantRecord = Record<string, string>;
-type ProductImageRecord = Record<string, string>;
+import { getProductBySlug } from "../../../../../lib/db/products";
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
-function normalizeLower(value: unknown) {
-  return normalizeText(value).toLowerCase();
-}
-
-function isTrue(value: unknown) {
-  return normalizeLower(value) === "true";
-}
-
-function toSafeNumber(value: unknown, fallback = 999999) {
-  const num = Number(normalizeText(value));
-  return Number.isFinite(num) ? num : fallback;
-}
-
-function isPublishedLike(value: unknown) {
-  const normalized = normalizeLower(value);
-  return normalized === "" || normalized === "published" || normalized === "active";
-}
-
-function buildVariantSortKey(item: VariantRecord) {
-  return [
-    normalizeText(item.option1_value),
-    normalizeText(item.option2_value),
-    normalizeText(item.option3_value),
-    normalizeText(item.sku),
-    normalizeText(item.id),
-  ].join(" | ");
-}
-
-function toProductItem(item: ProductRecord) {
+function mapProductForLegacyAdmin(product: any) {
   return {
-    id: normalizeText(item.id),
-    title: normalizeText(item.title),
-    slug: normalizeText(item.slug),
-    description: normalizeText(item.description),
-    short_description: normalizeText(item.short_description),
-    image: normalizeText(item.image),
-    gallery: normalizeText(item.gallery),
-    collection_slug: normalizeText(item.collection_slug),
-    status: normalizeText(item.status),
-    featured: normalizeText(item.featured || "false"),
-    seo_title: normalizeText(item.seo_title),
-    seo_description: normalizeText(item.seo_description),
-    created_at: normalizeText(item.created_at),
-    updated_at: normalizeText(item.updated_at),
-    vendor: normalizeText(item.vendor),
-    product_category: normalizeText(item.product_category),
-    type: normalizeText(item.type),
-    tags: normalizeText(item.tags),
+    id: product.id || "",
+    title: product.title || "",
+    slug: product.slug || "",
+    description: product.description || "",
+    short_description: product.short_description || "",
+    image: product.image_url || product.image || "",
+    gallery: "",
+    collection_slug: product.collections?.[0]?.slug || "",
+    status: product.status || "draft",
+    featured: String(Boolean(product.featured)),
+    seo_title: product.seo_title || "",
+    seo_description: product.seo_description || "",
+    vendor: product.vendor || "",
+    product_category: product.product_category || "",
+    type: product.product_type || "",
+    product_type: product.product_type || "",
+    tags: product.tags || "",
+    base_price: product.base_price,
+    compare_at_price: product.compare_at_price,
+    currency: product.currency || "USD",
+    box_quantity: product.box_quantity,
+    min_order_quantity: product.min_order_quantity,
+    quantity_step: product.quantity_step,
+    created_at: product.created_at || "",
+    updated_at: product.updated_at || "",
   };
 }
 
-function toVariantItem(item: VariantRecord) {
+function mapVariantForLegacyAdmin(variant: any) {
   return {
-    id: normalizeText(item.id),
-    product_slug: normalizeText(item.product_slug),
-    option1_name: normalizeText(item.option1_name),
-    option1_value: normalizeText(item.option1_value),
-    option2_name: normalizeText(item.option2_name),
-    option2_value: normalizeText(item.option2_value),
-    option3_name: normalizeText(item.option3_name),
-    option3_value: normalizeText(item.option3_value),
-    sku: normalizeText(item.sku),
-    barcode: normalizeText(item.barcode),
-    price: normalizeText(item.price),
-    compare_at_price: normalizeText(item.compare_at_price),
-    inventory_tracker: normalizeText(item.inventory_tracker),
-    inventory_policy: normalizeText(item.inventory_policy),
-    fulfillment_service: normalizeText(item.fulfillment_service),
-    requires_shipping: normalizeText(item.requires_shipping),
-    taxable: normalizeText(item.taxable),
-    image_id: normalizeText(item.image_id),
-    variant_image: normalizeText(item.variant_image),
-    weight: normalizeText(item.weight),
-    weight_unit: normalizeText(item.weight_unit),
-    box_quantity: normalizeText(item.box_quantity),
-    status: normalizeText(item.status),
-    created_at: normalizeText(item.created_at),
-    updated_at: normalizeText(item.updated_at),
+    id: variant.id || "",
+    product_id: variant.product_id || "",
+    product_slug: "",
+    title: variant.title || "Default Title",
+    option1_name: variant.option1_name || "",
+    option1_value: variant.option1_value || "",
+    option2_name: variant.option2_name || "",
+    option2_value: variant.option2_value || "",
+    option3_name: variant.option3_name || "",
+    option3_value: variant.option3_value || "",
+    sku: variant.sku || "",
+    barcode: variant.barcode || "",
+    price:
+      variant.price === null || variant.price === undefined
+        ? ""
+        : String(variant.price),
+    compare_at_price:
+      variant.compare_at_price === null ||
+      variant.compare_at_price === undefined
+        ? ""
+        : String(variant.compare_at_price),
+    inventory_tracker: variant.inventory_tracker || "",
+    inventory_policy: variant.inventory_policy || "",
+    fulfillment_service: variant.fulfillment_service || "",
+    requires_shipping: String(Boolean(variant.requires_shipping)),
+    taxable: String(Boolean(variant.taxable)),
+    image_id: variant.image_file_id || "",
+    variant_image: variant.image_url || "",
+    weight:
+      variant.weight === null || variant.weight === undefined
+        ? ""
+        : String(variant.weight),
+    weight_unit: variant.weight_unit || "",
+    box_quantity:
+      variant.box_quantity === null || variant.box_quantity === undefined
+        ? ""
+        : String(variant.box_quantity),
+    min_order_quantity:
+      variant.min_order_quantity === null ||
+      variant.min_order_quantity === undefined
+        ? ""
+        : String(variant.min_order_quantity),
+    quantity_step:
+      variant.quantity_step === null || variant.quantity_step === undefined
+        ? ""
+        : String(variant.quantity_step),
+    status: variant.status || "active",
+    created_at: variant.created_at || "",
+    updated_at: variant.updated_at || "",
   };
 }
 
-function toProductImageItem(item: ProductImageRecord) {
+function mapImageForLegacyAdmin(image: any) {
   return {
-    id: normalizeText(item.id),
-    product_slug: normalizeText(item.product_slug),
-    image_url: normalizeText(item.image_url),
-    sort_order: normalizeText(item.sort_order),
-    alt_text: normalizeText(item.alt_text),
-    is_main: normalizeText(item.is_main),
-    created_at: normalizeText(item.created_at),
-    updated_at: normalizeText(item.updated_at),
+    id: image.id || "",
+    product_id: image.product_id || "",
+    image_url: image.image_url || "",
+    image_file_id: image.image_file_id || "",
+    alt_text: image.alt_text || "",
+    sort_order: String(image.sort_order || 0),
+    is_main: String(Boolean(image.is_main)),
+    created_at: image.created_at || "",
+    updated_at: image.updated_at || "",
   };
 }
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const slug = normalizeLower(searchParams.get("slug"));
+    const slug = normalizeText(searchParams.get("slug"));
 
     if (!slug) {
       return NextResponse.json(
-        { ok: false, error: "Missing product slug." },
+        {
+          ok: false,
+          error: "Product slug is required.",
+        },
         { status: 400 }
       );
     }
 
-    const [products, variantsRaw, productImagesRaw] = await Promise.all([
-      getSheetData("products", {
-        forceFresh: true,
-        ttlSeconds: 0,
-      }) as Promise<ProductRecord[]>,
-      getSheetData("product_variants", {
-        forceFresh: true,
-        ttlSeconds: 0,
-      }) as Promise<VariantRecord[]>,
-      getSheetData("product_images", {
-        forceFresh: true,
-        ttlSeconds: 0,
-      }) as Promise<ProductImageRecord[]>,
-    ]);
-
-    const product =
-      products.find((item) => normalizeLower(item.slug) === slug) || null;
+    const product = await getProductBySlug({ slug });
 
     if (!product) {
       return NextResponse.json(
-        { ok: false, error: "Product not found." },
+        {
+          ok: false,
+          error: "Product not found.",
+        },
         { status: 404 }
       );
     }
 
-    let variants = variantsRaw
-      .filter((item) => normalizeText(item.id))
-      .filter((item) => normalizeLower(item.product_slug) === slug);
-
-    const publishedVariants = variants.filter((item) => isPublishedLike(item.status));
-    variants = publishedVariants.length ? publishedVariants : variants;
-
-    variants = [...variants].sort((a, b) => {
-      const aBoxQty = toSafeNumber(a.box_quantity, 999999);
-      const bBoxQty = toSafeNumber(b.box_quantity, 999999);
-
-      if (aBoxQty !== bBoxQty) {
-        return aBoxQty - bBoxQty;
-      }
-
-      return buildVariantSortKey(a).localeCompare(buildVariantSortKey(b));
-    });
-
-    const productImages = productImagesRaw
-      .filter((item) => normalizeLower(item.product_slug) === slug)
-      .sort((a, b) => {
-        const aMain = isTrue(a.is_main);
-        const bMain = isTrue(b.is_main);
-
-        if (aMain !== bMain) {
-          return aMain ? -1 : 1;
-        }
-
-        return toSafeNumber(a.sort_order, 999999) - toSafeNumber(b.sort_order, 999999);
-      });
-
-    return NextResponse.json(
-      {
-        ok: true,
-        item: {
-          product: toProductItem(product),
-          variants: variants.map(toVariantItem),
-          product_images: productImages.map(toProductImageItem),
-        },
+    return NextResponse.json({
+      ok: true,
+      item: {
+        product: mapProductForLegacyAdmin(product),
+        variants: Array.isArray(product.variants)
+          ? product.variants.map(mapVariantForLegacyAdmin)
+          : [],
+        product_images: Array.isArray(product.images)
+          ? product.images.map(mapImageForLegacyAdmin)
+          : [],
       },
-      {
-        headers: {
-          "Cache-Control": "no-store",
-        },
-      }
-    );
+    });
   } catch (error) {
     return NextResponse.json(
       {
@@ -193,7 +149,7 @@ export async function GET(req: Request) {
         error:
           error instanceof Error
             ? error.message
-            : "Failed to load admin product detail.",
+            : "Failed to load product detail.",
       },
       { status: 500 }
     );

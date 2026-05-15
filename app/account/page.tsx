@@ -134,7 +134,7 @@ export default async function AccountPage() {
     redirect("/change-password");
   }
 
-  const customer = await findCustomerById(session.customerId);
+  const customer = await findCustomerById(session.customerUserId || session.customerId);
 
   if (!customer) {
     redirect("/portal-login");
@@ -142,10 +142,13 @@ export default async function AccountPage() {
 
   const orders = await getOrdersForCustomer({
     customerId: customer.id,
+    customerUserId: session.customerUserId || customer.customer_user_id,
+    companyId: session.companyId || customer.company_id,
     email: customer.email,
   });
 
   const safeCustomer = sanitizeCustomer(customer);
+
   const fullName = [safeCustomer.first_name, safeCustomer.last_name]
     .filter(Boolean)
     .join(" ");
@@ -155,7 +158,7 @@ export default async function AccountPage() {
       <div style={pageWrapStyle}>
         <section style={heroCardStyle}>
           <div>
-            <div style={eyebrowStyle}>Customer Account</div>
+            <div style={eyebrowStyle}>Member Portal</div>
 
             <h1 style={heroTitleStyle}>{fullName || safeCustomer.email}</h1>
 
@@ -171,6 +174,10 @@ export default async function AccountPage() {
               Edit Profile
             </a>
 
+            <a href="/collections" style={secondaryButtonStyle}>
+              Browse Products
+            </a>
+
             <form
               action="/api/customer-auth/logout"
               method="post"
@@ -183,6 +190,34 @@ export default async function AccountPage() {
           </div>
         </section>
 
+        <section style={quickStatsGridStyle}>
+          <div style={quickStatCardStyle}>
+            <div style={quickStatLabelStyle}>Company</div>
+            <div style={quickStatValueStyle}>
+              {safeCustomer.company || "-"}
+            </div>
+          </div>
+
+          <div style={quickStatCardStyle}>
+            <div style={quickStatLabelStyle}>Account Status</div>
+            <div style={quickStatValueStyle}>
+              {safeCustomer.status || "-"}
+            </div>
+          </div>
+
+          <div style={quickStatCardStyle}>
+            <div style={quickStatLabelStyle}>Currency</div>
+            <div style={quickStatValueStyle}>
+              {safeCustomer.currency || "USD"}
+            </div>
+          </div>
+
+          <div style={quickStatCardStyle}>
+            <div style={quickStatLabelStyle}>Quote Requests</div>
+            <div style={quickStatValueStyle}>{orders.length}</div>
+          </div>
+        </section>
+
         <div style={layoutStyle}>
           <aside style={sideCardStyle}>
             <h2 style={sideTitleStyle}>Account Details</h2>
@@ -190,21 +225,35 @@ export default async function AccountPage() {
             <div style={{ display: "grid", gap: 18 }}>
               <InfoRow label="Name" value={fullName || "-"} />
               <InfoRow label="Company" value={safeCustomer.company || "-"} />
+              <InfoRow label="Email" value={safeCustomer.email || "-"} />
               <InfoRow label="Phone" value={safeCustomer.phone || "-"} />
               <InfoRow label="Country" value={safeCustomer.country || "-"} />
+              <InfoRow label="State" value={safeCustomer.state || "-"} />
               <InfoRow label="City" value={safeCustomer.city || "-"} />
               <InfoRow
                 label="Address"
                 value={safeCustomer.address_line_1 || "-"}
               />
               <InfoRow
+                label="Address 2"
+                value={safeCustomer.address_line_2 || "-"}
+              />
+              <InfoRow
                 label="Postal Code"
                 value={safeCustomer.postal_code || "-"}
+              />
+              <InfoRow
+                label="Payment Terms"
+                value={safeCustomer.payment_terms || "-"}
+              />
+              <InfoRow
+                label="Customer Type"
+                value={safeCustomer.customer_type || "-"}
               />
               <InfoRow label="Status" value={safeCustomer.status || "-"} />
               <InfoRow
                 label="Last Login"
-                value={safeCustomer.last_login_at || "-"}
+                value={formatDate(safeCustomer.last_login_at || "")}
               />
             </div>
           </aside>
@@ -225,7 +274,15 @@ export default async function AccountPage() {
 
             {orders.length === 0 ? (
               <div style={emptyStateStyle}>
-                No quote requests found for this account yet.
+                <h3 style={emptyTitleStyle}>No quote requests yet</h3>
+                <p style={emptyTextStyle}>
+                  Your submitted quote requests will appear here once you send
+                  your first request.
+                </p>
+
+                <a href="/collections" style={darkInlineButtonStyle}>
+                  Start New Quote Request
+                </a>
               </div>
             ) : (
               <div style={{ display: "grid", gap: 12 }}>
@@ -238,7 +295,7 @@ export default async function AccountPage() {
                     <div key={order.id} style={requestRowStyle}>
                       <div style={{ minWidth: 0 }}>
                         <div style={requestNumberStyle}>
-                          {order.order_number}
+                          {order.order_number || "Quote Request"}
                         </div>
 
                         <div style={requestMetaStyle}>
@@ -390,6 +447,52 @@ const darkButtonStyle: React.CSSProperties = {
   lineHeight: 1,
 };
 
+const darkInlineButtonStyle: React.CSSProperties = {
+  minHeight: 46,
+  padding: "0 20px",
+  borderRadius: 999,
+  border: "1px solid #171717",
+  background: "#171717",
+  color: "#fff",
+  fontWeight: 800,
+  cursor: "pointer",
+  textDecoration: "none",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "fit-content",
+};
+
+const quickStatsGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 16,
+};
+
+const quickStatCardStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e6ddd0",
+  borderRadius: 22,
+  padding: 20,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
+};
+
+const quickStatLabelStyle: React.CSSProperties = {
+  fontSize: 12,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "#7a7166",
+  fontWeight: 800,
+  marginBottom: 8,
+};
+
+const quickStatValueStyle: React.CSSProperties = {
+  fontSize: 20,
+  lineHeight: 1.2,
+  fontWeight: 800,
+  color: "#171717",
+};
+
 const layoutStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "320px minmax(0, 1fr)",
@@ -426,6 +529,7 @@ const infoLabelStyle: React.CSSProperties = {
 const infoValueStyle: React.CSSProperties = {
   color: "#171717",
   fontWeight: 700,
+  wordBreak: "break-word",
 };
 
 const contentCardStyle: React.CSSProperties = {
@@ -472,6 +576,21 @@ const emptyStateStyle: React.CSSProperties = {
   borderRadius: 20,
   padding: 28,
   color: "#665d52",
+  display: "grid",
+  gap: 12,
+};
+
+const emptyTitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#171717",
+  fontSize: 20,
+  fontFamily: "var(--font-heading)",
+};
+
+const emptyTextStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#665d52",
+  lineHeight: 1.6,
 };
 
 const requestRowStyle: React.CSSProperties = {

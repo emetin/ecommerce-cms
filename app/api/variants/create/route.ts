@@ -1,52 +1,74 @@
 import { NextResponse } from "next/server";
-import {
-  appendSheetRow,
-  getSheetData,
-  getSheetHeaders,
-} from "../../../../lib/sheets";
+import { createSupabaseAdminClient } from "../../../../lib/supabase/admin";
 
-type VariantRecord = Record<string, string>;
-
-const SHEET_NAME = "product_variants";
-const ALLOWED_STATUS = ["published", "draft", "archived"];
+const ALLOWED_VARIANT_STATUSES = ["active", "draft", "archived", "published"];
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
-function normalizeStatus(value: unknown) {
-  return String(value || "draft").trim().toLowerCase();
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
 }
 
-function buildVariantId() {
-  return `var_${Date.now()}${Math.floor(Math.random() * 1000)}`;
+function parseNumber(value: unknown) {
+  const text = normalizeText(value).replace(/[$,]/g, "");
+
+  if (!text) return null;
+
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
+function parseInteger(value: unknown) {
+  const number = Number(normalizeText(value));
+
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function parseBoolean(value: unknown, fallback = true) {
+  if (typeof value === "boolean") return value;
+
+  const normalized = normalizeLower(value);
+
+  if (["true", "1", "yes"].includes(normalized)) return true;
+  if (["false", "0", "no"].includes(normalized)) return false;
+
+  return fallback;
+}
+
+function nullIfEmpty(value: unknown) {
+  const text = normalizeText(value);
+  return text || null;
+}
+
+function buildVariantTitle(body: any) {
+  const values = [
+    body?.option1_value,
+    body?.option2_value,
+    body?.option3_value,
+  ]
+    .map(normalizeText)
+    .filter(Boolean);
+
+  return values.length > 0 ? values.join(" / ") : "Default Title";
+}
+
+function normalizeVariantStatus(value: unknown) {
+  const status = normalizeLower(value || "active");
+
+  if (status === "published") return "active";
+  if (ALLOWED_VARIANT_STATUSES.includes(status)) return status;
+
+  return "active";
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const productSlug = normalizeText(body?.product_slug).toLowerCase();
-    const option1Name = normalizeText(body?.option1_name);
-    const option1Value = normalizeText(body?.option1_value);
-    const option2Name = normalizeText(body?.option2_name);
-    const option2Value = normalizeText(body?.option2_value);
-    const option3Name = normalizeText(body?.option3_name);
-    const option3Value = normalizeText(body?.option3_value);
-    const sku = normalizeText(body?.sku);
-    const barcode = normalizeText(body?.barcode);
-    const price = normalizeText(body?.price);
-    const compareAtPrice = normalizeText(body?.compare_at_price);
-    const inventoryTracker = normalizeText(body?.inventory_tracker);
-    const inventoryPolicy = normalizeText(body?.inventory_policy);
-    const fulfillmentService = normalizeText(body?.fulfillment_service);
-    const requiresShipping = normalizeText(body?.requires_shipping);
-    const taxable = normalizeText(body?.taxable);
-    const variantImage = normalizeText(body?.variant_image);
-    const weight = normalizeText(body?.weight);
-    const weightUnit = normalizeText(body?.weight_unit);
-    const boxQuantity = normalizeText(body?.box_quantity);
-    const status = normalizeStatus(body?.status);
+    const productSlug = normalizeLower(body?.product_slug);
+    const price = parseNumber(body?.price);
 
     if (!productSlug) {
       return NextResponse.json(
@@ -55,80 +77,104 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!option1Value) {
+    const supabase = createSupabaseAdminClient();
+
+    const { data: product, error: productError } = await supabase
+      .from("products")
+      .select(
+        "id, slug, box_quantity, min_order_quantity, quantity_step, base_price"
+      )
+      .eq("slug", productSlug)
+      .maybeSingle();
+
+    if (productError) {
+      throw new Error(productError.message);
+    }
+
+    if (!product) {
       return NextResponse.json(
-        { ok: false, error: "Option 1 value is required." },
-        { status: 400 }
+        { ok: false, error: "Product not found." },
+        { status: 404 }
       );
     }
 
-    if (!ALLOWED_STATUS.includes(status)) {
-      return NextResponse.json(
-        { ok: false, error: "Invalid status value." },
-        { status: 400 }
-      );
-    }
+    const boxQuantity =
+      parseInteger(body?.box_quantity) ||
+      Number(product.box_quantity) ||
+      1;
 
-    const existing = (await getSheetData(SHEET_NAME)) as VariantRecord[];
-
-    const duplicate = existing.find((item) => {
-      return (
-        String(item.product_slug || "").trim().toLowerCase() === productSlug &&
-        String(item.option1_value || "").trim() === option1Value &&
-        String(item.option2_value || "").trim() === option2Value &&
-        String(item.option3_value || "").trim() === option3Value
-      );
-    });
-
-    if (duplicate) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "A variant with the same option combination already exists.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const headers = await getSheetHeaders(SHEET_NAME);
-    const now = new Date().toISOString();
-
-    const item: Record<string, string> = {
-      id: buildVariantId(),
-      product_slug: productSlug,
-      option1_name: option1Name,
-      option1_value: option1Value,
-      option2_name: option2Name,
-      option2_value: option2Value,
-      option3_name: option3Name,
-      option3_value: option3Value,
-      sku,
-      barcode,
+    const variantPayload = {
+      product_id: product.id,
+      title: buildVariantTitle(body),
+      sku: nullIfEmpty(body?.sku),
+      barcode: nullIfEmpty(body?.barcode),
+      option1_name: nullIfEmpty(body?.option1_name),
+      option1_value: nullIfEmpty(body?.option1_value),
+      option2_name: nullIfEmpty(body?.option2_name),
+      option2_value: nullIfEmpty(body?.option2_value),
+      option3_name: nullIfEmpty(body?.option3_name),
+      option3_value: nullIfEmpty(body?.option3_value),
       price,
-      compare_at_price: compareAtPrice,
-      inventory_tracker: inventoryTracker,
-      inventory_policy: inventoryPolicy,
-      fulfillment_service: fulfillmentService,
-      requires_shipping: requiresShipping,
-      taxable,
-      variant_image: variantImage,
-      image_id: variantImage,
-      weight,
-      weight_unit: weightUnit,
+      compare_at_price: parseNumber(body?.compare_at_price),
+      inventory_tracker: nullIfEmpty(body?.inventory_tracker),
+      inventory_policy: nullIfEmpty(body?.inventory_policy) || "deny",
+      fulfillment_service: nullIfEmpty(body?.fulfillment_service) || "manual",
+      requires_shipping: parseBoolean(body?.requires_shipping, true),
+      taxable: parseBoolean(body?.taxable, true),
+      variant_image_url: nullIfEmpty(body?.variant_image || body?.image_url),
+      variant_image_file_id: nullIfEmpty(body?.image_id),
+      weight: parseNumber(body?.weight),
+      weight_unit: nullIfEmpty(body?.weight_unit),
       box_quantity: boxQuantity,
-      status,
-      created_at: now,
-      updated_at: now,
+      min_order_quantity: boxQuantity,
+      quantity_step: boxQuantity,
+      status: normalizeVariantStatus(body?.status),
+      sort_order: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
 
-    const rowValues = headers.map((header) => item[header] || "");
+    const { data: variant, error: variantError } = await supabase
+      .from("product_variants")
+      .insert(variantPayload)
+      .select("*")
+      .single();
 
-    await appendSheetRow(SHEET_NAME, rowValues);
+    if (variantError) {
+      throw new Error(variantError.message);
+    }
+
+    if (price !== null) {
+      const { data: variants } = await supabase
+        .from("product_variants")
+        .select("price, compare_at_price")
+        .eq("product_id", product.id)
+        .eq("status", "active")
+        .not("price", "is", null);
+
+      const prices = (variants || [])
+        .map((item) => Number(item.price))
+        .filter((value) => Number.isFinite(value));
+
+      const comparePrices = (variants || [])
+        .map((item) => Number(item.compare_at_price))
+        .filter((value) => Number.isFinite(value));
+
+      await supabase
+        .from("products")
+        .update({
+          base_price: prices.length ? Math.min(...prices) : price,
+          compare_at_price: comparePrices.length
+            ? Math.min(...comparePrices)
+            : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", product.id);
+    }
 
     return NextResponse.json({
       ok: true,
-      message: "Variant created successfully.",
-      item,
+      item: variant,
     });
   } catch (error) {
     return NextResponse.json(

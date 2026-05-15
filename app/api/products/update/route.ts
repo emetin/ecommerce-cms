@@ -1,244 +1,146 @@
 import { NextResponse } from "next/server";
-import {
-  getSheetData,
-  getSheetHeaders,
-  updateSheetObjectBySlug,
-} from "../../../../lib/sheets";
+import { createSupabaseAdminClient } from "../../../../lib/supabase/admin";
 
-type ProductRecord = Record<string, string>;
-
-const SHEET_NAME = "products";
+const ALLOWED_PRODUCT_STATUSES = ["draft", "published", "archived"];
 
 function normalizeText(value: unknown) {
-  return String(value ?? "").trim();
+  return String(value || "").trim();
 }
 
 function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
-function hasOwn(obj: unknown, key: string) {
-  return !!obj && typeof obj === "object" && key in obj;
+function toBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+
+  const normalized = normalizeLower(value);
+
+  if (["true", "1", "yes"].includes(normalized)) return true;
+  if (["false", "0", "no"].includes(normalized)) return false;
+
+  return false;
 }
 
-function normalizeStatus(value: unknown, fallback = "draft") {
-  const normalized = normalizeLower(value || fallback);
-
-  if (normalized === "published") return "published";
-  if (normalized === "draft") return "draft";
-  if (normalized === "archived") return "archived";
-  if (normalized === "active") return "published";
-
-  return fallback;
-}
-
-function normalizeBool(value: unknown, fallback = "false") {
-  const normalized = normalizeLower(value || fallback);
-  return normalized === "true" ? "true" : "false";
-}
-
-function mapLogicalFieldToActualHeader(
-  logicalField: string,
-  headers: string[]
-): string | null {
-  const headerMap: Record<string, string[]> = {
-    title: ["title"],
-    slug: ["slug"],
-    description: ["description"],
-    short_description: ["short_description", "short description"],
-    image: ["image"],
-    gallery: ["gallery"],
-    collection_slug: ["collection_slug", "collection"],
-    status: ["status"],
-    featured: ["featured"],
-    seo_title: ["seo_title", "seo title"],
-    seo_description: ["seo_description", "seo description"],
-    vendor: ["vendor"],
-    product_category: ["product_category", "category", "product category"],
-    type: ["type"],
-    tags: ["tags"],
-    updated_at: ["updated_at", "updated at"],
-  };
-
-  const normalizedHeaders = headers.map((header) => normalizeLower(header));
-  const candidates = headerMap[logicalField] || [logicalField];
-
-  for (const candidate of candidates) {
-    const index = normalizedHeaders.findIndex(
-      (header) => header === normalizeLower(candidate)
-    );
-
-    if (index !== -1) {
-      return headers[index];
-    }
-  }
-
-  return null;
-}
-
-function buildMappedUpdates(
-  logicalUpdates: Record<string, string>,
-  headers: string[]
-) {
-  const actualUpdates: Record<string, string> = {};
-
-  for (const [logicalField, value] of Object.entries(logicalUpdates)) {
-    const actualHeader = mapLogicalFieldToActualHeader(logicalField, headers);
-
-    if (actualHeader) {
-      actualUpdates[actualHeader] = normalizeText(value);
-    }
-  }
-
-  return actualUpdates;
+function nullIfEmpty(value: unknown) {
+  const text = normalizeText(value);
+  return text || null;
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => null);
-
-    if (!body || typeof body !== "object") {
-      return NextResponse.json(
-        { ok: false, error: "Invalid request body." },
-        { status: 400 }
-      );
-    }
+    const body = await req.json();
 
     const slug = normalizeLower(body?.slug);
+    const title = normalizeText(body?.title);
+    const status = normalizeLower(body?.status || "draft");
 
     if (!slug) {
       return NextResponse.json(
-        { ok: false, error: "Slug is required." },
+        { ok: false, error: "Product slug is required." },
         { status: 400 }
       );
     }
 
-    const [items, headers] = await Promise.all([
-      getSheetData(SHEET_NAME, {
-        forceFresh: true,
-        ttlSeconds: 0,
-      }) as Promise<ProductRecord[]>,
-      getSheetHeaders(SHEET_NAME, {
-        forceFresh: true,
-        ttlSeconds: 0,
-      }),
-    ]);
+    if (!title) {
+      return NextResponse.json(
+        { ok: false, error: "Product title is required." },
+        { status: 400 }
+      );
+    }
 
-    const current =
-      items.find((item) => normalizeLower(item.slug) === slug) || null;
+    if (!ALLOWED_PRODUCT_STATUSES.includes(status)) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid product status." },
+        { status: 400 }
+      );
+    }
 
-    if (!current) {
+    const supabase = createSupabaseAdminClient();
+
+    const updatePayload = {
+      title,
+      description: nullIfEmpty(body?.description),
+      short_description: nullIfEmpty(body?.short_description),
+      image_url: nullIfEmpty(body?.image),
+      status,
+      featured: toBoolean(body?.featured),
+      seo_title: nullIfEmpty(body?.seo_title),
+      seo_description: nullIfEmpty(body?.seo_description),
+      vendor: nullIfEmpty(body?.vendor),
+      product_category: nullIfEmpty(body?.product_category),
+      product_type: nullIfEmpty(body?.type || body?.product_type),
+      tags: nullIfEmpty(body?.tags),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from("products")
+      .update(updatePayload)
+      .eq("slug", slug)
+      .select("id, title, slug")
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!data) {
       return NextResponse.json(
         { ok: false, error: "Product not found." },
         { status: 404 }
       );
     }
 
-    const nextTitle = hasOwn(body, "title")
-      ? normalizeText(body.title)
-      : normalizeText(current.title);
+    const collectionSlug = normalizeLower(body?.collection_slug);
 
-    if (!nextTitle) {
-      return NextResponse.json(
-        { ok: false, error: "Title is required." },
-        { status: 400 }
-      );
+    if (collectionSlug) {
+      const { data: collection, error: collectionError } = await supabase
+        .from("collections")
+        .select("id, slug")
+        .eq("slug", collectionSlug)
+        .maybeSingle();
+
+      if (collectionError) {
+        throw new Error(collectionError.message);
+      }
+
+      if (collection) {
+        await supabase
+          .from("products")
+          .update({
+            primary_collection_id: collection.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", data.id);
+
+        await supabase.from("product_collections").upsert(
+          {
+            product_id: data.id,
+            collection_id: collection.id,
+            sort_order: 0,
+          },
+          {
+            onConflict: "product_id,collection_id",
+          }
+        );
+
+        await supabase.from("product_collection_links").upsert(
+          {
+            product_id: data.id,
+            collection_id: collection.id,
+            sort_order: 0,
+          },
+          {
+            onConflict: "product_id,collection_id",
+          }
+        );
+      }
     }
-
-    const nextStatus = hasOwn(body, "status")
-      ? normalizeStatus(body.status, normalizeStatus(current.status, "draft"))
-      : normalizeStatus(current.status, "draft");
-
-    const nextFeatured = hasOwn(body, "featured")
-      ? normalizeBool(body.featured, normalizeBool(current.featured, "false"))
-      : normalizeBool(current.featured, "false");
-
-    const nextDescription = hasOwn(body, "description")
-      ? normalizeText(body.description)
-      : normalizeText(current.description);
-
-    const nextShortDescription = hasOwn(body, "short_description")
-      ? normalizeText(body.short_description)
-      : normalizeText(current.short_description);
-
-    const nextImage = hasOwn(body, "image")
-      ? normalizeText(body.image)
-      : normalizeText(current.image);
-
-    const nextGallery = hasOwn(body, "gallery")
-      ? normalizeText(body.gallery)
-      : normalizeText(current.gallery);
-
-    const nextCollectionSlug = hasOwn(body, "collection_slug")
-      ? normalizeText(body.collection_slug)
-      : normalizeText(current.collection_slug);
-
-    const nextSeoTitle = hasOwn(body, "seo_title")
-      ? normalizeText(body.seo_title)
-      : normalizeText(current.seo_title);
-
-    const nextSeoDescription = hasOwn(body, "seo_description")
-      ? normalizeText(body.seo_description)
-      : normalizeText(current.seo_description);
-
-    const nextVendor = hasOwn(body, "vendor")
-      ? normalizeText(body.vendor)
-      : normalizeText(current.vendor);
-
-    const nextProductCategory = hasOwn(body, "product_category")
-      ? normalizeText(body.product_category)
-      : normalizeText(current.product_category);
-
-    const nextType = hasOwn(body, "type")
-      ? normalizeText(body.type)
-      : normalizeText(current.type);
-
-    const nextTags = hasOwn(body, "tags")
-      ? normalizeText(body.tags)
-      : normalizeText(current.tags);
-
-    const logicalUpdates: Record<string, string> = {
-      title: nextTitle,
-      description: nextDescription,
-      short_description: nextShortDescription,
-      image: nextImage,
-      gallery: nextGallery,
-      collection_slug: nextCollectionSlug,
-      status: nextStatus,
-      featured: nextFeatured,
-      seo_title: nextSeoTitle || nextTitle,
-      seo_description:
-        nextSeoDescription || nextShortDescription || nextDescription,
-      vendor: nextVendor,
-      product_category: nextProductCategory,
-      type: nextType,
-      tags: nextTags,
-      updated_at: new Date().toISOString(),
-    };
-
-    const actualUpdates = buildMappedUpdates(logicalUpdates, headers);
-
-    if (!Object.keys(actualUpdates).length) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "No matching headers were found in the products sheet for update.",
-        },
-        { status: 400 }
-      );
-    }
-
-    await updateSheetObjectBySlug(SHEET_NAME, slug, actualUpdates);
 
     return NextResponse.json({
       ok: true,
-      message: "Product updated successfully.",
-      item: {
-        ...current,
-        ...logicalUpdates,
-        slug,
-      },
+      item: data,
     });
   } catch (error) {
     return NextResponse.json(

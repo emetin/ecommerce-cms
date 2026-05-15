@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteSheetRowsByField } from "../../../../lib/sheets";
+import { createSupabaseAdminClient } from "../../../../lib/supabase/admin";
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -7,25 +7,42 @@ function normalizeText(value: unknown) {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = await req.json();
     const id = normalizeText(body?.id);
 
     if (!id) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Variant id is required.",
-        },
+        { ok: false, error: "Variant id is required." },
         { status: 400 }
       );
     }
 
-    const result = await deleteSheetRowsByField("product_variants", "id", id);
+    const supabase = createSupabaseAdminClient();
+
+    const { data, error } = await supabase
+      .from("product_variants")
+      .update({
+        status: "archived",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("id, product_id, title, status")
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!data) {
+      return NextResponse.json(
+        { ok: false, error: "Variant not found." },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({
       ok: true,
-      deleted: result.deletedCount || 0,
-      message: "Variant deleted successfully.",
+      item: data,
     });
   } catch (error) {
     return NextResponse.json(

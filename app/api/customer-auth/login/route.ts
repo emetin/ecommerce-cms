@@ -45,6 +45,8 @@ export async function POST(req: Request) {
 
     const token = await createCustomerSessionToken({
       customerId: customer.id,
+      customerUserId: customer.customerUserId,
+      companyId: customer.companyId,
       email: customer.email,
       companyName: customer.companyName,
       contactName: customer.contactName,
@@ -58,6 +60,8 @@ export async function POST(req: Request) {
       message: "Login successful.",
       customer: {
         customerId: customer.id,
+        customerUserId: customer.customerUserId,
+        companyId: customer.companyId,
         email: customer.email,
         companyName: customer.companyName,
         contactName: customer.contactName,

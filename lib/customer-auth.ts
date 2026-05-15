@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { getSheetData } from "../lib/sheets";
+import { createSupabaseAdminClient } from "./supabase/admin";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -10,6 +10,8 @@ export const CUSTOMER_SESSION_DURATION_SECONDS = 60 * 60 * 24 * 7;
 type CustomerSessionPayload = {
   sub: "customer";
   customerId: string;
+  customerUserId: string;
+  companyId: string;
   email: string;
   companyName: string;
   contactName: string;
@@ -21,35 +23,44 @@ type CustomerSessionPayload = {
   nonce: string;
 };
 
-type CustomerRow = {
-  id?: string;
-  email?: string;
-  password_hash?: string;
+type CustomerCompanyRow = {
+  id: string;
+  company_name: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  country: string | null;
+  state: string | null;
+  city: string | null;
+  address_line_1: string | null;
+  address_line_2: string | null;
+  postal_code: string | null;
+  status: string | null;
+  notes: string | null;
+  tax_id?: string | null;
+  customer_type?: string | null;
+  industry?: string | null;
+  source?: string | null;
+  price_list_id?: string | null;
+  credit_limit?: number | string | null;
+  payment_terms?: string | null;
+  currency?: string | null;
+};
 
-  first_name?: string;
-  last_name?: string;
-  company?: string;
-  phone?: string;
-  country?: string;
-  city?: string;
-  address_line_1?: string;
-  address_line_2?: string;
-  postal_code?: string;
-
-  status?: string;
-  created_at?: string;
-  updated_at?: string;
-  last_login_at?: string;
-  tax_exempt?: string;
-  approved_at?: string;
-  must_change_password?: string;
-
-  // legacy fallback
-  company_name?: string;
-  contact_name?: string;
-  customer_code?: string;
-  price_tier?: string;
-  currency?: string;
+type CustomerUserRow = {
+  id: string;
+  company_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string;
+  phone: string | null;
+  role: string | null;
+  password_hash: string | null;
+  status: string | null;
+  last_login_at: string | null;
+  is_primary?: boolean | null;
+  permissions_json?: Record<string, unknown> | null;
+  customer_companies?: CustomerCompanyRow | null;
 };
 
 function getEnvValue(name: string) {
@@ -89,10 +100,6 @@ function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
-function normalizeBooleanString(value: unknown) {
-  return normalizeLower(value) === "true";
-}
-
 function safeEqual(a: string, b: string) {
   if (a.length !== b.length) {
     return false;
@@ -107,16 +114,26 @@ function safeEqual(a: string, b: string) {
   return result === 0;
 }
 
-function buildContactName(customer: CustomerRow) {
-  const first = normalizeText(customer.first_name);
-  const last = normalizeText(customer.last_name);
+function buildContactName(customerUser: CustomerUserRow) {
+  const first = normalizeText(customerUser.first_name);
+  const last = normalizeText(customerUser.last_name);
   const full = [first, last].filter(Boolean).join(" ").trim();
 
-  return full || normalizeText(customer.contact_name);
+  return full || normalizeText(customerUser.email);
 }
 
-function buildCompanyName(customer: CustomerRow) {
-  return normalizeText(customer.company) || normalizeText(customer.company_name);
+function buildCompanyName(company?: CustomerCompanyRow | null) {
+  return normalizeText(company?.company_name) || "Customer Company";
+}
+
+function normalizeCompanyRelation(
+  value: CustomerCompanyRow | CustomerCompanyRow[] | null | undefined
+) {
+  if (Array.isArray(value)) {
+    return value[0] || null;
+  }
+
+  return value || null;
 }
 
 export function createNonce(size = 24) {
@@ -161,6 +178,8 @@ export function getExpiredCustomerCookieOptions() {
 
 export async function createCustomerSessionToken(input: {
   customerId: string;
+  customerUserId?: string;
+  companyId?: string;
   email: string;
   companyName?: string;
   contactName?: string;
@@ -171,6 +190,8 @@ export async function createCustomerSessionToken(input: {
   const payload: CustomerSessionPayload = {
     sub: "customer",
     customerId: normalizeText(input.customerId),
+    customerUserId: normalizeText(input.customerUserId || input.customerId),
+    companyId: normalizeText(input.companyId),
     email: normalizeLower(input.email),
     companyName: normalizeText(input.companyName),
     contactName: normalizeText(input.contactName),
@@ -227,6 +248,10 @@ export async function readCustomerFromSessionToken(token?: string | null) {
 
     return {
       customerId: normalizeText(payload.customerId),
+      customerUserId: normalizeText(
+        payload.customerUserId || payload.customerId
+      ),
+      companyId: normalizeText(payload.companyId),
       email: normalizeLower(payload.email),
       companyName: normalizeText(payload.companyName),
       contactName: normalizeText(payload.contactName),
@@ -251,22 +276,83 @@ export async function verifyCustomerCredentials(email: string, password: string)
     return null;
   }
 
-  const customers = (await getSheetData("customers", {
-    ttlSeconds: 60,
-  })) as CustomerRow[];
+  const supabase = createSupabaseAdminClient();
 
-  const customer =
-    customers.find((item) => normalizeLower(item.email) === normalizedEmail) || null;
+  const { data: customerUser, error } = await supabase
+    .from("customer_users")
+    .select(
+      `
+      id,
+      company_id,
+      first_name,
+      last_name,
+      email,
+      phone,
+      role,
+      password_hash,
+      status,
+      last_login_at,
+      is_primary,
+      permissions_json,
+      customer_companies (
+        id,
+        company_name,
+        email,
+        phone,
+        website,
+        country,
+        state,
+        city,
+        address_line_1,
+        address_line_2,
+        postal_code,
+        status,
+        notes,
+        tax_id,
+        customer_type,
+        industry,
+        source,
+        price_list_id,
+        credit_limit,
+        payment_terms,
+        currency
+      )
+    `
+    )
+    .eq("email", normalizedEmail)
+    .maybeSingle();
 
-  if (!customer) {
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!customerUser) {
     return null;
   }
 
-  if (normalizeLower(customer.status) !== "active") {
+  const rawCustomerUser = customerUser as unknown as Omit<
+    CustomerUserRow,
+    "customer_companies"
+  > & {
+    customer_companies?: CustomerCompanyRow | CustomerCompanyRow[] | null;
+  };
+
+  const company = normalizeCompanyRelation(rawCustomerUser.customer_companies);
+
+  const typedCustomerUser: CustomerUserRow = {
+    ...rawCustomerUser,
+    customer_companies: company,
+  };
+
+  if (normalizeLower(typedCustomerUser.status) !== "active") {
     return null;
   }
 
-  const passwordHash = normalizeText(customer.password_hash);
+  if (company && normalizeLower(company.status) !== "active") {
+    return null;
+  }
+
+  const passwordHash = normalizeText(typedCustomerUser.password_hash);
 
   if (!passwordHash) {
     return null;
@@ -278,14 +364,24 @@ export async function verifyCustomerCredentials(email: string, password: string)
     return null;
   }
 
+  await supabase
+    .from("customer_users")
+    .update({
+      last_login_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", typedCustomerUser.id);
+
   return {
-    id: normalizeText(customer.id),
-    email: normalizeLower(customer.email),
-    companyName: buildCompanyName(customer),
-    contactName: buildContactName(customer),
-    priceTier: normalizeText(customer.price_tier || "standard") || "standard",
-    currency: normalizeText(customer.currency || "USD") || "USD",
-    customerCode: normalizeText(customer.customer_code),
-    mustChangePassword: normalizeBooleanString(customer.must_change_password),
+    id: typedCustomerUser.id,
+    customerUserId: typedCustomerUser.id,
+    companyId: normalizeText(typedCustomerUser.company_id),
+    email: normalizeLower(typedCustomerUser.email),
+    companyName: buildCompanyName(company),
+    contactName: buildContactName(typedCustomerUser),
+    priceTier: "standard",
+    currency: normalizeText(company?.currency || "USD") || "USD",
+    customerCode: "",
+    mustChangePassword: false,
   };
 }

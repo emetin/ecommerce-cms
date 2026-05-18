@@ -31,7 +31,7 @@ function getRange(value: string | null): ReportRangeKey {
 
 export async function GET(
   req: Request,
-  context: { params: Promise<{ customerId: string }> | { customerId: string } }
+  context: { params: Promise<{ customerId: string }> }
 ) {
   try {
     const cookieHeader = req.headers.get("cookie") || "";

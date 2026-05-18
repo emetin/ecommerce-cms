@@ -154,17 +154,6 @@ function mapQuoteRequestError(message: string) {
     };
   }
 
-  if (
-    normalized.includes("sheet headers") ||
-    normalized.includes("row could not be found")
-  ) {
-    return {
-      message:
-        "Quote request could not be completed because the order data structure needs attention. Please contact the administrator.",
-      status: 500,
-    };
-  }
-
   return {
     message: message || "Failed to submit quote request.",
     status: 500,
@@ -238,7 +227,9 @@ export async function POST(req: Request) {
     }
 
     const result = await createOrderFromCartToken(cartToken, {
-      customer_id: session?.customerId || "",
+      customer_company_id: session?.companyId || "",
+      customer_user_id: session?.customerUserId || "",
+      customer_id: session?.customerUserId || "",
       email: effectiveEmail,
       first_name: firstName,
       last_name: lastName,

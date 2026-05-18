@@ -18,19 +18,22 @@ export type ResolvedCartCatalogItem = {
   image: string;
   unitPrice: number;
   compareAtPrice: number;
+  minQuantity: number;
   boxQuantity: number;
+  caseQuantity: number;
+  stepQuantity: number;
 };
 
-function normalize(value?: string | number | boolean | null) {
+function normalize(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function normalizeLower(value?: string | number | boolean | null) {
+function normalizeLower(value: unknown) {
   return normalize(value).toLowerCase();
 }
 
 function toPositiveInteger(value: unknown, fallback: number) {
-  const parsed = Number(value);
+  const parsed = Number(String(value ?? "").trim());
 
   if (!Number.isFinite(parsed)) {
     return fallback;
@@ -42,7 +45,7 @@ function toPositiveInteger(value: unknown, fallback: number) {
 }
 
 function toSafeOrder(value: unknown) {
-  const parsed = Number(value);
+  const parsed = Number(String(value ?? "").trim());
 
   return Number.isFinite(parsed) ? parsed : 999999;
 }
@@ -77,10 +80,6 @@ function buildVariantTitle(variant: CatalogVariant | null) {
   return directTitle;
 }
 
-function getProductBoxQuantity(product: CatalogProduct) {
-  return toPositiveInteger((product as any).box_quantity, 0) || 1;
-}
-
 function getVariantImage(variant: CatalogVariant | null) {
   if (!variant) return "";
 
@@ -113,6 +112,85 @@ function getProductSku(product: CatalogProduct) {
   return normalize((product as any).sku);
 }
 
+function getProductMinQuantity(product: CatalogProduct) {
+  return (
+    toPositiveInteger((product as any).min_quantity, 0) ||
+    toPositiveInteger((product as any).minimum_quantity, 0) ||
+    1
+  );
+}
+
+function getProductBoxQuantity(product: CatalogProduct) {
+  return (
+    toPositiveInteger((product as any).box_quantity, 0) ||
+    toPositiveInteger((product as any).case_quantity, 0) ||
+    1
+  );
+}
+
+function getProductCaseQuantity(product: CatalogProduct) {
+  return (
+    toPositiveInteger((product as any).case_quantity, 0) ||
+    toPositiveInteger((product as any).box_quantity, 0) ||
+    0
+  );
+}
+
+function getVariantBoxQuantity(variant: CatalogVariant | null) {
+  if (!variant) return 0;
+
+  return (
+    toPositiveInteger((variant as any).box_quantity, 0) ||
+    toPositiveInteger((variant as any).case_quantity, 0) ||
+    0
+  );
+}
+
+function getVariantCaseQuantity(variant: CatalogVariant | null) {
+  if (!variant) return 0;
+
+  return (
+    toPositiveInteger((variant as any).case_quantity, 0) ||
+    toPositiveInteger((variant as any).box_quantity, 0) ||
+    0
+  );
+}
+
+function getVariantMinQuantity(variant: CatalogVariant | null) {
+  if (!variant) return 0;
+
+  return (
+    toPositiveInteger((variant as any).min_quantity, 0) ||
+    toPositiveInteger((variant as any).minimum_quantity, 0) ||
+    0
+  );
+}
+
+function resolveQuantityRules(product: CatalogProduct, variant: CatalogVariant | null) {
+  const minQuantity = getVariantMinQuantity(variant) || getProductMinQuantity(product) || 1;
+
+  const boxQuantity =
+    getVariantBoxQuantity(variant) || getProductBoxQuantity(product) || minQuantity || 1;
+
+  const caseQuantity =
+    getVariantCaseQuantity(variant) || getProductCaseQuantity(product) || 0;
+
+  const stepQuantity =
+    toPositiveInteger((variant as any)?.step_quantity, 0) ||
+    toPositiveInteger((product as any).step_quantity, 0) ||
+    caseQuantity ||
+    boxQuantity ||
+    minQuantity ||
+    1;
+
+  return {
+    minQuantity,
+    boxQuantity,
+    caseQuantity,
+    stepQuantity,
+  };
+}
+
 function getBackendVariant(options: {
   allVariants: CatalogVariant[];
   variantsBySlug: Map<string, CatalogVariant[]>;
@@ -140,7 +218,12 @@ function getBackendVariant(options: {
 
   const active = scoped
     .filter((variant) => isActiveStatus((variant as any).status))
-    .sort((a, b) => toSafeOrder((a as any).sort_order) - toSafeOrder((b as any).sort_order));
+    .sort((a, b) => {
+      return (
+        toSafeOrder((a as any).sort_order) -
+        toSafeOrder((b as any).sort_order)
+      );
+    });
 
   return active[0] || scoped[0] || null;
 }
@@ -188,7 +271,8 @@ export async function resolveCartCatalogItem(
 
   const sku = getProductSku(product) || normalize((backendVariant as any)?.sku);
   const image = getProductImage(product) || getVariantImage(backendVariant);
-  const boxQuantity = getProductBoxQuantity(product);
+
+  const quantityRules = resolveQuantityRules(product, backendVariant);
 
   return {
     product,
@@ -203,6 +287,9 @@ export async function resolveCartCatalogItem(
     image,
     unitPrice,
     compareAtPrice,
-    boxQuantity,
+    minQuantity: quantityRules.minQuantity,
+    boxQuantity: quantityRules.boxQuantity,
+    caseQuantity: quantityRules.caseQuantity,
+    stepQuantity: quantityRules.stepQuantity,
   };
 }

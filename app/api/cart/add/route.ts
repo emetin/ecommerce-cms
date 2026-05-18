@@ -8,6 +8,10 @@ import { addItemToCart } from "../../../../lib/cart";
 import { resolveCartCatalogItem } from "../../../../lib/catalog";
 import { resolveQuantityRule } from "../../../../lib/cart-rules";
 import { getRateLimitKey, rateLimit } from "../../../../lib/rate-limit";
+import {
+  CUSTOMER_COOKIE_NAME,
+  readCustomerFromSessionToken,
+} from "../../../../lib/customer-auth";
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -31,6 +35,14 @@ function getCartCookieOptions(maxAge: number) {
     path: "/",
     maxAge,
   };
+}
+
+function getCookieValue(cookieHeader: string, name: string) {
+  const match = cookieHeader.match(
+    new RegExp(`${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]+)`)
+  );
+
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 function jsonError(message: string, status: number) {
@@ -88,21 +100,34 @@ export async function POST(req: Request) {
     const existingCartToken = await getCartTokenFromCookies();
     const cartToken = existingCartToken || createToken("cart");
 
-    const cart = await addItemToCart(cartToken, {
-      product_slug: productSlug,
-      variant_id: resolved.variantId,
-      product_title: resolved.productTitle,
-      variant_title: resolved.variantTitle,
-      sku: resolved.sku,
-      image: resolved.image,
-      unit_price: resolved.unitPrice,
-      compare_at_price: resolved.compareAtPrice,
-      quantity: quantityRule.quantity,
-      min_quantity: quantityRule.minQuantity,
-      box_quantity: quantityRule.boxQuantity,
-      case_quantity: quantityRule.caseQuantity,
-      step_quantity: quantityRule.stepQuantity,
-    });
+    const cookieHeader = req.headers.get("cookie") || "";
+    const customerToken = getCookieValue(cookieHeader, CUSTOMER_COOKIE_NAME);
+    const session = await readCustomerFromSessionToken(customerToken);
+
+    const cart = await addItemToCart(
+      cartToken,
+      {
+        product_id: normalizeText((resolved.product as any)?.id),
+        product_slug: productSlug,
+        variant_id: resolved.variantId,
+        product_title: resolved.productTitle,
+        variant_title: resolved.variantTitle,
+        sku: resolved.sku,
+        image: resolved.image,
+        unit_price: resolved.unitPrice,
+        compare_at_price: resolved.compareAtPrice,
+        quantity: quantityRule.quantity,
+        min_quantity: quantityRule.minQuantity,
+        box_quantity: quantityRule.boxQuantity,
+        case_quantity: quantityRule.caseQuantity,
+        step_quantity: quantityRule.stepQuantity,
+      },
+      {
+        customerCompanyId: session?.companyId || "",
+        customerUserId: session?.customerUserId || "",
+        currency: session?.currency || "USD",
+      }
+    );
 
     const response = NextResponse.json({
       ok: true,

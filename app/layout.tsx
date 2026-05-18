@@ -1,21 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Figtree, Playfair_Display } from "next/font/google";
 import AppShell from "../components/layout/AppShell";
-
-const figtree = Figtree({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-body",
-  display: "swap",
-});
-
-const playfairDisplay = Playfair_Display({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-heading",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL(
@@ -31,10 +16,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html
-      lang="en"
-      className={`${figtree.variable} ${playfairDisplay.variable}`}
-    >
+    <html lang="en">
       <body>
         <AppShell>{children}</AppShell>
       </body>

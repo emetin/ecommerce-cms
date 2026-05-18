@@ -1,22 +1,16 @@
+import { createSupabaseAdminClient } from "./supabase/admin";
 import {
-  appendSheetRow,
-  findSheetItemByField,
-  findSheetItemsByField,
-  getSheetHeaders,
-  updateSheetRowByRowNumber,
-  findRowNumberByField,
-  getSheetData,
-} from "./sheets";
-import { getCartByToken, syncCartTotals } from "./cart";
+  getCartByToken,
+  getCartItems,
+  markCartConverted,
+  syncCartTotals,
+  type CartItemRecord,
+} from "./cart";
 import { toMoney, toNumber } from "./money";
-import { createId, createOrderNumber, nowIso } from "./ids";
+import { createOrderNumber } from "./ids";
 import { findCustomerByEmail, findCustomerById } from "./customer-account";
 import { resolveCartCatalogItem } from "./catalog";
 import { assertValidQuantityRule } from "./cart-rules";
-
-const ORDERS_SHEET = "orders";
-const ORDER_ITEMS_SHEET = "order_items";
-const CARTS_SHEET = "carts";
 
 export type OrderStatus =
   | "pending"
@@ -35,6 +29,8 @@ export type OrderRecord = {
   cart_token: string;
   cart_id: string;
   customer_id: string;
+  customer_company_id: string;
+  customer_user_id: string;
   email: string;
   first_name: string;
   last_name: string;
@@ -47,6 +43,8 @@ export type OrderRecord = {
   postal_code: string;
   note: string;
   status: string;
+  fulfillment_status: string;
+  payment_status: string;
   currency: string;
   subtotal: string;
   discount_total: string;
@@ -54,6 +52,11 @@ export type OrderRecord = {
   tax_total: string;
   grand_total: string;
   item_count: string;
+  billing_address_json?: Record<string, unknown>;
+  shipping_address_json?: Record<string, unknown>;
+  customer_snapshot_json?: Record<string, unknown>;
+  meta_json?: Record<string, unknown>;
+  placed_at: string;
   created_at: string;
   updated_at: string;
 };
@@ -61,6 +64,7 @@ export type OrderRecord = {
 export type OrderItemRecord = {
   id: string;
   order_id: string;
+  product_id: string;
   product_slug: string;
   variant_id: string;
   product_title: string;
@@ -69,14 +73,19 @@ export type OrderItemRecord = {
   image: string;
   unit_price: string;
   compare_at_price: string;
+  box_quantity: string;
   quantity: string;
   line_total: string;
+  product_snapshot_json?: Record<string, unknown>;
+  meta_json?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };
 
 export type CreateOrderInput = {
   customer_id?: string;
+  customer_company_id?: string;
+  customer_user_id?: string;
   email: string;
   first_name?: string;
   last_name?: string;
@@ -90,21 +99,53 @@ export type CreateOrderInput = {
   note?: string;
 };
 
-type CartItemForValidation = {
-  id?: string;
-  product_slug?: string;
-  variant_id?: string;
-  product_title?: string;
-  variant_title?: string;
-  sku?: string;
-  image?: string;
-  unit_price?: string | number;
-  compare_at_price?: string | number;
-  quantity?: string | number;
-  line_total?: string | number;
+type OrderDbRow = {
+  id: string;
+  order_number: string | null;
+  draft_order_id: string | null;
+  customer_company_id: string | null;
+  customer_user_id: string | null;
+  status: string;
+  fulfillment_status: string;
+  payment_status: string;
+  currency: string;
+  subtotal: number | string;
+  discount_total: number | string;
+  shipping_total: number | string;
+  tax_total: number | string;
+  grand_total: number | string;
+  billing_address_json: Record<string, unknown> | null;
+  shipping_address_json: Record<string, unknown> | null;
+  customer_snapshot_json: Record<string, unknown> | null;
+  notes: string | null;
+  internal_notes: string | null;
+  placed_at: string | null;
+  cancelled_at: string | null;
+  meta_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type OrderItemDbRow = {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  variant_id: string | null;
+  product_title: string | null;
+  variant_title: string | null;
+  sku: string | null;
+  quantity: number;
+  unit_price: number | string | null;
+  box_quantity: number | null;
+  line_total: number | string | null;
+  product_snapshot_json: Record<string, unknown> | null;
+  meta_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type ValidatedOrderItemInput = {
+  product_id: string;
   product_slug: string;
   variant_id: string;
   product_title: string;
@@ -113,16 +154,21 @@ type ValidatedOrderItemInput = {
   image: string;
   unit_price: number;
   compare_at_price: number;
+  box_quantity: number;
   quantity: number;
   line_total: number;
 };
 
-function normalize(value?: string | number | null) {
+function normalize(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function normalizeLower(value?: string | number | null) {
+function normalizeLower(value: unknown) {
   return normalize(value).toLowerCase();
+}
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
 function assertRequired(value: string, message: string) {
@@ -131,46 +177,50 @@ function assertRequired(value: string, message: string) {
   }
 }
 
-async function buildRowFromHeaders(
-  sheetName: string,
-  record: Record<string, unknown>
-): Promise<string[]> {
-  const headers = await getSheetHeaders(sheetName);
-
-  if (!headers.length) {
-    throw new Error(`"${sheetName}" sheet headers could not be found.`);
-  }
-
-  return headers.map((header) => {
-    const value = record[header];
-    return value == null ? "" : String(value);
-  });
+function toNullableUuid(value: unknown) {
+  const normalized = normalize(value);
+  return normalized || null;
 }
 
-async function resolveCustomerContext(input: {
-  customer_id?: string;
-  email?: string;
+function getMetaValue(
+  meta: Record<string, unknown> | null | undefined,
+  key: string
+) {
+  return normalize(meta?.[key]);
+}
+
+function buildAddressSnapshot(input: CreateOrderInput) {
+  return {
+    first_name: normalize(input.first_name),
+    last_name: normalize(input.last_name),
+    company: normalize(input.company),
+    phone: normalize(input.phone),
+    country: normalize(input.country),
+    city: normalize(input.city),
+    address_line_1: normalize(input.address_line_1),
+    address_line_2: normalize(input.address_line_2),
+    postal_code: normalize(input.postal_code),
+  };
+}
+
+function buildCustomerSnapshot(input: {
+  customerCompanyId: string;
+  customerUserId: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  company: string;
+  phone: string;
 }) {
-  const customerId = normalize(input.customer_id);
-  const email = normalizeLower(input.email);
-
-  if (customerId) {
-    const customer = await findCustomerById(customerId);
-
-    if (customer) {
-      return customer;
-    }
-  }
-
-  if (email) {
-    const customer = await findCustomerByEmail(email);
-
-    if (customer) {
-      return customer;
-    }
-  }
-
-  return null;
+  return {
+    customer_company_id: input.customerCompanyId || null,
+    customer_user_id: input.customerUserId || null,
+    email: input.email,
+    first_name: input.firstName,
+    last_name: input.lastName,
+    company: input.company,
+    phone: input.phone,
+  };
 }
 
 function calculateValidatedTotals(items: ValidatedOrderItemInput[]) {
@@ -193,45 +243,111 @@ function calculateValidatedTotals(items: ValidatedOrderItemInput[]) {
   };
 }
 
+async function resolveCustomerContext(input: {
+  customer_id?: string;
+  customer_company_id?: string;
+  customer_user_id?: string;
+  email?: string;
+}) {
+  const explicitCompanyId = normalize(input.customer_company_id);
+  const explicitUserId = normalize(input.customer_user_id || input.customer_id);
+  const email = normalizeLower(input.email);
+
+  if (explicitUserId) {
+    const customer = await findCustomerById(explicitUserId);
+
+    if (customer) {
+      return {
+        customer,
+        customerCompanyId: normalize(customer.company_id || explicitCompanyId),
+        customerUserId: normalize(customer.id || explicitUserId),
+      };
+    }
+  }
+
+  if (email) {
+    const customer = await findCustomerByEmail(email);
+
+    if (customer) {
+      return {
+        customer,
+        customerCompanyId: normalize(customer.company_id || explicitCompanyId),
+        customerUserId: normalize(customer.id || explicitUserId),
+      };
+    }
+  }
+
+  return {
+    customer: null,
+    customerCompanyId: explicitCompanyId,
+    customerUserId: explicitUserId,
+  };
+}
+
 async function validateCartItemsForQuote(
-  cartItems: CartItemForValidation[]
+  cartItems: CartItemRecord[]
 ): Promise<ValidatedOrderItemInput[]> {
   const validatedItems: ValidatedOrderItemInput[] = [];
 
   for (const cartItem of cartItems) {
     const productSlug = normalize(cartItem.product_slug);
+    const productIdFromCart = normalize(cartItem.product_id);
     const requestedQuantity = toNumber(cartItem.quantity);
 
-    if (!productSlug) {
+    if (!productSlug && !productIdFromCart) {
       throw new Error("A cart item is missing product information.");
     }
 
-    const resolved = await resolveCartCatalogItem(productSlug);
+    let resolvedProductId = productIdFromCart;
+    let resolvedVariantId = normalize(cartItem.variant_id);
+    let productTitle = normalize(cartItem.product_title);
+    let variantTitle = normalize(cartItem.variant_title);
+    let sku = normalize(cartItem.sku);
+    let image = normalize(cartItem.image);
+    let unitPrice = toNumber(cartItem.unit_price);
+    let compareAtPrice = toNumber(cartItem.compare_at_price);
+    let boxQuantity = toNumber(cartItem.box_quantity);
 
-    if (resolved.unitPrice <= 0) {
+    if (productSlug) {
+      const resolved = await resolveCartCatalogItem(productSlug);
+
+      resolvedProductId = normalize(
+        (resolved.product as any)?.id || resolvedProductId
+      );
+      resolvedVariantId = normalize(resolved.variantId || resolvedVariantId);
+      productTitle = normalize(resolved.productTitle || productTitle);
+      variantTitle = normalize(resolved.variantTitle || variantTitle);
+      sku = normalize(resolved.sku || sku);
+      image = normalize(resolved.image || image);
+      unitPrice = toNumber(resolved.unitPrice || unitPrice);
+      compareAtPrice = toNumber(resolved.compareAtPrice || compareAtPrice);
+      boxQuantity = toNumber(resolved.boxQuantity || boxQuantity);
+    }
+
+    if (unitPrice <= 0) {
       throw new Error(
-        `${resolved.productTitle} does not have an active price anymore.`
+        `${productTitle || "Product"} does not have an active price anymore.`
       );
     }
 
     const quantityRule = assertValidQuantityRule({
       quantity: requestedQuantity,
-      boxQuantity: resolved.boxQuantity,
+      boxQuantity,
     });
 
-    const lineTotal = Number(
-      (resolved.unitPrice * quantityRule.quantity).toFixed(2)
-    );
+    const lineTotal = Number((unitPrice * quantityRule.quantity).toFixed(2));
 
     validatedItems.push({
+      product_id: resolvedProductId,
       product_slug: productSlug,
-      variant_id: resolved.variantId,
-      product_title: resolved.productTitle,
-      variant_title: resolved.variantTitle,
-      sku: resolved.sku,
-      image: resolved.image,
-      unit_price: resolved.unitPrice,
-      compare_at_price: resolved.compareAtPrice,
+      variant_id: resolvedVariantId,
+      product_title: productTitle || "Product",
+      variant_title: variantTitle,
+      sku,
+      image,
+      unit_price: unitPrice,
+      compare_at_price: compareAtPrice,
+      box_quantity: boxQuantity,
       quantity: quantityRule.quantity,
       line_total: lineTotal,
     });
@@ -240,60 +356,81 @@ async function validateCartItemsForQuote(
   return validatedItems;
 }
 
-function buildOrderItemFromValidatedItem(
-  item: ValidatedOrderItemInput,
-  orderId: string,
-  now: string
-): OrderItemRecord {
+function mapOrderItemRow(row: OrderItemDbRow): OrderItemRecord {
+  const meta = row.meta_json || {};
+  const snapshot = row.product_snapshot_json || {};
+
   return {
-    id: createId("orderitem"),
-    order_id: orderId,
-    product_slug: normalize(item.product_slug),
-    variant_id: normalize(item.variant_id),
-    product_title: normalize(item.product_title),
-    variant_title: normalize(item.variant_title),
-    sku: normalize(item.sku),
-    image: normalize(item.image),
-    unit_price: toMoney(item.unit_price),
-    compare_at_price: toMoney(item.compare_at_price),
-    quantity: String(item.quantity),
-    line_total: toMoney(item.line_total),
-    created_at: now,
-    updated_at: now,
+    id: normalize(row.id),
+    order_id: normalize(row.order_id),
+    product_id: normalize(row.product_id),
+    product_slug: getMetaValue(meta, "product_slug"),
+    variant_id: normalize(row.variant_id),
+    product_title: normalize(row.product_title),
+    variant_title: normalize(row.variant_title),
+    sku: normalize(row.sku),
+    image: getMetaValue(snapshot, "image") || getMetaValue(meta, "image"),
+    unit_price: toMoney(row.unit_price),
+    compare_at_price: toMoney(snapshot.compare_at_price),
+    box_quantity: row.box_quantity ? String(row.box_quantity) : "",
+    quantity: String(row.quantity || 0),
+    line_total: toMoney(row.line_total),
+    product_snapshot_json: snapshot,
+    meta_json: meta,
+    created_at: normalize(row.created_at),
+    updated_at: normalize(row.updated_at),
   };
 }
 
-async function markCartAsConverted(cart: {
-  id: string;
-  cart_token: string;
-  customer_id: string;
-  status: string;
-  currency: string;
-  subtotal: string;
-  discount_total: string;
-  shipping_total: string;
-  tax_total: string;
-  grand_total: string;
-  item_count: string;
-  note: string;
-  created_at: string;
-  updated_at: string;
-  expires_at: string;
-}) {
-  const cartRowNumber = await findRowNumberByField(CARTS_SHEET, "id", cart.id);
+function mapOrderRow(
+  row: OrderDbRow,
+  items: OrderItemRecord[] = []
+): OrderRecord {
+  const shipping = row.shipping_address_json || {};
+  const customer = row.customer_snapshot_json || {};
+  const meta = row.meta_json || {};
 
-  if (!cartRowNumber) {
-    return;
-  }
+  const itemCount =
+    Number(meta.item_count || 0) ||
+    items.reduce((sum, item) => sum + toNumber(item.quantity), 0);
 
-  const updatedCart = {
-    ...cart,
-    status: "converted",
-    updated_at: nowIso(),
+  return {
+    id: normalize(row.id),
+    order_number: normalize(row.order_number),
+    cart_token: getMetaValue(meta, "cart_token"),
+    cart_id: getMetaValue(meta, "cart_id"),
+    customer_id: normalize(row.customer_user_id || row.customer_company_id),
+    customer_company_id: normalize(row.customer_company_id),
+    customer_user_id: normalize(row.customer_user_id),
+    email: normalize(customer.email),
+    first_name: normalize(customer.first_name || shipping.first_name),
+    last_name: normalize(customer.last_name || shipping.last_name),
+    company: normalize(customer.company || shipping.company),
+    phone: normalize(customer.phone || shipping.phone),
+    country: normalize(shipping.country),
+    city: normalize(shipping.city),
+    address_line_1: normalize(shipping.address_line_1),
+    address_line_2: normalize(shipping.address_line_2),
+    postal_code: normalize(shipping.postal_code),
+    note: normalize(row.notes),
+    status: normalize(row.status),
+    fulfillment_status: normalize(row.fulfillment_status),
+    payment_status: normalize(row.payment_status),
+    currency: normalize(row.currency || "USD") || "USD",
+    subtotal: toMoney(row.subtotal),
+    discount_total: toMoney(row.discount_total),
+    shipping_total: toMoney(row.shipping_total),
+    tax_total: toMoney(row.tax_total),
+    grand_total: toMoney(row.grand_total),
+    item_count: String(itemCount),
+    billing_address_json: row.billing_address_json || {},
+    shipping_address_json: row.shipping_address_json || {},
+    customer_snapshot_json: row.customer_snapshot_json || {},
+    meta_json: meta,
+    placed_at: normalize(row.placed_at),
+    created_at: normalize(row.created_at),
+    updated_at: normalize(row.updated_at),
   };
-
-  const cartRow = await buildRowFromHeaders(CARTS_SHEET, updatedCart);
-  await updateSheetRowByRowNumber(CARTS_SHEET, cartRowNumber, cartRow);
 }
 
 export async function getOrderByCartId(cartId: string) {
@@ -303,37 +440,49 @@ export async function getOrderByCartId(cartId: string) {
     return null;
   }
 
-  const orderRaw = await findSheetItemByField(
-    ORDERS_SHEET,
-    "cart_id",
-    normalizedCartId,
-    { forceFresh: true, ttlSeconds: 0 }
-  );
+  const supabase = createSupabaseAdminClient();
 
-  const order = orderRaw as OrderRecord | null;
+  const { data: orderData, error: orderError } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("meta_json->>cart_id", normalizedCartId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  if (!order) {
+  if (orderError) {
+    throw new Error(orderError.message);
+  }
+
+  if (!orderData) {
     return null;
   }
 
-  const itemsRaw = await findSheetItemsByField(
-    ORDER_ITEMS_SHEET,
-    "order_id",
-    order.id,
-    { forceFresh: true, ttlSeconds: 0 }
-  );
+  const { data: itemsData, error: itemsError } = await supabase
+    .from("order_items")
+    .select("*")
+    .eq("order_id", orderData.id)
+    .order("created_at", { ascending: true });
 
-  const items = (itemsRaw as OrderItemRecord[]) || [];
+  if (itemsError) {
+    throw new Error(itemsError.message);
+  }
+
+  const items = ((itemsData || []) as OrderItemDbRow[]).map(mapOrderItemRow);
 
   return {
-    order,
+    order: mapOrderRow(orderData as OrderDbRow, items),
     items,
   };
 }
 
-export async function createOrderFromCartToken(
+async function createOrderFromCartTokenInternal(
   cartToken: string,
-  input: CreateOrderInput
+  input: CreateOrderInput,
+  options?: {
+    status?: string;
+    paymentStatus?: string;
+  }
 ) {
   const normalizedCartToken = normalize(cartToken);
 
@@ -395,72 +544,156 @@ export async function createOrderFromCartToken(
 
   const resolvedCustomer = await resolveCustomerContext({
     customer_id: input.customer_id,
+    customer_company_id: input.customer_company_id || cart.customer_company_id,
+    customer_user_id: input.customer_user_id || cart.customer_user_id,
     email,
   });
 
-  const now = nowIso();
+  const customerCompanyId = normalize(
+    resolvedCustomer.customerCompanyId || cart.customer_company_id
+  );
 
-  const orderRecord: OrderRecord = {
-    id: createId("order"),
-    order_number: createOrderNumber(),
-    cart_token: normalizedCartToken,
-    cart_id: cart.id,
-    customer_id: normalize(resolvedCustomer?.id || input.customer_id),
-    email,
-    first_name: firstName || normalize(resolvedCustomer?.first_name),
-    last_name: lastName || normalize(resolvedCustomer?.last_name),
-    company: company || normalize(resolvedCustomer?.company),
-    phone: phone || normalize(resolvedCustomer?.phone),
+  const customerUserId = normalize(
+    resolvedCustomer.customerUserId || cart.customer_user_id
+  );
+
+  const timestamp = nowIso();
+
+  const shippingAddress = buildAddressSnapshot({
+    ...input,
+    first_name: firstName,
+    last_name: lastName,
+    company,
+    phone,
     country,
     city,
     address_line_1: addressLine1,
     address_line_2: addressLine2,
     postal_code: postalCode,
-    note,
-    status: "submitted",
-    currency: normalize(cart.currency) || "USD",
-    subtotal: toMoney(totals.subtotal),
-    discount_total: toMoney(totals.discount_total),
-    shipping_total: toMoney(totals.shipping_total),
-    tax_total: toMoney(totals.tax_total),
-    grand_total: toMoney(totals.grand_total),
-    item_count: String(totals.item_count),
-    created_at: now,
-    updated_at: now,
-  };
-
-  const orderRow = await buildRowFromHeaders(ORDERS_SHEET, orderRecord);
-  await appendSheetRow(ORDERS_SHEET, orderRow);
-
-  const createdItems: OrderItemRecord[] = [];
-
-  for (const validatedItem of validatedItems) {
-    const orderItem = buildOrderItemFromValidatedItem(
-      validatedItem,
-      orderRecord.id,
-      now
-    );
-
-    const orderItemRow = await buildRowFromHeaders(ORDER_ITEMS_SHEET, orderItem);
-    await appendSheetRow(ORDER_ITEMS_SHEET, orderItemRow);
-
-    createdItems.push(orderItem);
-  }
-
-  await markCartAsConverted({
-    ...cart,
-    subtotal: orderRecord.subtotal,
-    discount_total: orderRecord.discount_total,
-    shipping_total: orderRecord.shipping_total,
-    tax_total: orderRecord.tax_total,
-    grand_total: orderRecord.grand_total,
-    item_count: orderRecord.item_count,
   });
 
+  const customerSnapshot = buildCustomerSnapshot({
+    customerCompanyId,
+    customerUserId,
+    email,
+    firstName,
+    lastName,
+    company,
+    phone,
+  });
+
+  const supabase = createSupabaseAdminClient();
+
+  const finalStatus = normalize(options?.status) || "submitted";
+  const finalPaymentStatus = normalize(options?.paymentStatus) || "pending";
+
+  const { data: orderData, error: orderError } = await supabase
+    .from("orders")
+    .insert({
+      order_number: createOrderNumber(),
+      draft_order_id: null,
+      customer_company_id: toNullableUuid(customerCompanyId),
+      customer_user_id: toNullableUuid(customerUserId),
+      status: finalStatus,
+      fulfillment_status: "unfulfilled",
+      payment_status: finalPaymentStatus,
+      currency: normalize(cart.currency) || "USD",
+      subtotal: totals.subtotal,
+      discount_total: totals.discount_total,
+      shipping_total: totals.shipping_total,
+      tax_total: totals.tax_total,
+      grand_total: totals.grand_total,
+      billing_address_json: shippingAddress,
+      shipping_address_json: shippingAddress,
+      customer_snapshot_json: customerSnapshot,
+      notes: note || null,
+      internal_notes: null,
+      placed_at: timestamp,
+      cancelled_at: null,
+      meta_json: {
+        cart_id: cart.id,
+        cart_token: normalizedCartToken,
+        item_count: totals.item_count,
+        source: "website_checkout",
+      },
+      created_at: timestamp,
+      updated_at: timestamp,
+    })
+    .select("*")
+    .single();
+
+  if (orderError) {
+    throw new Error(orderError.message);
+  }
+
+  const orderId = normalize(orderData.id);
+
+  const orderItemPayloads = validatedItems.map((item) => ({
+    order_id: orderId,
+    product_id: toNullableUuid(item.product_id),
+    variant_id: toNullableUuid(item.variant_id),
+    product_title: item.product_title,
+    variant_title: item.variant_title,
+    sku: item.sku,
+    quantity: item.quantity,
+    unit_price: item.unit_price,
+    box_quantity: item.box_quantity || null,
+    line_total: item.line_total,
+    product_snapshot_json: {
+      product_slug: item.product_slug,
+      image: item.image,
+      compare_at_price: item.compare_at_price,
+      product_title: item.product_title,
+      variant_title: item.variant_title,
+      sku: item.sku,
+    },
+    meta_json: {
+      product_slug: item.product_slug,
+      source_cart_id: cart.id,
+    },
+    created_at: timestamp,
+    updated_at: timestamp,
+  }));
+
+  const { data: itemsData, error: itemsError } = await supabase
+    .from("order_items")
+    .insert(orderItemPayloads)
+    .select("*");
+
+  if (itemsError) {
+    throw new Error(itemsError.message);
+  }
+
+  await markCartConverted(cart.id);
+
+  const items = ((itemsData || []) as OrderItemDbRow[]).map(mapOrderItemRow);
+
   return {
-    order: orderRecord,
-    items: createdItems,
+    order: mapOrderRow(orderData as OrderDbRow, items),
+    items,
   };
+}
+
+export async function createOrderFromCartToken(
+  cartToken: string,
+  input: CreateOrderInput
+) {
+  return createOrderFromCartTokenInternal(cartToken, input, {
+    status: "submitted",
+    paymentStatus: "pending",
+  });
+}
+
+export async function createPaidOrderFromCartToken(
+  cartToken: string,
+  input: CreateOrderInput & {
+    paid_status?: string;
+  }
+) {
+  return createOrderFromCartTokenInternal(cartToken, input, {
+    status: normalize(input.paid_status) || "paid",
+    paymentStatus: "paid",
+  });
 }
 
 export async function getOrderByNumber(orderNumber: string) {
@@ -470,51 +703,94 @@ export async function getOrderByNumber(orderNumber: string) {
     return null;
   }
 
-  const orderRaw = await findSheetItemByField(
-    ORDERS_SHEET,
-    "order_number",
-    normalizedOrderNumber,
-    { forceFresh: true, ttlSeconds: 0 }
-  );
+  const supabase = createSupabaseAdminClient();
 
-  const order = orderRaw as OrderRecord | null;
+  const { data: orderData, error: orderError } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("order_number", normalizedOrderNumber)
+    .maybeSingle();
 
-  if (!order) {
+  if (orderError) {
+    throw new Error(orderError.message);
+  }
+
+  if (!orderData) {
     return null;
   }
 
-  const itemsRaw = await findSheetItemsByField(
-    ORDER_ITEMS_SHEET,
-    "order_id",
-    order.id,
-    { forceFresh: true, ttlSeconds: 0 }
-  );
+  const { data: itemsData, error: itemsError } = await supabase
+    .from("order_items")
+    .select("*")
+    .eq("order_id", orderData.id)
+    .order("created_at", { ascending: true });
 
-  const items = (itemsRaw as OrderItemRecord[]) || [];
+  if (itemsError) {
+    throw new Error(itemsError.message);
+  }
+
+  const items = ((itemsData || []) as OrderItemDbRow[]).map(mapOrderItemRow);
 
   return {
-    order,
+    order: mapOrderRow(orderData as OrderDbRow, items),
     items,
   };
 }
 
 export async function getAllOrders(
-  options?: {
+  _options?: {
     forceFresh?: boolean;
     ttlSeconds?: number;
   }
 ): Promise<OrderRecord[]> {
-  const rows = (await getSheetData(ORDERS_SHEET, {
-    forceFresh: options?.forceFresh ?? false,
-    ttlSeconds: options?.ttlSeconds ?? 60,
-  })) as OrderRecord[];
+  const supabase = createSupabaseAdminClient();
 
-  return [...rows].sort((a, b) => {
-    return (
-      new Date(b.created_at || 0).getTime() -
-      new Date(a.created_at || 0).getTime()
-    );
-  });
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data || []) as OrderDbRow[]).map((row) => mapOrderRow(row));
+}
+
+export async function getOrdersForCustomer(input: {
+  customerCompanyId?: string;
+  customerUserId?: string;
+  customerId?: string;
+  email?: string;
+}) {
+  const customerCompanyId = normalize(input.customerCompanyId);
+  const customerUserId = normalize(input.customerUserId || input.customerId);
+  const email = normalizeLower(input.email);
+
+  const supabase = createSupabaseAdminClient();
+
+  let query = supabase
+    .from("orders")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (customerCompanyId) {
+    query = query.eq("customer_company_id", customerCompanyId);
+  } else if (customerUserId) {
+    query = query.eq("customer_user_id", customerUserId);
+  } else if (email) {
+    query = query.eq("customer_snapshot_json->>email", email);
+  } else {
+    return [];
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data || []) as OrderDbRow[]).map((row) => mapOrderRow(row));
 }
 
 export async function updateOrderStatus(
@@ -532,171 +808,36 @@ export async function updateOrderStatus(
     throw new Error("status is required.");
   }
 
-  const orderRaw = await findSheetItemByField(
-    ORDERS_SHEET,
-    "order_number",
-    normalizedOrderNumber,
-    { forceFresh: true, ttlSeconds: 0 }
-  );
+  const supabase = createSupabaseAdminClient();
 
-  const order = orderRaw as OrderRecord | null;
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: nextStatus,
+      updated_at: nowIso(),
+    })
+    .eq("order_number", normalizedOrderNumber)
+    .select("*")
+    .single();
 
-  if (!order) {
-    throw new Error("Order not found.");
+  if (error) {
+    throw new Error(error.message);
   }
 
-  const rowNumber = await findRowNumberByField(
-    ORDERS_SHEET,
-    "order_number",
-    normalizedOrderNumber
-  );
+  const { data: itemsData, error: itemsError } = await supabase
+    .from("order_items")
+    .select("*")
+    .eq("order_id", data.id)
+    .order("created_at", { ascending: true });
 
-  if (!rowNumber) {
-    throw new Error("Order row could not be found.");
+  if (itemsError) {
+    throw new Error(itemsError.message);
   }
 
-  const updatedOrder: OrderRecord = {
-    ...order,
-    status: nextStatus,
-    updated_at: nowIso(),
-  };
-
-  const row = await buildRowFromHeaders(ORDERS_SHEET, updatedOrder);
-  await updateSheetRowByRowNumber(ORDERS_SHEET, rowNumber, row);
-
-  const itemsRaw = await findSheetItemsByField(
-    ORDER_ITEMS_SHEET,
-    "order_id",
-    order.id,
-    { forceFresh: true, ttlSeconds: 0 }
-  );
-
-  const items = (itemsRaw as OrderItemRecord[]) || [];
+  const items = ((itemsData || []) as OrderItemDbRow[]).map(mapOrderItemRow);
 
   return {
-    order: updatedOrder,
+    order: mapOrderRow(data as OrderDbRow, items),
     items,
-  };
-}
-
-export async function createPaidOrderFromCartToken(
-  cartToken: string,
-  input: CreateOrderInput & {
-    paid_status?: string;
-  }
-) {
-  const normalizedCartToken = normalize(cartToken);
-
-  if (!normalizedCartToken) {
-    throw new Error("Cart token not found.");
-  }
-
-  const cart = await getCartByToken(normalizedCartToken);
-
-  if (!cart) {
-    throw new Error("Cart not found.");
-  }
-
-  const existing = await getOrderByCartId(cart.id);
-
-  if (existing) {
-    return existing;
-  }
-
-  if (normalizeLower(cart.status) === "converted") {
-    throw new Error("This cart has already been converted to an order.");
-  }
-
-  const hydratedCart = await syncCartTotals(cart.id);
-  const cartItems = hydratedCart.items || [];
-
-  if (!cartItems.length) {
-    throw new Error("Your cart is empty.");
-  }
-
-  const validatedItems = await validateCartItemsForQuote(cartItems);
-
-  if (!validatedItems.length) {
-    throw new Error("Your cart is empty.");
-  }
-
-  const totals = calculateValidatedTotals(validatedItems);
-
-  const email = normalizeLower(input.email);
-
-  if (!email) {
-    throw new Error("Email is required.");
-  }
-
-  const resolvedCustomer = await resolveCustomerContext({
-    customer_id: input.customer_id,
-    email,
-  });
-
-  const now = nowIso();
-  const finalStatus = normalize(input.paid_status) || "paid";
-
-  const orderRecord: OrderRecord = {
-    id: createId("order"),
-    order_number: createOrderNumber(),
-    cart_token: normalizedCartToken,
-    cart_id: cart.id,
-    customer_id: normalize(resolvedCustomer?.id || input.customer_id),
-    email,
-    first_name:
-      normalize(input.first_name) || normalize(resolvedCustomer?.first_name),
-    last_name:
-      normalize(input.last_name) || normalize(resolvedCustomer?.last_name),
-    company: normalize(input.company) || normalize(resolvedCustomer?.company),
-    phone: normalize(input.phone) || normalize(resolvedCustomer?.phone),
-    country: normalize(input.country),
-    city: normalize(input.city),
-    address_line_1: normalize(input.address_line_1),
-    address_line_2: normalize(input.address_line_2),
-    postal_code: normalize(input.postal_code),
-    note: normalize(input.note),
-    status: finalStatus,
-    currency: normalize(cart.currency) || "USD",
-    subtotal: toMoney(totals.subtotal),
-    discount_total: toMoney(totals.discount_total),
-    shipping_total: toMoney(totals.shipping_total),
-    tax_total: toMoney(totals.tax_total),
-    grand_total: toMoney(totals.grand_total),
-    item_count: String(totals.item_count),
-    created_at: now,
-    updated_at: now,
-  };
-
-  const orderRow = await buildRowFromHeaders(ORDERS_SHEET, orderRecord);
-  await appendSheetRow(ORDERS_SHEET, orderRow);
-
-  const createdItems: OrderItemRecord[] = [];
-
-  for (const validatedItem of validatedItems) {
-    const orderItem = buildOrderItemFromValidatedItem(
-      validatedItem,
-      orderRecord.id,
-      now
-    );
-
-    const orderItemRow = await buildRowFromHeaders(ORDER_ITEMS_SHEET, orderItem);
-    await appendSheetRow(ORDER_ITEMS_SHEET, orderItemRow);
-
-    createdItems.push(orderItem);
-  }
-
-  await markCartAsConverted({
-    ...cart,
-    subtotal: orderRecord.subtotal,
-    discount_total: orderRecord.discount_total,
-    shipping_total: orderRecord.shipping_total,
-    tax_total: orderRecord.tax_total,
-    grand_total: orderRecord.grand_total,
-    item_count: orderRecord.item_count,
-  });
-
-  return {
-    order: orderRecord,
-    items: createdItems,
   };
 }

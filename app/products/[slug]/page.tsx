@@ -43,21 +43,22 @@ type ProductImageItem = {
   updated_at?: string;
 };
 
-function normalizeText(value?: string) {
-  return String(value || "").trim();
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim();
 }
 
-function normalizeLower(value?: string) {
+function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
-function toSafeOrder(value?: string) {
+function toSafeOrder(value: unknown) {
   const num = Number(normalizeText(value));
   return Number.isFinite(num) ? num : 999999;
 }
 
-function isTrue(value?: string) {
-  return normalizeLower(value) === "true";
+function isTrue(value: unknown) {
+  const normalized = normalizeLower(value);
+  return normalized === "true" || normalized === "1" || normalized === "yes";
 }
 
 function sortProductImages(images: ProductImageItem[]) {
@@ -148,13 +149,12 @@ function groupVariantsBySlug(variants: VariantItem[]) {
 }
 
 const getCatalogData = cache(async () => {
-  const [allProductsRaw, allProductImagesRaw, allVariantsRaw] = await Promise.all(
-    [
+  const [allProductsRaw, allProductImagesRaw, allVariantsRaw] =
+    await Promise.all([
       getSheetData("products", { ttlSeconds: 1800 }),
       getSheetData("product_images", { ttlSeconds: 1800 }),
       getSheetData("product_variants", { ttlSeconds: 1800 }),
-    ]
-  );
+    ]);
 
   const allProducts = allProductsRaw as ProductItem[];
   const allProductImages = allProductImagesRaw as ProductImageItem[];
@@ -162,7 +162,7 @@ const getCatalogData = cache(async () => {
 
   const publishedProducts = filterPublishedProducts(allProducts);
   const imagesBySlug = groupImagesBySlug(allProductImages);
-  const variantsBySlug = groupVariantsBySlug(allVariants);
+  const variantsBySlug = groupVariantsBySlug(filterActiveVariants(allVariants));
 
   return {
     allProducts,

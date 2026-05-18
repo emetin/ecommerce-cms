@@ -5,9 +5,9 @@ import {
 } from "../../../../lib/customer-auth";
 import {
   findCustomerById,
-  getOrdersForCustomer,
   sanitizeCustomer,
 } from "../../../../lib/customer-account";
+import { getOrdersForCustomer } from "../../../../lib/order";
 
 function getCookieValue(cookieHeader: string, name: string) {
   const match = cookieHeader.match(
@@ -24,14 +24,16 @@ export async function GET(req: Request) {
 
     const session = await readCustomerFromSessionToken(token);
 
-    if (!session?.customerId) {
+    if (!session?.customerUserId && !session?.customerId) {
       return NextResponse.json(
         { ok: false, error: "Customer login required." },
         { status: 401 }
       );
     }
 
-    const customer = await findCustomerById(session.customerId);
+    const customer = await findCustomerById(
+      session.customerUserId || session.customerId
+    );
 
     if (!customer) {
       return NextResponse.json(
@@ -41,7 +43,8 @@ export async function GET(req: Request) {
     }
 
     const orders = await getOrdersForCustomer({
-      customerId: customer.id,
+      customerCompanyId: session.companyId || customer.company_id,
+      customerUserId: session.customerUserId || customer.id,
       email: customer.email,
     });
 

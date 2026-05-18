@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "dev:turbo": "next dev",
-    "build": "next build",
+    "build": "set NODE_OPTIONS=--max-old-space-size=8192 && next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "import:prices": "node scripts/import-shopify-prices-to-supabase.mjs"

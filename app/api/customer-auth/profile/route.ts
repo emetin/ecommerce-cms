@@ -23,14 +23,16 @@ export async function GET(req: Request) {
     const token = getCookieValue(cookieHeader, CUSTOMER_COOKIE_NAME);
     const session = await readCustomerFromSessionToken(token);
 
-    if (!session?.customerId) {
+    if (!session?.customerUserId && !session?.customerId) {
       return NextResponse.json(
         { ok: false, error: "Customer login required." },
         { status: 401 }
       );
     }
 
-    const customer = await findCustomerById(session.customerId);
+    const customer = await findCustomerById(
+      session.customerUserId || session.customerId
+    );
 
     if (!customer) {
       return NextResponse.json(
@@ -61,7 +63,7 @@ export async function PATCH(req: Request) {
     const token = getCookieValue(cookieHeader, CUSTOMER_COOKIE_NAME);
     const session = await readCustomerFromSessionToken(token);
 
-    if (!session?.customerId) {
+    if (!session?.customerUserId && !session?.customerId) {
       return NextResponse.json(
         { ok: false, error: "Customer login required." },
         { status: 401 }
@@ -70,17 +72,27 @@ export async function PATCH(req: Request) {
 
     const body = await req.json();
 
-    const updated = await updateCustomerProfile(session.customerId, {
-      first_name: body?.first_name,
-      last_name: body?.last_name,
-      company: body?.company,
-      phone: body?.phone,
-      country: body?.country,
-      city: body?.city,
-      address_line_1: body?.address_line_1,
-      address_line_2: body?.address_line_2,
-      postal_code: body?.postal_code,
-    });
+    const updated = await updateCustomerProfile(
+      session.customerUserId || session.customerId,
+      {
+        first_name: body?.first_name,
+        last_name: body?.last_name,
+        company: body?.company,
+        phone: body?.phone,
+        country: body?.country,
+        city: body?.city,
+        address_line_1: body?.address_line_1,
+        address_line_2: body?.address_line_2,
+        postal_code: body?.postal_code,
+      }
+    );
+
+    if (!updated) {
+      return NextResponse.json(
+        { ok: false, error: "Customer profile could not be updated." },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({
       ok: true,

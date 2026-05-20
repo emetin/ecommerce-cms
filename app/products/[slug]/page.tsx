@@ -338,22 +338,120 @@ async function fetchProductVariants(productId: string, productSlug: string) {
 }
 
 async function fetchRelatedProducts(product: ProductItem) {
-  const collectionSlug = normalizeText(product.collection_slug);
   const currentProductId = normalizeText(product.id);
+  const productCategory = normalizeText(product.product_category);
+  const productType = normalizeText(product.type);
+  const collectionSlug = normalizeText(product.collection_slug);
 
-  if (!collectionSlug) {
+  if (!currentProductId) {
     return [] as ProductItem[];
   }
 
   const supabase = createSupabaseAdminClient();
 
+  const { data: collectionLinks, error: collectionError } = await supabase
+    .from("product_collections")
+    .select(
+      `
+      collection_id,
+      sort_order
+    `
+    )
+    .eq("product_id", currentProductId);
+
+  if (!collectionError && Array.isArray(collectionLinks) && collectionLinks.length) {
+    const collectionIds = collectionLinks
+      .map((item: any) => normalizeText(item.collection_id))
+      .filter(Boolean);
+
+    if (collectionIds.length) {
+      const { data, error } = await supabase
+        .from("product_collections")
+        .select(
+          `
+          sort_order,
+          products (
+            *
+          )
+        `
+        )
+        .in("collection_id", collectionIds)
+        .neq("product_id", currentProductId)
+        .order("sort_order", { ascending: true })
+        .limit(8);
+
+      if (!error && Array.isArray(data)) {
+        const related = data
+          .map((item: any) => item.products)
+          .filter(Boolean)
+          .map(mapProduct)
+          .filter((item: ProductItem) => isPublishedProduct(item.status))
+          .slice(0, 3);
+
+        if (related.length) {
+          return related;
+        }
+      }
+    }
+  }
+
+  if (collectionSlug) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("status", "published")
+      .eq("collection_slug", collectionSlug)
+      .neq("id", currentProductId)
+      .order("title", { ascending: true })
+      .limit(3);
+
+    if (!error && Array.isArray(data) && data.length) {
+      return (data as ProductRow[])
+        .map(mapProduct)
+        .filter((item) => isPublishedProduct(item.status));
+    }
+  }
+
+  if (productCategory) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("status", "published")
+      .eq("product_category", productCategory)
+      .neq("id", currentProductId)
+      .order("title", { ascending: true })
+      .limit(3);
+
+    if (!error && Array.isArray(data) && data.length) {
+      return (data as ProductRow[])
+        .map(mapProduct)
+        .filter((item) => isPublishedProduct(item.status));
+    }
+  }
+
+  if (productType) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("status", "published")
+      .eq("product_type", productType)
+      .neq("id", currentProductId)
+      .order("title", { ascending: true })
+      .limit(3);
+
+    if (!error && Array.isArray(data) && data.length) {
+      return (data as ProductRow[])
+        .map(mapProduct)
+        .filter((item) => isPublishedProduct(item.status));
+    }
+  }
+
   const { data, error } = await supabase
     .from("products")
     .select("*")
     .eq("status", "published")
-    .eq("collection_slug", collectionSlug)
     .neq("id", currentProductId)
-    .order("title", { ascending: true })
+    .order("updated_at", { ascending: false })
     .limit(3);
 
   if (error) {

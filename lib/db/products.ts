@@ -207,9 +207,21 @@ function sortBySortOrder<
   });
 }
 
+function sortProductOptions(items: SupabaseProductOption[] | null | undefined) {
+  return [...(items || [])].sort((a, b) => {
+    const aPosition = a.position ?? 0;
+    const bPosition = b.position ?? 0;
+
+    if (aPosition !== bPosition) {
+      return aPosition - bPosition;
+    }
+
+    return normalizeText(a.name).localeCompare(normalizeText(b.name));
+  });
+}
+
 function getMainImage(product: SupabaseProduct) {
   const images = sortBySortOrder(product.product_images);
-
   const mainImage = images.find((image) => image.is_main) || images[0] || null;
 
   return {
@@ -383,7 +395,9 @@ function normalizeProductDetail(product: SupabaseProduct) {
     .map(normalizeCollectionLink)
     .filter(Boolean);
 
-  const options = sortBySortOrder(product.product_options).map(normalizeOption);
+  const options = sortProductOptions(product.product_options).map(
+    normalizeOption
+  );
 
   const hasOnlyDefaultVariant =
     variants.length === 1 && Boolean(variants[0]?.is_default);

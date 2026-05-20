@@ -1,147 +1,233 @@
-import { NextResponse } from "next/server";
-import { getAllOrders } from "../../../../../lib/order";
+import { createSupabaseAdminClient } from "../../../../../lib/supabase/admin";
 import {
-  ADMIN_COOKIE_NAME,
-  verifyAdminSessionToken,
-} from "../../../../../lib/admin-auth";
-import { toNumber } from "../../../../../lib/money";
+  jsonError,
+  jsonOk,
+  requireAdminFromRequest,
+} from "../../../../../lib/api/admin";
 
-function parseCookieValue(cookieHeader: string, cookieName: string) {
-  const escapedCookieName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = cookieHeader.match(
-    new RegExp(`(?:^|;\\s*)${escapedCookieName}=([^;]+)`)
-  );
-
-  return match ? decodeURIComponent(match[1]) : null;
-}
+type OrderRow = {
+  id: string;
+  order_number: string | null;
+  customer_company_id: string | null;
+  customer_user_id: string | null;
+  status: string | null;
+  payment_status: string | null;
+  fulfillment_status: string | null;
+  currency: string | null;
+  subtotal: number | string | null;
+  discount_total: number | string | null;
+  shipping_total: number | string | null;
+  tax_total: number | string | null;
+  grand_total: number | string | null;
+  notes: string | null;
+  customer_snapshot_json: Record<string, unknown> | null;
+  shipping_address_json: Record<string, unknown> | null;
+  meta_json: Record<string, unknown> | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
 function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
-function normalizeEmail(value: unknown) {
-  return normalizeText(value).toLowerCase();
+function toNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }
 
-function matchesQuery(item: Record<string, unknown>, query: string) {
-  if (!query) return true;
+function normalizePage(value: unknown) {
+  const number = Number(value || 1);
 
-  const combined = [
-    item.order_number,
-    item.email,
-    item.first_name,
-    item.last_name,
-    item.company_name,
-    item.phone,
-    item.city,
-    item.country,
-    item.status,
-    item.payment_status,
-    item.fulfillment_status,
-    item.notes,
-  ]
-    .map((value) => normalizeLower(value))
-    .join(" ");
+  if (!Number.isFinite(number) || number <= 0) {
+    return 1;
+  }
 
-  return combined.includes(query);
+  return Math.floor(number);
+}
+
+function normalizeLimit(value: unknown) {
+  const number = Number(value || 25);
+
+  if (!Number.isFinite(number) || number <= 0) {
+    return 25;
+  }
+
+  return Math.min(Math.floor(number), 100);
+}
+
+function getJsonValue(
+  source: Record<string, unknown> | null | undefined,
+  key: string
+) {
+  return normalizeText(source?.[key]);
+}
+
+function mapOrder(row: OrderRow) {
+  const customer = row.customer_snapshot_json || {};
+  const shipping = row.shipping_address_json || {};
+  const meta = row.meta_json || {};
+
+  const firstName =
+    getJsonValue(customer, "first_name") || getJsonValue(shipping, "first_name");
+
+  const lastName =
+    getJsonValue(customer, "last_name") || getJsonValue(shipping, "last_name");
+
+  const email = getJsonValue(customer, "email");
+  const company =
+    getJsonValue(customer, "company") ||
+    getJsonValue(customer, "company_name") ||
+    getJsonValue(shipping, "company");
+
+  const phone =
+    getJsonValue(customer, "phone") || getJsonValue(shipping, "phone");
+
+  const country = getJsonValue(shipping, "country");
+  const city = getJsonValue(shipping, "city");
+
+  return {
+    id: normalizeText(row.id),
+    order_number: normalizeText(row.order_number),
+    cart_id: getJsonValue(meta, "cart_id"),
+    customer_id:
+      normalizeText(row.customer_company_id) ||
+      normalizeText(row.customer_user_id),
+    customer_company_id: normalizeText(row.customer_company_id),
+    customer_user_id: normalizeText(row.customer_user_id),
+
+    email: normalizeLower(email),
+    first_name: firstName,
+    last_name: lastName,
+    company_name: company,
+    phone,
+
+    country,
+    city,
+    address_line_1: getJsonValue(shipping, "address_line_1"),
+    address_line_2: getJsonValue(shipping, "address_line_2"),
+    postal_code: getJsonValue(shipping, "postal_code"),
+
+    status: normalizeLower(row.status || "submitted") || "submitted",
+    payment_status:
+      normalizeLower(row.payment_status || "pending") || "pending",
+    fulfillment_status:
+      normalizeLower(row.fulfillment_status || "unfulfilled") || "unfulfilled",
+
+    currency: normalizeText(row.currency || "USD") || "USD",
+
+    subtotal: toNumber(row.subtotal),
+    discount_total: toNumber(row.discount_total),
+    shipping_total: toNumber(row.shipping_total),
+    tax_total: toNumber(row.tax_total),
+    grand_total: toNumber(row.grand_total),
+    item_count: toNumber(meta.item_count),
+
+    notes: normalizeText(row.notes),
+    created_at: normalizeText(row.created_at),
+    updated_at: normalizeText(row.updated_at),
+  };
 }
 
 export async function GET(req: Request) {
   try {
-    const cookieHeader = req.headers.get("cookie") || "";
-    const token = parseCookieValue(cookieHeader, ADMIN_COOKIE_NAME);
-    const isAdmin = await verifyAdminSessionToken(token);
-
-    if (!isAdmin) {
-      return NextResponse.json(
-        { ok: false, error: "Unauthorized." },
-        { status: 401 }
-      );
-    }
+    await requireAdminFromRequest(req);
 
     const url = new URL(req.url);
+    const supabase = createSupabaseAdminClient();
+
+    const page = normalizePage(url.searchParams.get("page"));
+    const limit = normalizeLimit(url.searchParams.get("limit"));
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
     const statusFilter = normalizeLower(url.searchParams.get("status"));
     const paymentFilter = normalizeLower(url.searchParams.get("payment_status"));
     const fulfillmentFilter = normalizeLower(
       url.searchParams.get("fulfillment_status")
     );
-    const searchQuery = normalizeLower(url.searchParams.get("q"));
+    const searchQuery = normalizeText(url.searchParams.get("q"));
 
-    const orders = await getAllOrders({
-      forceFresh: true,
-      ttlSeconds: 0,
-    });
+    let query = supabase
+      .from("orders")
+      .select(
+        `
+        id,
+        order_number,
+        customer_company_id,
+        customer_user_id,
+        status,
+        payment_status,
+        fulfillment_status,
+        currency,
+        subtotal,
+        discount_total,
+        shipping_total,
+        tax_total,
+        grand_total,
+        notes,
+        customer_snapshot_json,
+        shipping_address_json,
+        meta_json,
+        created_at,
+        updated_at
+      `,
+        { count: "exact" }
+      )
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
-    const mappedItems = orders.map((order) => ({
-      id: normalizeText(order.id),
-      order_number: normalizeText(order.order_number),
-      cart_id: normalizeText(order.cart_id),
-      customer_id: normalizeText(order.customer_id),
-      customer_company_id: normalizeText(order.customer_company_id),
-      customer_user_id: normalizeText(order.customer_user_id),
+    if (statusFilter && statusFilter !== "all") {
+      query = query.eq("status", statusFilter);
+    }
 
-      email: normalizeEmail(order.email),
-      first_name: normalizeText(order.first_name),
-      last_name: normalizeText(order.last_name),
-      company_name: normalizeText(order.company),
-      phone: normalizeText(order.phone),
+    if (paymentFilter && paymentFilter !== "all") {
+      query = query.eq("payment_status", paymentFilter);
+    }
 
-      country: normalizeText(order.country),
-      city: normalizeText(order.city),
-      address_line_1: normalizeText(order.address_line_1),
-      address_line_2: normalizeText(order.address_line_2),
-      postal_code: normalizeText(order.postal_code),
+    if (fulfillmentFilter && fulfillmentFilter !== "all") {
+      query = query.eq("fulfillment_status", fulfillmentFilter);
+    }
 
-      status: normalizeLower(order.status || "submitted") || "submitted",
-      payment_status:
-        normalizeLower(order.payment_status || "pending") || "pending",
-      fulfillment_status:
-        normalizeLower(order.fulfillment_status || "unfulfilled") ||
-        "unfulfilled",
-
-      currency: normalizeText(order.currency || "USD") || "USD",
-
-      subtotal: toNumber(order.subtotal),
-      discount_total: toNumber(order.discount_total),
-      shipping_total: toNumber(order.shipping_total),
-      tax_total: toNumber(order.tax_total),
-      grand_total: toNumber(order.grand_total),
-      item_count: toNumber(order.item_count),
-
-      notes: normalizeText(order.note),
-      created_at: normalizeText(order.created_at),
-      updated_at: normalizeText(order.updated_at),
-    }));
-
-    const items = mappedItems.filter((item) => {
-      const matchesStatus = statusFilter
-        ? item.status === statusFilter
-        : true;
-
-      const matchesPayment = paymentFilter
-        ? item.payment_status === paymentFilter
-        : true;
-
-      const matchesFulfillment = fulfillmentFilter
-        ? item.fulfillment_status === fulfillmentFilter
-        : true;
-
-      const matchesSearch = matchesQuery(item, searchQuery);
-
-      return (
-        matchesStatus && matchesPayment && matchesFulfillment && matchesSearch
+    if (searchQuery) {
+      const safeQuery = searchQuery.replace(/[%]/g, "");
+      query = query.or(
+        [
+          `order_number.ilike.%${safeQuery}%`,
+          `status.ilike.%${safeQuery}%`,
+          `payment_status.ilike.%${safeQuery}%`,
+          `fulfillment_status.ilike.%${safeQuery}%`,
+          `customer_snapshot_json->>email.ilike.%${safeQuery}%`,
+          `customer_snapshot_json->>company.ilike.%${safeQuery}%`,
+          `customer_snapshot_json->>first_name.ilike.%${safeQuery}%`,
+          `customer_snapshot_json->>last_name.ilike.%${safeQuery}%`,
+          `customer_snapshot_json->>phone.ilike.%${safeQuery}%`,
+          `shipping_address_json->>city.ilike.%${safeQuery}%`,
+          `shipping_address_json->>country.ilike.%${safeQuery}%`,
+        ].join(",")
       );
-    });
+    }
 
-    return NextResponse.json(
+    const { data, count, error } = await query;
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const total = count || 0;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const items = ((data || []) as OrderRow[]).map(mapOrder);
+
+    return jsonOk(
       {
-        ok: true,
-        total: items.length,
+        total,
+        page,
+        limit,
+        totalPages,
         items,
       },
       {
@@ -151,9 +237,6 @@ export async function GET(req: Request) {
       }
     );
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to load orders.";
-
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    return jsonError(error, "Failed to load orders.");
   }
 }

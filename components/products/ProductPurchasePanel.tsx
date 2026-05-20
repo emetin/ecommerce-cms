@@ -86,7 +86,6 @@ function toPositiveInteger(value: unknown, fallback: number) {
 
 function toSafeOrder(value: unknown) {
   const parsed = Number(value);
-
   return Number.isFinite(parsed) ? parsed : 999999;
 }
 
@@ -123,7 +122,6 @@ function parsePrice(value?: string | number | null) {
 
 function isActiveStatus(value: unknown) {
   const status = normalizeLower(value);
-
   return status === "" || status === "published" || status === "active";
 }
 
@@ -133,33 +131,48 @@ function getUsableVariants(variants: VariantItem[]) {
     .sort((a, b) => toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order));
 }
 
-function getBackendVariant(variants: VariantItem[]) {
-  const usableVariants = getUsableVariants(variants);
+function isDefaultVariantText(value: unknown) {
+  const text = normalizeLower(value);
 
-  return usableVariants[0] || null;
+  return (
+    !text ||
+    text === "default" ||
+    text === "default title" ||
+    text === "default variant" ||
+    text === "standard" ||
+    text === "title"
+  );
 }
 
 function buildVariantTitle(variant: VariantItem | null) {
   if (!variant) return "";
 
-  const directTitle =
-    normalize(variant.title) ||
-    normalize(variant.name) ||
-    normalize(variant.option1_value) ||
-    normalize(variant.option2_value) ||
-    normalize(variant.option3_value);
+  const optionParts = [
+    normalize(variant.option1_value),
+    normalize(variant.option2_value),
+    normalize(variant.option3_value),
+  ].filter((item) => item && !isDefaultVariantText(item));
 
-  const lowered = directTitle.toLowerCase();
+  if (optionParts.length > 0) {
+    return optionParts.join(" / ");
+  }
 
-  if (
-    lowered === "default" ||
-    lowered === "default title" ||
-    lowered === "default variant"
-  ) {
+  const directTitle = normalize(variant.title) || normalize(variant.name);
+
+  if (isDefaultVariantText(directTitle)) {
     return "";
   }
 
   return directTitle;
+}
+
+function getDisplayVariantTitle(variant: VariantItem | null) {
+  return buildVariantTitle(variant) || "Standard";
+}
+
+function isDefaultVariant(variant: VariantItem | null) {
+  if (!variant) return true;
+  return !buildVariantTitle(variant);
 }
 
 function getVariantImage(variant: VariantItem | null) {
@@ -202,10 +215,7 @@ function getQuantityRule(
     1;
 
   const minQuantity =
-    variantMinQuantity ||
-    productMinQuantity ||
-    packageQuantity ||
-    1;
+    variantMinQuantity || productMinQuantity || packageQuantity || 1;
 
   const stepQuantity =
     toPositiveInteger(variant?.step_quantity, 0) ||
@@ -222,7 +232,7 @@ function getQuantityRule(
     stepQuantity,
     message:
       packageQuantity > 1
-        ? `Minimum order: ${finalMinQuantity} units.`
+        ? `Minimum order: ${finalMinQuantity} units. Orders increase by ${stepQuantity}.`
         : "",
   };
 }
@@ -259,7 +269,6 @@ function getNextDecreaseQuantity(quantity: number, rule: QuantityRule) {
 
 function getNextIncreaseQuantity(quantity: number, rule: QuantityRule) {
   const step = Math.max(rule.stepQuantity || rule.packageQuantity || 1, 1);
-
   return normalizeQuantityToRule(quantity + step, rule);
 }
 
@@ -270,30 +279,56 @@ function ProductPurchasePanelComponent({
 }: ProductPurchasePanelProps) {
   const { handleAddToCart, isAdding } = useCart();
 
+  const usableVariants = useMemo(() => {
+    return getUsableVariants(variants);
+  }, [variants]);
+
+  const [selectedVariantId, setSelectedVariantId] = useState("");
+
+  const selectedVariant = useMemo(() => {
+    if (!usableVariants.length) return null;
+
+    if (selectedVariantId) {
+      const match = usableVariants.find((variant) => {
+        return normalize(variant.id) === selectedVariantId;
+      });
+
+      if (match) return match;
+    }
+
+    return usableVariants[0] || null;
+  }, [selectedVariantId, usableVariants]);
+
+  const hasRealVariantSelection = useMemo(() => {
+    if (usableVariants.length <= 1) {
+      return false;
+    }
+
+    return usableVariants.some((variant) => !isDefaultVariant(variant));
+  }, [usableVariants]);
+
+  const quantityRule = useMemo(() => {
+    return getQuantityRule(product, selectedVariant);
+  }, [product, selectedVariant]);
+
   const [quantity, setQuantity] = useState(1);
   const [quantityInput, setQuantityInput] = useState("1");
   const [localError, setLocalError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  const backendVariant = useMemo(() => {
-    return getBackendVariant(variants);
-  }, [variants]);
-
-  const quantityRule = useMemo(() => {
-    return getQuantityRule(product, backendVariant);
-  }, [product, backendVariant]);
-
   useEffect(() => {
-    onVariantChange?.(backendVariant);
-  }, [backendVariant, onVariantChange]);
+    onVariantChange?.(selectedVariant);
+  }, [selectedVariant, onVariantChange]);
 
   const quantityRuleKey = useMemo(() => {
     return [
+      normalize(selectedVariant?.id),
       quantityRule.minQuantity,
       quantityRule.packageQuantity,
       quantityRule.stepQuantity,
     ].join(":");
   }, [
+    selectedVariant?.id,
     quantityRule.minQuantity,
     quantityRule.packageQuantity,
     quantityRule.stepQuantity,
@@ -312,10 +347,10 @@ function ProductPurchasePanelComponent({
   }, [quantityRuleKey]);
 
   const price =
-    parsePrice(backendVariant?.price) || parsePrice(product.price) || 0;
+    parsePrice(selectedVariant?.price) || parsePrice(product.price) || 0;
 
   const compareAtPrice =
-    parsePrice(backendVariant?.compare_at_price) ||
+    parsePrice(selectedVariant?.compare_at_price) ||
     parsePrice(product.compare_at_price) ||
     0;
 
@@ -326,25 +361,27 @@ function ProductPurchasePanelComponent({
     : 0;
 
   const effectiveSku =
-    normalize(backendVariant?.sku) || normalize(product.sku) || "";
+    normalize(selectedVariant?.sku) || normalize(product.sku) || "";
 
   const effectiveImage =
-    getVariantImage(backendVariant) || normalize(product.image) || "";
+    getVariantImage(selectedVariant) || normalize(product.image) || "";
 
   const effectiveVariantId =
-    normalize(backendVariant?.id) ||
-    normalize(backendVariant?.sku) ||
-    normalize(backendVariant?.title) ||
+    normalize(selectedVariant?.id) ||
+    normalize(selectedVariant?.sku) ||
+    normalize(selectedVariant?.title) ||
     "";
 
-  const effectiveVariantTitle = buildVariantTitle(backendVariant);
+  const effectiveVariantTitle = buildVariantTitle(selectedVariant);
+
+  const displayVariantTitle = getDisplayVariantTitle(selectedVariant);
 
   const inquiryHref = `/contact-us?product=${encodeURIComponent(
     product.title || "Product"
   )}`;
 
   const canAddToCart =
-    Boolean(product.slug) && price > 0 && quantity >= quantityRule.minQuantity;
+    Boolean(product.slug) && quantity >= quantityRule.minQuantity;
 
   function commitQuantity(rawValue: unknown) {
     const next = normalizeQuantityToRule(rawValue, quantityRule);
@@ -439,10 +476,42 @@ function ProductPurchasePanelComponent({
           </div>
 
           <p style={priceNoteStyle}>
-            Estimated B2B unit price. Final pricing, freight, and payment terms
-            are reviewed after quote submission.
+            Estimated B2B unit price. Final pricing, freight, availability, and
+            payment terms are reviewed after quote submission.
           </p>
         </div>
+
+        {hasRealVariantSelection ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            <label style={labelStyle}>Select Variant</label>
+
+            <select
+              value={normalize(selectedVariant?.id)}
+              onChange={(event) => {
+                setSelectedVariantId(event.target.value);
+                setLocalError("");
+                setSuccessMessage("");
+              }}
+              disabled={isAdding}
+              style={selectStyle}
+            >
+              {usableVariants.map((variant, index) => {
+                const title =
+                  buildVariantTitle(variant) || `Variant ${index + 1}`;
+                const sku = normalize(variant.sku);
+
+                return (
+                  <option
+                    key={variant.id || `${title}-${index}`}
+                    value={variant.id}
+                  >
+                    {sku ? `${title} | ${sku}` : title}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        ) : null}
 
         <div style={{ display: "grid", gap: 10 }}>
           <label style={labelStyle}>Quantity</label>
@@ -508,12 +577,21 @@ function ProductPurchasePanelComponent({
         <div style={infoGridStyle}>
           <InfoRow label="SKU" value={effectiveSku || "-"} />
 
+          {hasRealVariantSelection ? (
+            <InfoRow label="Variant" value={displayVariantTitle} />
+          ) : null}
+
           {quantityRule.minQuantity > 1 ? (
             <InfoRow
               label="Minimum Order"
               value={`${quantityRule.minQuantity} units`}
             />
           ) : null}
+
+          <InfoRow
+            label="Order Increment"
+            value={`${quantityRule.stepQuantity} units`}
+          />
         </div>
 
         {localError ? (
@@ -610,6 +688,19 @@ const labelStyle: CSSProperties = {
   color: "#5d554a",
   letterSpacing: "0.04em",
   textTransform: "uppercase",
+};
+
+const selectStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 52,
+  padding: "0 16px",
+  borderRadius: 16,
+  border: "1px solid #ddd3c5",
+  background: "#fff",
+  color: "#171717",
+  fontSize: 15,
+  fontWeight: 750,
+  outline: "none",
 };
 
 const quantityControlStyle: CSSProperties = {

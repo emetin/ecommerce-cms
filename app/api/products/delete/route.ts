@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "../../../../lib/supabase/admin";
+import { requireAdminFromRequest } from "../../../../lib/api/admin";
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -9,16 +10,25 @@ function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
+function jsonError(message: string, status = 500) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    { status }
+  );
+}
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    await requireAdminFromRequest(req);
+
+    const body = await req.json().catch(() => ({}));
     const slug = normalizeLower(body?.slug);
 
     if (!slug) {
-      return NextResponse.json(
-        { ok: false, error: "Product slug is required." },
-        { status: 400 }
-      );
+      return jsonError("Product slug is required.", 400);
     }
 
     const supabase = createSupabaseAdminClient();
@@ -38,13 +48,10 @@ export async function POST(req: Request) {
     }
 
     if (!data) {
-      return NextResponse.json(
-        { ok: false, error: "Product not found." },
-        { status: 404 }
-      );
+      return jsonError("Product not found.", 404);
     }
 
-    await supabase
+    const { error: variantError } = await supabase
       .from("product_variants")
       .update({
         status: "archived",
@@ -52,18 +59,18 @@ export async function POST(req: Request) {
       })
       .eq("product_id", data.id);
 
+    if (variantError) {
+      throw new Error(variantError.message);
+    }
+
     return NextResponse.json({
       ok: true,
+      message: "Product archived successfully.",
       item: data,
     });
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error ? error.message : "Failed to delete product.",
-      },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error ? error.message : "Failed to archive product."
     );
   }
 }

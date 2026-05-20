@@ -1,102 +1,84 @@
 import { NextResponse } from "next/server";
-import {
-  ADMIN_COOKIE_NAME,
-  verifyAdminSessionToken,
-} from "../../../../../lib/admin-auth";
-import { getSheetData } from "../../../../../lib/sheets";
-import { getAllOrders } from "../../../../../lib/order";
-import { toNumber } from "../../../../../lib/money";
+import { createSupabaseAdminClient } from "../../../../../lib/supabase/admin";
+import { requireAdminFromRequest } from "../../../../../lib/api/admin";
 
-type ProductRow = Record<string, string>;
-
-type ApplicationRow = {
+type ProductRow = {
   id?: string;
-  company_name?: string;
-  contact_name?: string;
-  email?: string;
-  phone?: string;
-  country?: string;
-  business_type?: string;
-  tax_id?: string;
-  website?: string;
-  notes?: string;
-  status?: string;
-  created_at?: string;
-  approved_at?: string;
-  reviewed_by?: string;
+  title?: string | null;
+  slug?: string | null;
+  status?: string | null;
+  base_price?: number | string | null;
+  image_url?: string | null;
+  image_file_id?: string | null;
+  image_alt?: string | null;
+  seo_title?: string | null;
+  seo_description?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
-type CustomerRow = {
+type CustomerUserRow = {
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+};
+
+type CustomerCompanyRow = {
   id?: string;
-  email?: string;
-  first_name?: string;
-  last_name?: string;
-  company?: string;
-  phone?: string;
-  country?: string;
-  city?: string;
-  address_line_1?: string;
-  address_line_2?: string;
-  postal_code?: string;
-  status?: string;
-  created_at?: string;
-  updated_at?: string;
-  last_login_at?: string;
-  tax_exempt?: string;
-  approved_at?: string;
-  company_name?: string;
-  contact_name?: string;
-  customer_code?: string;
-  price_tier?: string;
-  currency?: string;
-  shipping_terms?: string;
-  payment_terms?: string;
+  company_name?: string | null;
+  email?: string | null;
+  status?: string | null;
+  currency?: string | null;
+  created_at?: string | null;
+  customer_users?: CustomerUserRow[] | CustomerUserRow | null;
 };
 
-type OrderSummaryItem = {
-  id: string;
-  order_number: string;
-  customer_id: string;
-  company_name: string;
-  status: string;
-  subtotal: number;
-  currency: string;
-  created_at: string;
-  updated_at: string;
+type OrderRow = {
+  id?: string;
+  order_number?: string | null;
+  customer_company_id?: string | null;
+  customer_user_id?: string | null;
+  status?: string | null;
+  payment_status?: string | null;
+  fulfillment_status?: string | null;
+  currency?: string | null;
+  subtotal?: number | string | null;
+  grand_total?: number | string | null;
+  customer_snapshot_json?: Record<string, unknown> | null;
+  meta_json?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
-const SUMMARY_TTL_SECONDS = 300;
-
-function parseCookieValue(cookieHeader: string, cookieName: string) {
-  const escapedCookieName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = cookieHeader.match(
-    new RegExp(`(?:^|;\\s*)${escapedCookieName}=([^;]+)`)
-  );
-
-  return match ? decodeURIComponent(match[1]) : null;
-}
+type SupabaseResult = {
+  data?: unknown;
+  error?: {
+    message?: string;
+  } | null;
+};
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
 function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
-function buildCustomerFullName(row: CustomerRow) {
-  const first = normalizeText(row.first_name);
-  const last = normalizeText(row.last_name);
-  const full = [first, last].filter(Boolean).join(" ").trim();
-
-  return full || normalizeText(row.contact_name);
+function toNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }
 
-function buildCustomerCompany(row: CustomerRow) {
-  return normalizeText(row.company) || normalizeText(row.company_name);
+function getDateDaysAgo(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString();
 }
 
-function sortByCreatedAtDesc<T extends { created_at?: string }>(items: T[]) {
+function sortByCreatedAtDesc<T extends { created_at?: string | null }>(
+  items: T[]
+) {
   return [...items].sort((a, b) => {
     const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
     const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -105,170 +87,306 @@ function sortByCreatedAtDesc<T extends { created_at?: string }>(items: T[]) {
   });
 }
 
-function mapApplication(row: ApplicationRow) {
+function normalizeCustomerUsers(value: CustomerCompanyRow["customer_users"]) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (value) {
+    return [value];
+  }
+
+  return [];
+}
+
+function buildContactName(company: CustomerCompanyRow) {
+  const firstUser = normalizeCustomerUsers(company.customer_users)[0] || null;
+
+  const fullName = [
+    normalizeText(firstUser?.first_name),
+    normalizeText(firstUser?.last_name),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  return (
+    fullName ||
+    normalizeText(firstUser?.email) ||
+    normalizeText(company.email) ||
+    "-"
+  );
+}
+
+function getCustomerSnapshotValue(
+  order: OrderRow,
+  key: string,
+  fallback = ""
+) {
+  return normalizeText(order.customer_snapshot_json?.[key]) || fallback;
+}
+
+function mapOrder(order: OrderRow) {
+  const companyName =
+    getCustomerSnapshotValue(order, "company") ||
+    getCustomerSnapshotValue(order, "company_name") ||
+    "-";
+
   return {
-    id: normalizeText(row.id),
-    company_name: normalizeText(row.company_name),
-    contact_name: normalizeText(row.contact_name),
-    email: normalizeText(row.email),
-    phone: normalizeText(row.phone),
-    country: normalizeText(row.country),
-    business_type: normalizeText(row.business_type),
-    tax_id: normalizeText(row.tax_id),
-    website: normalizeText(row.website),
-    notes: normalizeText(row.notes),
-    status: normalizeText(row.status || "pending") || "pending",
-    created_at: normalizeText(row.created_at),
-    approved_at: normalizeText(row.approved_at),
-    reviewed_by: normalizeText(row.reviewed_by),
+    id: normalizeText(order.id),
+    order_number: normalizeText(order.order_number),
+    customer_id:
+      normalizeText(order.customer_company_id) ||
+      normalizeText(order.customer_user_id),
+    company_name: companyName,
+    status: normalizeText(order.status || "submitted") || "submitted",
+    subtotal: toNumber(order.subtotal || order.grand_total),
+    currency: normalizeText(order.currency || "USD") || "USD",
+    created_at: normalizeText(order.created_at),
+    updated_at: normalizeText(order.updated_at),
   };
 }
 
-function mapCustomer(row: CustomerRow) {
-  return {
-    id: normalizeText(row.id),
-    company_name: buildCustomerCompany(row),
-    contact_name: buildCustomerFullName(row),
-    email: normalizeText(row.email),
-    status: normalizeText(row.status || "inactive") || "inactive",
-    price_tier: normalizeText(row.price_tier || "standard") || "standard",
-    currency: normalizeText(row.currency || "USD") || "USD",
-    created_at: normalizeText(row.created_at),
-  };
+async function safeSelect<T>(query: unknown): Promise<T[]> {
+  try {
+    const result = (await query) as SupabaseResult;
+
+    if (result.error) {
+      return [];
+    }
+
+    return Array.isArray(result.data) ? (result.data as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function buildErrorResponse(error: unknown) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to load dashboard summary.",
+    },
+    { status: 500 }
+  );
 }
 
 export async function GET(req: Request) {
   try {
-    const cookieHeader = req.headers.get("cookie") || "";
-    const token = parseCookieValue(cookieHeader, ADMIN_COOKIE_NAME);
-    const isAdmin = await verifyAdminSessionToken(token);
+    await requireAdminFromRequest(req);
 
-    if (!isAdmin) {
-      return NextResponse.json(
-        { ok: false, error: "Unauthorized." },
-        { status: 401 }
-      );
-    }
+    const supabase = createSupabaseAdminClient();
+    const thirtyDaysAgo = getDateDaysAgo(30);
 
-    const [productsRaw, applicationsRaw, customersRaw, ordersRaw] =
-      await Promise.all([
-        getSheetData("products", {
-          forceFresh: false,
-          ttlSeconds: SUMMARY_TTL_SECONDS,
-        }) as Promise<ProductRow[]>,
-
-        getSheetData("customer_applications", {
-          forceFresh: false,
-          ttlSeconds: SUMMARY_TTL_SECONDS,
-        }) as Promise<ApplicationRow[]>,
-
-        getSheetData("customers", {
-          forceFresh: false,
-          ttlSeconds: SUMMARY_TTL_SECONDS,
-        }) as Promise<CustomerRow[]>,
-
-        getAllOrders({
-          forceFresh: false,
-          ttlSeconds: SUMMARY_TTL_SECONDS,
-        }),
-      ]);
-
-    const productTotal = productsRaw.reduce((count, item) => {
-      return normalizeText(item.slug) ? count + 1 : count;
-    }, 0);
-
-    const applications = sortByCreatedAtDesc(
-      applicationsRaw.map(mapApplication)
+    const productsPromise = safeSelect<ProductRow>(
+      supabase
+        .from("products")
+        .select(
+          `
+          id,
+          title,
+          slug,
+          status,
+          base_price,
+          image_url,
+          image_file_id,
+          image_alt,
+          seo_title,
+          seo_description,
+          created_at,
+          updated_at
+        `
+        )
     );
 
-    const customers = sortByCreatedAtDesc(customersRaw.map(mapCustomer));
+    const customersPromise = safeSelect<CustomerCompanyRow>(
+      supabase
+        .from("customer_companies")
+        .select(
+          `
+          id,
+          company_name,
+          email,
+          status,
+          currency,
+          created_at,
+          customer_users (
+            first_name,
+            last_name,
+            email
+          )
+        `
+        )
+        .order("created_at", { ascending: false })
+        .limit(20)
+    );
 
-    const orders: OrderSummaryItem[] = ordersRaw.map((order) => ({
-      id: normalizeText(order.id),
-      order_number: normalizeText(order.order_number),
-      customer_id: normalizeText(order.customer_id),
-      company_name: normalizeText(order.company),
-      status: normalizeText(order.status || "submitted"),
-      subtotal: toNumber(order.subtotal),
-      currency: normalizeText(order.currency || "USD") || "USD",
-      created_at: normalizeText(order.created_at),
-      updated_at: normalizeText(order.updated_at),
-    }));
+    const ordersPromise = safeSelect<OrderRow>(
+      supabase
+        .from("orders")
+        .select(
+          `
+          id,
+          order_number,
+          customer_company_id,
+          customer_user_id,
+          status,
+          payment_status,
+          fulfillment_status,
+          currency,
+          subtotal,
+          grand_total,
+          customer_snapshot_json,
+          meta_json,
+          created_at,
+          updated_at
+        `
+        )
+        .order("created_at", { ascending: false })
+        .limit(30)
+    );
 
-    const pendingApplications = applications.reduce((count, item) => {
-      return normalizeLower(item.status) === "pending" ? count + 1 : count;
-    }, 0);
+    const recentOrders30DaysPromise = safeSelect<OrderRow>(
+      supabase
+        .from("orders")
+        .select(
+          `
+          id,
+          order_number,
+          status,
+          currency,
+          subtotal,
+          grand_total,
+          customer_snapshot_json,
+          created_at,
+          updated_at
+        `
+        )
+        .gte("created_at", thirtyDaysAgo)
+        .order("created_at", { ascending: false })
+    );
 
-    const approvedApplications = applications.reduce((count, item) => {
-      return normalizeLower(item.status) === "approved" ? count + 1 : count;
-    }, 0);
+    const [products, customers, orders, recentOrders30Days] =
+      await Promise.all([
+        productsPromise,
+        customersPromise,
+        ordersPromise,
+        recentOrders30DaysPromise,
+      ]);
 
-    const activeCustomers = customers.reduce((count, item) => {
-      return normalizeLower(item.status) === "active" ? count + 1 : count;
-    }, 0);
+    const productTotal = products.length;
 
-    const inactiveCustomers = customers.length - activeCustomers;
+    const publishedProducts = products.filter(
+      (item) => normalizeLower(item.status) === "published"
+    ).length;
+
+    const draftProducts = products.filter(
+      (item) => normalizeLower(item.status) === "draft"
+    ).length;
+
+    const archivedProducts = products.filter(
+      (item) => normalizeLower(item.status) === "archived"
+    ).length;
+
+    const missingImageProducts = products.filter((item) => {
+      return !normalizeText(item.image_url) && !normalizeText(item.image_file_id);
+    }).length;
+
+    const missingPriceProducts = products.filter((item) => {
+      return toNumber(item.base_price) <= 0;
+    }).length;
+
+    const missingSeoProducts = products.filter((item) => {
+      return (
+        !normalizeText(item.seo_title) || !normalizeText(item.seo_description)
+      );
+    }).length;
+
+    const activeCustomers = customers.filter(
+      (item) => normalizeLower(item.status) === "active"
+    ).length;
+
+    const inactiveCustomers = customers.filter(
+      (item) => normalizeLower(item.status) !== "active"
+    ).length;
 
     const pendingOrderStatuses = new Set(["pending", "submitted", "reviewing"]);
-    const processingOrderStatuses = new Set(["approved", "processing", "quoted"]);
 
-    let pendingOrders = 0;
-    let processingOrders = 0;
-    let completedOrders = 0;
-    let orderVolume = 0;
+    const processingOrderStatuses = new Set([
+      "quoted",
+      "approved",
+      "processing",
+    ]);
 
-    orders.forEach((item) => {
-      const status = normalizeLower(item.status);
+    const pendingOrders = orders.filter((item) => {
+      return pendingOrderStatuses.has(normalizeLower(item.status));
+    }).length;
 
-      if (pendingOrderStatuses.has(status)) {
-        pendingOrders += 1;
-      }
+    const processingOrders = orders.filter((item) => {
+      return processingOrderStatuses.has(normalizeLower(item.status));
+    }).length;
 
-      if (processingOrderStatuses.has(status)) {
-        processingOrders += 1;
-      }
+    const completedOrders = orders.filter((item) => {
+      return normalizeLower(item.status) === "completed";
+    }).length;
 
-      if (status === "completed") {
-        completedOrders += 1;
-      }
+    const orderVolume = orders.reduce((sum, item) => {
+      return sum + toNumber(item.subtotal || item.grand_total);
+    }, 0);
 
-      orderVolume += Number(item.subtotal || 0);
-    });
+    const monthlyQuoteVolume = recentOrders30Days.reduce((sum, item) => {
+      return sum + toNumber(item.subtotal || item.grand_total);
+    }, 0);
+
+    const recentCustomers = sortByCreatedAtDesc(customers)
+      .slice(0, 5)
+      .map((item) => ({
+        id: normalizeText(item.id),
+        company_name: normalizeText(item.company_name),
+        contact_name: buildContactName(item),
+        email: normalizeText(item.email),
+        status: normalizeText(item.status || "inactive") || "inactive",
+        price_tier: "standard",
+        created_at: normalizeText(item.created_at),
+      }));
+
+    const recentOrders = orders.slice(0, 6).map(mapOrder);
 
     return NextResponse.json(
       {
         ok: true,
         stats: {
           productTotal,
-          pendingApplications,
-          approvedApplications,
+          publishedProducts,
+          draftProducts,
+          archivedProducts,
+          missingImageProducts,
+          missingPriceProducts,
+          missingSeoProducts,
+          pendingApplications: 0,
+          approvedApplications: 0,
           activeCustomers,
           inactiveCustomers,
           pendingOrders,
           processingOrders,
           completedOrders,
           orderVolume,
+          monthlyQuoteVolume,
         },
-        recentApplications: applications.slice(0, 5),
-        recentCustomers: customers.slice(0, 5),
-        recentOrders: orders.slice(0, 6),
+        recentApplications: [],
+        recentCustomers,
+        recentOrders,
       },
       {
         headers: {
-          "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
+          "Cache-Control": "private, no-store",
         },
       }
     );
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to load dashboard summary.",
-      },
-      { status: 500 }
-    );
+    return buildErrorResponse(error);
   }
 }

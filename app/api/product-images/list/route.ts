@@ -1,57 +1,128 @@
 import { NextResponse } from "next/server";
-import { getSheetData } from "../../../../lib/sheets";
+import { createSupabaseAdminClient } from "../../../../lib/supabase/admin";
 
-type ProductImageRecord = {
+type ProductImageRow = {
   id?: string;
-  product_slug?: string;
-  image_url?: string;
-  image_file_id?: string;
-  image_uploaded_at?: string;
-  sort_order?: string;
-  alt_text?: string;
-  is_main?: string;
-  created_at?: string;
-  updated_at?: string;
+  product_id?: string | null;
+  image_url?: string | null;
+  image_file_id?: string | null;
+  alt_text?: string | null;
+  sort_order?: number | string | null;
+  is_main?: boolean | string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  products?: {
+    slug?: string | null;
+  } | null;
 };
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
 function isTrue(value: unknown) {
-  return String(value || "").trim().toLowerCase() === "true";
+  if (typeof value === "boolean") return value;
+  return normalizeLower(value) === "true";
 }
 
 function toSafeOrder(value: unknown) {
-  const num = Number(String(value || "").trim());
-
+  const num = Number(normalizeText(value));
   return Number.isFinite(num) ? num : 999999;
+}
+
+function mapImage(row: ProductImageRow) {
+  const productSlug = normalizeText(row.products?.slug);
+
+  return {
+    id: normalizeText(row.id),
+    product_id: normalizeText(row.product_id),
+    product_slug: productSlug,
+    image_url: normalizeText(row.image_url),
+    image_file_id: normalizeText(row.image_file_id),
+    image_uploaded_at: normalizeText(row.created_at),
+    sort_order: String(toSafeOrder(row.sort_order)),
+    alt_text: normalizeText(row.alt_text),
+    is_main: isTrue(row.is_main) ? "true" : "false",
+    created_at: normalizeText(row.created_at),
+    updated_at: normalizeText(row.updated_at),
+  };
 }
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const productSlug = normalizeText(searchParams.get("product_slug")).toLowerCase();
+    const productSlug = normalizeLower(searchParams.get("product_slug"));
 
-    /*
-      Performance fix:
-      Previously this endpoint used forceFresh: true and ttlSeconds: 0.
-      That made every product image page reload pull product_images from Google Sheets again.
-      60 seconds cache is enough for admin listing.
-      Image create/update/delete operations should already clear cache through sheet invalidation.
-    */
-    const items = (await getSheetData("product_images", {
-      ttlSeconds: 60,
-    })) as ProductImageRecord[];
+    const supabase = createSupabaseAdminClient();
 
-    const filtered = items
-      .filter((item) => {
-        if (!productSlug) return true;
+    let productId = "";
 
-        return (
-          String(item.product_slug || "").trim().toLowerCase() === productSlug
+    if (productSlug) {
+      const { data: product, error: productError } = await supabase
+        .from("products")
+        .select("id, slug")
+        .eq("slug", productSlug)
+        .maybeSingle();
+
+      if (productError) {
+        throw new Error(productError.message);
+      }
+
+      if (!product) {
+        return NextResponse.json(
+          {
+            ok: true,
+            items: [],
+          },
+          {
+            headers: {
+              "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+            },
+          }
         );
-      })
+      }
+
+      productId = normalizeText(product.id);
+    }
+
+    let query = supabase
+      .from("product_images")
+      .select(
+        `
+        id,
+        product_id,
+        image_url,
+        image_file_id,
+        alt_text,
+        sort_order,
+        is_main,
+        created_at,
+        updated_at,
+        products (
+          slug
+        )
+      `
+      )
+      .order("is_main", { ascending: false })
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (productId) {
+      query = query.eq("product_id", productId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const items = ((data || []) as ProductImageRow[])
+      .map(mapImage)
       .sort((a, b) => {
         const aMain = isTrue(a.is_main);
         const bMain = isTrue(b.is_main);
@@ -66,7 +137,7 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         ok: true,
-        items: filtered,
+        items,
       },
       {
         headers: {

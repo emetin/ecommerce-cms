@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
 type ApplicationItem = {
   id: string;
@@ -36,6 +37,12 @@ type OrderItem = {
 
 type DashboardStats = {
   productTotal: number;
+  publishedProducts: number;
+  draftProducts: number;
+  archivedProducts: number;
+  missingImageProducts: number;
+  missingPriceProducts: number;
+  missingSeoProducts: number;
   pendingApplications: number;
   approvedApplications: number;
   activeCustomers: number;
@@ -44,12 +51,13 @@ type DashboardStats = {
   processingOrders: number;
   completedOrders: number;
   orderVolume: number;
+  monthlyQuoteVolume: number;
 };
 
 type DashboardSummaryResponse = {
   ok?: boolean;
   error?: string;
-  stats?: DashboardStats;
+  stats?: Partial<DashboardStats>;
   recentApplications?: ApplicationItem[];
   recentCustomers?: CustomerItem[];
   recentOrders?: OrderItem[];
@@ -57,6 +65,12 @@ type DashboardSummaryResponse = {
 
 const emptyStats: DashboardStats = {
   productTotal: 0,
+  publishedProducts: 0,
+  draftProducts: 0,
+  archivedProducts: 0,
+  missingImageProducts: 0,
+  missingPriceProducts: 0,
+  missingSeoProducts: 0,
   pendingApplications: 0,
   approvedApplications: 0,
   activeCustomers: 0,
@@ -65,14 +79,22 @@ const emptyStats: DashboardStats = {
   processingOrders: 0,
   completedOrders: 0,
   orderVolume: 0,
+  monthlyQuoteVolume: 0,
 };
 
-function normalizeText(value?: string) {
-  return String(value || "").trim();
+function normalizeText(value?: unknown) {
+  return String(value ?? "").trim();
 }
 
-function normalizeLower(value?: string) {
+function normalizeLower(value?: unknown) {
   return normalizeText(value).toLowerCase();
+}
+
+function mergeStats(stats?: Partial<DashboardStats>): DashboardStats {
+  return {
+    ...emptyStats,
+    ...(stats || {}),
+  };
 }
 
 function formatDate(value?: string) {
@@ -88,11 +110,40 @@ function formatDate(value?: string) {
   }).format(date);
 }
 
+function formatDateTime(value?: string) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function formatMoney(value: number, currency = "USD") {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency || "USD",
-  }).format(value || 0);
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+}
+
+function calculateReadinessScore(stats: DashboardStats) {
+  if (!stats.productTotal) return 100;
+
+  const issueTotal =
+    stats.missingImageProducts +
+    stats.missingPriceProducts +
+    stats.missingSeoProducts;
+
+  const rawScore = 100 - Math.round((issueTotal / stats.productTotal) * 100);
+
+  return Math.max(0, Math.min(100, rawScore));
 }
 
 async function readJsonResponse<T>(
@@ -130,7 +181,7 @@ async function readJsonResponse<T>(
   }
 }
 
-function getStatusPillStyle(value?: string): React.CSSProperties {
+function getStatusPillStyle(value?: string): CSSProperties {
   const raw = normalizeLower(value);
 
   if (raw === "active" || raw === "approved" || raw === "completed") {
@@ -141,7 +192,7 @@ function getStatusPillStyle(value?: string): React.CSSProperties {
     };
   }
 
-  if (raw === "processing") {
+  if (raw === "processing" || raw === "quoted") {
     return {
       background: "#eef4fb",
       color: "#315f95",
@@ -157,15 +208,7 @@ function getStatusPillStyle(value?: string): React.CSSProperties {
     };
   }
 
-  if (raw === "quoted") {
-    return {
-      background: "#eef4fb",
-      color: "#315f95",
-      border: "1px solid rgba(49,95,149,0.16)",
-    };
-  }
-
-  if (raw === "inactive" || raw === "cancelled") {
+  if (raw === "inactive" || raw === "cancelled" || raw === "canceled") {
     return {
       background: "#fff4f2",
       color: "#a54a3f",
@@ -184,17 +227,35 @@ export default function AdminDashboardPage() {
   const hasLoadedRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [stats, setStats] = useState<DashboardStats>(emptyStats);
-  const [recentApplications, setRecentApplications] = useState<
-    ApplicationItem[]
-  >([]);
+  const [recentApplications, setRecentApplications] = useState<ApplicationItem[]>(
+    []
+  );
   const [recentCustomers, setRecentCustomers] = useState<CustomerItem[]>([]);
   const [recentOrders, setRecentOrders] = useState<OrderItem[]>([]);
 
-  async function loadDashboard() {
+  const readinessScore = useMemo(() => {
+    return calculateReadinessScore(stats);
+  }, [stats]);
+
+  const issueTotal = useMemo(() => {
+    return (
+      stats.missingImageProducts +
+      stats.missingPriceProducts +
+      stats.missingSeoProducts
+    );
+  }, [stats]);
+
+  async function loadDashboard(options?: { silent?: boolean }) {
     try {
-      setLoading(true);
+      if (options?.silent) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
       setErrorMessage("");
 
       const response = await fetch("/api/admin/dashboard/summary", {
@@ -207,7 +268,7 @@ export default function AdminDashboardPage() {
         "Failed to load dashboard summary."
       );
 
-      setStats(data.stats || emptyStats);
+      setStats(mergeStats(data.stats));
 
       setRecentApplications(
         Array.isArray(data.recentApplications) ? data.recentApplications : []
@@ -224,6 +285,7 @@ export default function AdminDashboardPage() {
       );
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
@@ -235,7 +297,12 @@ export default function AdminDashboardPage() {
   }, []);
 
   if (loading) {
-    return <div style={cardStyle}>Loading dashboard...</div>;
+    return (
+      <div style={loadingCardStyle}>
+        <div style={loadingTitleStyle}>Loading dashboard...</div>
+        <div style={loadingTextStyle}>Preparing admin overview.</div>
+      </div>
+    );
   }
 
   if (errorMessage) {
@@ -244,91 +311,222 @@ export default function AdminDashboardPage() {
         <strong>Dashboard could not be loaded.</strong>
         <br />
         {errorMessage}
+        <div style={{ marginTop: 16 }}>
+          <button
+            type="button"
+            onClick={() => loadDashboard()}
+            style={primaryButtonStyle}
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: "grid", gap: 24 }}>
+    <div style={pageWrapStyle}>
       <div style={heroWrapStyle}>
         <div>
           <div style={eyebrowStyle}>Globaltex Admin Dashboard</div>
           <h1 style={titleStyle}>Operations overview</h1>
           <p style={subtitleStyle}>
-            Review product catalog size, incoming applications, customer account
-            health, and recent B2B order activity from one place.
+            Review catalog readiness, quote activity, customer accounts, and
+            pending operational work from one place.
           </p>
         </div>
 
         <div style={heroActionsStyle}>
+          <button
+            type="button"
+            onClick={() => loadDashboard({ silent: true })}
+            style={secondaryButtonStyle}
+            disabled={refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </button>
+
           <Link href="/admin/products/new" style={primaryButtonStyle}>
             + New Product
           </Link>
-          <Link href="/admin/customer-applications" style={secondaryButtonStyle}>
-            Review Applications
+
+          <Link href="/admin/products" style={secondaryButtonStyle}>
+            Open Products
           </Link>
         </div>
       </div>
 
       <section style={statsGridStyle}>
         <StatCard
-          label="Products"
+          label="Total Products"
           value={String(stats.productTotal)}
-          helper="Catalog entries currently available"
+          helper={`${stats.publishedProducts} published, ${stats.draftProducts} draft`}
+          tone="default"
+          href="/admin/products"
         />
+
         <StatCard
-          label="Pending Applications"
-          value={String(stats.pendingApplications)}
-          helper={`${stats.approvedApplications} approved applications`}
-          warning
+          label="Catalog Readiness"
+          value={`${readinessScore}%`}
+          helper={`${issueTotal} total content issues`}
+          tone={readinessScore >= 90 ? "success" : "warning"}
+          href="/admin/products"
         />
+
         <StatCard
-          label="Active Customers"
-          value={String(stats.activeCustomers)}
-          helper={`${stats.inactiveCustomers} inactive accounts`}
+          label="Missing Images"
+          value={String(stats.missingImageProducts)}
+          helper="Products without primary image"
+          tone={stats.missingImageProducts > 0 ? "warning" : "success"}
+          href="/admin/products"
         />
+
+        <StatCard
+          label="Missing Prices"
+          value={String(stats.missingPriceProducts)}
+          helper="Products without base price"
+          tone={stats.missingPriceProducts > 0 ? "danger" : "success"}
+          href="/admin/products"
+        />
+
         <StatCard
           label="Pending Quote Requests"
           value={String(stats.pendingOrders)}
-          helper={`${stats.processingOrders} in progress`}
-          warning
+          helper={`${stats.processingOrders} currently in progress`}
+          tone={stats.pendingOrders > 0 ? "warning" : "default"}
+          href="/admin/orders"
         />
+
+        <StatCard
+          label="Quote Volume"
+          value={formatMoney(stats.orderVolume, "USD")}
+          helper={`${formatMoney(stats.monthlyQuoteVolume, "USD")} in last 30 days`}
+          tone="default"
+          href="/admin/orders"
+        />
+
         <StatCard
           label="Completed Orders"
           value={String(stats.completedOrders)}
           helper="Operationally finalized orders"
+          tone="success"
+          href="/admin/orders"
         />
+
         <StatCard
-          label="Quote Volume"
-          value={formatMoney(stats.orderVolume, "USD")}
-          helper="Combined subtotal of listed quote requests"
+          label="Active Customers"
+          value={String(stats.activeCustomers)}
+          helper={`${stats.inactiveCustomers} inactive accounts`}
+          tone="default"
+          href="/admin/customers"
         />
+
+        <StatCard
+          label="Missing SEO"
+          value={String(stats.missingSeoProducts)}
+          helper="Products missing title or description"
+          tone={stats.missingSeoProducts > 0 ? "warning" : "success"}
+          href="/admin/products"
+        />
+      </section>
+
+      <section style={healthGridStyle}>
+        <div style={healthCardStyle}>
+          <div style={sectionKickerStyle}>Catalog Health</div>
+          <h2 style={sectionTitleLargeStyle}>Product readiness summary</h2>
+          <p style={sectionDescriptionStyle}>
+            This score checks images, prices, and SEO readiness across your
+            published catalog.
+          </p>
+
+          <div style={progressOuterStyle}>
+            <div
+              style={{
+                ...progressInnerStyle,
+                width: `${readinessScore}%`,
+              }}
+            />
+          </div>
+
+          <div style={healthMetaGridStyle}>
+            <HealthMetric
+              label="Published"
+              value={String(stats.publishedProducts)}
+            />
+            <HealthMetric
+              label="Missing Image"
+              value={String(stats.missingImageProducts)}
+            />
+            <HealthMetric
+              label="Missing Price"
+              value={String(stats.missingPriceProducts)}
+            />
+            <HealthMetric
+              label="Missing SEO"
+              value={String(stats.missingSeoProducts)}
+            />
+          </div>
+        </div>
+
+        <div style={healthCardStyle}>
+          <div style={sectionKickerStyle}>Quote Pipeline</div>
+          <h2 style={sectionTitleLargeStyle}>Current request status</h2>
+          <p style={sectionDescriptionStyle}>
+            Monitor submitted, reviewing, quoted, approved, processing, and
+            completed quote activity.
+          </p>
+
+          <div style={pipelineGridStyle}>
+            <PipelineItem
+              label="Pending"
+              value={stats.pendingOrders}
+              tone="warning"
+            />
+            <PipelineItem
+              label="In Progress"
+              value={stats.processingOrders}
+              tone="info"
+            />
+            <PipelineItem
+              label="Completed"
+              value={stats.completedOrders}
+              tone="success"
+            />
+          </div>
+
+          <Link href="/admin/orders" style={inlineActionStyle}>
+            Review quote requests →
+          </Link>
+        </div>
       </section>
 
       <section style={quickGridStyle}>
         <QuickLinkCard
           title="Products"
-          text="Manage product data, media readiness, and publishing status."
+          text="Manage product data, media readiness, pricing, and publishing status."
           href="/admin/products"
           cta="Open Products"
         />
+
         <QuickLinkCard
-          title="Applications"
-          text="Review new B2B requests and approve qualified companies."
-          href="/admin/customer-applications"
-          cta="Open Applications"
+          title="Orders"
+          text="Track quote requests, inspect line items, and update request status."
+          href="/admin/orders"
+          cta="Open Orders"
         />
+
         <QuickLinkCard
           title="Customers"
-          text="Control account status, pricing access, and temporary passwords."
+          text="Control account status, customer access, and B2B account activity."
           href="/admin/customers"
           cta="Open Customers"
         />
+
         <QuickLinkCard
-          title="Quote Requests"
-          text="Track quote request progress and inspect submitted line items."
-          href="/admin/orders"
-          cta="Open Requests"
+          title="Reports"
+          text="Review performance, catalog health, and operational reporting."
+          href="/admin/reports"
+          cta="Open Reports"
         />
       </section>
 
@@ -357,7 +555,8 @@ export default function AdminDashboardPage() {
                         {item.order_number || "Quote Request"}
                       </div>
                       <div style={listItemMetaStyle}>
-                        {item.company_name || "-"} • {item.customer_id || "-"}
+                        {item.company_name || "-"} •{" "}
+                        {formatDateTime(item.created_at)}
                       </div>
                     </div>
 
@@ -391,6 +590,15 @@ export default function AdminDashboardPage() {
                       </div>
                     </div>
                   </div>
+
+                  {item.order_number ? (
+                    <Link
+                      href={`/admin/orders/${item.order_number}`}
+                      style={smallActionStyle}
+                    >
+                      Open request →
+                    </Link>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -400,48 +608,37 @@ export default function AdminDashboardPage() {
         <section style={cardStyle}>
           <div style={sectionHeaderStyle}>
             <div>
-              <div style={sectionKickerStyle}>Applications</div>
-              <div style={sectionTitleStyle}>Newest requests</div>
+              <div style={sectionKickerStyle}>Customers</div>
+              <div style={sectionTitleStyle}>Recently added accounts</div>
             </div>
 
-            <Link href="/admin/customer-applications" style={inlineLinkStyle}>
+            <Link href="/admin/customers" style={inlineLinkStyle}>
               View all
             </Link>
           </div>
 
-          {recentApplications.length === 0 ? (
-            <div style={emptyStateStyle}>No applications found.</div>
+          {recentCustomers.length === 0 ? (
+            <div style={emptyStateStyle}>No customer accounts found.</div>
           ) : (
             <div style={{ display: "grid", gap: 12 }}>
-              {recentApplications.map((item) => (
-                <div key={item.id} style={listItemCardStyle}>
-                  <div style={listItemTopStyle}>
-                    <div>
-                      <div style={listItemTitleStyle}>
-                        {item.company_name || "-"}
-                      </div>
-                      <div style={listItemMetaStyle}>
-                        {item.contact_name || "-"} • {item.email || "-"}
-                      </div>
+              {recentCustomers.map((item) => (
+                <div key={item.id} style={customerRowStyle}>
+                  <div>
+                    <div style={listItemTitleStyle}>
+                      {item.company_name || "-"}
                     </div>
-
-                    <div
-                      style={{
-                        ...statusPillStyle,
-                        ...getStatusPillStyle(item.status),
-                      }}
-                    >
-                      {item.status || "pending"}
+                    <div style={listItemMetaStyle}>
+                      {item.contact_name || "-"} • {item.email || "-"}
                     </div>
                   </div>
 
-                  <div style={miniMetaGridStyle}>
-                    <div>
-                      <div style={miniMetaLabelStyle}>Submitted</div>
-                      <div style={miniMetaValueStyle}>
-                        {formatDate(item.created_at)}
-                      </div>
-                    </div>
+                  <div
+                    style={{
+                      ...statusPillStyle,
+                      ...getStatusPillStyle(item.status),
+                    }}
+                  >
+                    {item.status || "inactive"}
                   </div>
                 </div>
               ))}
@@ -450,23 +647,21 @@ export default function AdminDashboardPage() {
         </section>
       </div>
 
-      <section style={cardStyle}>
-        <div style={sectionHeaderStyle}>
-          <div>
-            <div style={sectionKickerStyle}>Customers</div>
-            <div style={sectionTitleStyle}>Recently added accounts</div>
+      {recentApplications.length > 0 ? (
+        <section style={cardStyle}>
+          <div style={sectionHeaderStyle}>
+            <div>
+              <div style={sectionKickerStyle}>Applications</div>
+              <div style={sectionTitleStyle}>Newest B2B requests</div>
+            </div>
+
+            <Link href="/admin/customer-applications" style={inlineLinkStyle}>
+              View all
+            </Link>
           </div>
 
-          <Link href="/admin/customers" style={inlineLinkStyle}>
-            View all
-          </Link>
-        </div>
-
-        {recentCustomers.length === 0 ? (
-          <div style={emptyStateStyle}>No customer accounts found.</div>
-        ) : (
           <div style={customerGridStyle}>
-            {recentCustomers.map((item) => (
+            {recentApplications.map((item) => (
               <div key={item.id} style={customerCardStyle}>
                 <div style={customerCardTitleStyle}>
                   {item.company_name || "-"}
@@ -483,18 +678,18 @@ export default function AdminDashboardPage() {
                       ...getStatusPillStyle(item.status),
                     }}
                   >
-                    {item.status || "inactive"}
+                    {item.status || "pending"}
                   </div>
 
                   <div style={customerTierBadgeStyle}>
-                    {item.price_tier || "standard"}
+                    {formatDate(item.created_at)}
                   </div>
                 </div>
               </div>
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -503,20 +698,57 @@ function StatCard({
   label,
   value,
   helper,
-  warning = false,
+  tone = "default",
+  href,
 }: {
   label: string;
   value: string;
   helper: string;
-  warning?: boolean;
+  tone?: "default" | "success" | "warning" | "danger";
+  href?: string;
 }) {
-  return (
-    <div style={warning ? warningStatCardStyle : statCardStyle}>
+  const card = (
+    <div style={{ ...statCardStyle, ...getStatToneStyle(tone) }}>
       <div style={statCardLabelStyle}>{label}</div>
       <div style={statCardValueStyle}>{value}</div>
       <div style={statCardHelperStyle}>{helper}</div>
     </div>
   );
+
+  if (!href) {
+    return card;
+  }
+
+  return (
+    <Link href={href} style={{ textDecoration: "none" }}>
+      {card}
+    </Link>
+  );
+}
+
+function getStatToneStyle(tone: "default" | "success" | "warning" | "danger") {
+  if (tone === "success") {
+    return {
+      background: "#f3fbf5",
+      border: "1px solid #cfe7d8",
+    };
+  }
+
+  if (tone === "warning") {
+    return {
+      background: "#fff8e9",
+      border: "1px solid #ecd8ad",
+    };
+  }
+
+  if (tone === "danger") {
+    return {
+      background: "#fff4f2",
+      border: "1px solid rgba(165,74,63,0.18)",
+    };
+  }
+
+  return {};
 }
 
 function QuickLinkCard({
@@ -539,7 +771,60 @@ function QuickLinkCard({
   );
 }
 
-const heroWrapStyle: React.CSSProperties = {
+function HealthMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={healthMetricStyle}>
+      <div style={healthMetricLabelStyle}>{label}</div>
+      <div style={healthMetricValueStyle}>{value}</div>
+    </div>
+  );
+}
+
+function PipelineItem({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "warning" | "info" | "success";
+}) {
+  const color =
+    tone === "warning" ? "#8a6418" : tone === "info" ? "#315f95" : "#2f7d62";
+
+  return (
+    <div style={pipelineItemStyle}>
+      <div style={{ ...pipelineValueStyle, color }}>{value}</div>
+      <div style={pipelineLabelStyle}>{label}</div>
+    </div>
+  );
+}
+
+const pageWrapStyle: CSSProperties = {
+  display: "grid",
+  gap: 24,
+};
+
+const loadingCardStyle: CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e3dbcf",
+  borderRadius: 22,
+  padding: 24,
+};
+
+const loadingTitleStyle: CSSProperties = {
+  fontSize: 18,
+  fontWeight: 850,
+  color: "#171717",
+};
+
+const loadingTextStyle: CSSProperties = {
+  marginTop: 6,
+  color: "#6f6559",
+  fontSize: 14,
+};
+
+const heroWrapStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "flex-start",
@@ -547,7 +832,7 @@ const heroWrapStyle: React.CSSProperties = {
   flexWrap: "wrap",
 };
 
-const eyebrowStyle: React.CSSProperties = {
+const eyebrowStyle: CSSProperties = {
   fontSize: 12,
   textTransform: "uppercase",
   letterSpacing: "0.08em",
@@ -556,15 +841,16 @@ const eyebrowStyle: React.CSSProperties = {
   marginBottom: 10,
 };
 
-const titleStyle: React.CSSProperties = {
+const titleStyle: CSSProperties = {
   fontSize: 42,
   lineHeight: 1.08,
   margin: "0 0 10px",
-  fontWeight: 800,
+  fontWeight: 850,
   color: "#171717",
+  letterSpacing: "-0.04em",
 };
 
-const subtitleStyle: React.CSSProperties = {
+const subtitleStyle: CSSProperties = {
   margin: 0,
   color: "#6f6559",
   fontSize: 16,
@@ -572,13 +858,13 @@ const subtitleStyle: React.CSSProperties = {
   maxWidth: 820,
 };
 
-const heroActionsStyle: React.CSSProperties = {
+const heroActionsStyle: CSSProperties = {
   display: "flex",
   gap: 12,
   flexWrap: "wrap",
 };
 
-const primaryButtonStyle: React.CSSProperties = {
+const primaryButtonStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -588,11 +874,12 @@ const primaryButtonStyle: React.CSSProperties = {
   border: "1px solid #2f7d62",
   background: "#2f7d62",
   color: "#fff",
-  fontWeight: 800,
+  fontWeight: 850,
   textDecoration: "none",
+  cursor: "pointer",
 };
 
-const secondaryButtonStyle: React.CSSProperties = {
+const secondaryButtonStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -602,262 +889,380 @@ const secondaryButtonStyle: React.CSSProperties = {
   border: "1px solid #d9cfbf",
   background: "#fff",
   color: "#171717",
-  fontWeight: 800,
+  fontWeight: 850,
   textDecoration: "none",
+  cursor: "pointer",
 };
 
-const statsGridStyle: React.CSSProperties = {
+const statsGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: 16,
 };
 
-const statCardStyle: React.CSSProperties = {
+const statCardStyle: CSSProperties = {
   background: "#fff",
   border: "1px solid #e3dbcf",
   borderRadius: 22,
   padding: 20,
   boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
-};
-
-const warningStatCardStyle: React.CSSProperties = {
-  background: "#fff7e8",
-  border: "1px solid #ecd8ad",
-  borderRadius: 22,
-  padding: 20,
-  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
-};
-
-const statCardLabelStyle: React.CSSProperties = {
-  fontSize: 13,
-  color: "#7c7267",
-  marginBottom: 10,
-  fontWeight: 700,
-};
-
-const statCardValueStyle: React.CSSProperties = {
-  fontSize: 30,
-  lineHeight: 1.1,
-  fontWeight: 800,
-  color: "#171717",
-  marginBottom: 8,
-};
-
-const statCardHelperStyle: React.CSSProperties = {
-  color: "#665d52",
-  fontSize: 13,
-  lineHeight: 1.6,
-};
-
-const quickGridStyle: React.CSSProperties = {
+  minHeight: 126,
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  alignContent: "space-between",
+  transition: "transform 160ms ease, box-shadow 160ms ease",
+};
+
+const statCardLabelStyle: CSSProperties = {
+  fontSize: 13,
+  color: "#6f6559",
+  fontWeight: 850,
+};
+
+const statCardValueStyle: CSSProperties = {
+  marginTop: 10,
+  fontSize: 32,
+  lineHeight: 1,
+  color: "#111",
+  fontWeight: 900,
+};
+
+const statCardHelperStyle: CSSProperties = {
+  marginTop: 12,
+  color: "#6f6559",
+  fontSize: 13,
+  lineHeight: 1.45,
+};
+
+const healthGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
   gap: 16,
 };
 
-const quickCardStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 12,
+const healthCardStyle: CSSProperties = {
   background: "#fff",
-  border: "1px solid #ddd3c5",
-  borderRadius: 22,
-  padding: 20,
-  textDecoration: "none",
-  color: "#171717",
-  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
-};
-
-const quickCardTitleStyle: React.CSSProperties = {
-  fontSize: 20,
-  fontWeight: 800,
-  lineHeight: 1.2,
-};
-
-const quickCardTextStyle: React.CSSProperties = {
-  color: "#665d52",
-  fontSize: 14,
-  lineHeight: 1.75,
-};
-
-const quickCardCtaStyle: React.CSSProperties = {
-  color: "#2f7d62",
-  fontWeight: 800,
-  fontSize: 14,
-};
-
-const contentGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1.15fr 0.85fr",
-  gap: 20,
-};
-
-const cardStyle: React.CSSProperties = {
-  background: "#fff",
-  border: "1px solid #ddd3c5",
+  border: "1px solid #e3dbcf",
   borderRadius: 24,
   padding: 24,
   boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
 };
 
-const sectionHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 14,
-  flexWrap: "wrap",
-  marginBottom: 18,
-};
-
-const sectionKickerStyle: React.CSSProperties = {
+const sectionKickerStyle: CSSProperties = {
+  color: "#b5962f",
   fontSize: 12,
-  textTransform: "uppercase",
+  fontWeight: 900,
   letterSpacing: "0.08em",
-  color: "#7a7166",
-  fontWeight: 800,
-  marginBottom: 6,
+  textTransform: "uppercase",
 };
 
-const sectionTitleStyle: React.CSSProperties = {
-  fontSize: 24,
+const sectionTitleLargeStyle: CSSProperties = {
+  margin: "8px 0 8px",
+  fontSize: 26,
   lineHeight: 1.15,
-  fontWeight: 800,
   color: "#171717",
+  fontWeight: 900,
+  letterSpacing: "-0.03em",
 };
 
-const inlineLinkStyle: React.CSSProperties = {
+const sectionDescriptionStyle: CSSProperties = {
+  margin: 0,
+  color: "#6f6559",
+  fontSize: 14,
+  lineHeight: 1.7,
+};
+
+const progressOuterStyle: CSSProperties = {
+  marginTop: 22,
+  height: 14,
+  background: "#f2ece2",
+  borderRadius: 999,
+  overflow: "hidden",
+  border: "1px solid #e3dbcf",
+};
+
+const progressInnerStyle: CSSProperties = {
+  height: "100%",
+  background: "#2f7d62",
+  borderRadius: 999,
+};
+
+const healthMetaGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 10,
+  marginTop: 18,
+};
+
+const healthMetricStyle: CSSProperties = {
+  background: "#faf7f1",
+  border: "1px solid #e8dfd2",
+  borderRadius: 16,
+  padding: 12,
+};
+
+const healthMetricLabelStyle: CSSProperties = {
+  color: "#7b7367",
+  fontSize: 11,
+  fontWeight: 850,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+};
+
+const healthMetricValueStyle: CSSProperties = {
+  marginTop: 8,
+  color: "#171717",
+  fontSize: 22,
+  fontWeight: 900,
+};
+
+const pipelineGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 10,
+  marginTop: 22,
+};
+
+const pipelineItemStyle: CSSProperties = {
+  background: "#faf7f1",
+  border: "1px solid #e8dfd2",
+  borderRadius: 16,
+  padding: 14,
+};
+
+const pipelineValueStyle: CSSProperties = {
+  fontSize: 28,
+  fontWeight: 900,
+  lineHeight: 1,
+};
+
+const pipelineLabelStyle: CSSProperties = {
+  marginTop: 8,
+  color: "#6f6559",
+  fontSize: 12,
+  fontWeight: 850,
+};
+
+const inlineActionStyle: CSSProperties = {
+  display: "inline-flex",
+  marginTop: 18,
   color: "#2f7d62",
-  fontWeight: 800,
+  fontWeight: 900,
   textDecoration: "none",
 };
 
-const emptyStateStyle: React.CSSProperties = {
-  borderRadius: 18,
-  border: "1px dashed #d9cfbf",
-  background: "#faf8f4",
-  padding: 22,
-  color: "#6f6559",
-  fontWeight: 700,
+const quickGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 16,
 };
 
-const listItemCardStyle: React.CSSProperties = {
-  borderRadius: 18,
-  border: "1px solid #e8dfd2",
-  background: "#fcfbf8",
-  padding: 16,
+const quickCardStyle: CSSProperties = {
   display: "grid",
   gap: 12,
+  padding: 20,
+  background: "#fff",
+  border: "1px solid #e3dbcf",
+  borderRadius: 22,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
+  color: "#171717",
+  textDecoration: "none",
 };
 
-const listItemTopStyle: React.CSSProperties = {
+const quickCardTitleStyle: CSSProperties = {
+  fontSize: 22,
+  fontWeight: 900,
+  color: "#171717",
+};
+
+const quickCardTextStyle: CSSProperties = {
+  color: "#6f6559",
+  fontSize: 14,
+  lineHeight: 1.65,
+};
+
+const quickCardCtaStyle: CSSProperties = {
+  color: "#2f7d62",
+  fontWeight: 900,
+};
+
+const contentGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.2fr 0.8fr",
+  gap: 16,
+};
+
+const cardStyle: CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e3dbcf",
+  borderRadius: 24,
+  padding: 22,
+  boxShadow: "0 10px 30px rgba(23,23,23,0.04)",
+};
+
+const sectionHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "flex-start",
-  gap: 12,
-  flexWrap: "wrap",
+  gap: 14,
+  marginBottom: 16,
 };
 
-const listItemTitleStyle: React.CSSProperties = {
-  fontSize: 18,
-  lineHeight: 1.25,
-  fontWeight: 800,
+const sectionTitleStyle: CSSProperties = {
+  marginTop: 5,
+  fontSize: 22,
   color: "#171717",
-  marginBottom: 4,
+  fontWeight: 900,
 };
 
-const listItemMetaStyle: React.CSSProperties = {
-  color: "#665d52",
-  fontSize: 14,
-  lineHeight: 1.7,
+const inlineLinkStyle: CSSProperties = {
+  color: "#2f7d62",
+  fontWeight: 900,
+  textDecoration: "none",
+  whiteSpace: "nowrap",
 };
 
-const statusPillStyle: React.CSSProperties = {
+const emptyStateStyle: CSSProperties = {
+  background: "#faf7f1",
+  border: "1px dashed #d8cdbd",
+  borderRadius: 18,
+  padding: 18,
+  color: "#7b7367",
+  fontWeight: 750,
+};
+
+const listItemCardStyle: CSSProperties = {
+  border: "1px solid #e8dfd2",
+  borderRadius: 18,
+  padding: 16,
+  background: "#fff",
+};
+
+const listItemTopStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "flex-start",
+};
+
+const listItemTitleStyle: CSSProperties = {
+  color: "#171717",
+  fontSize: 16,
+  fontWeight: 900,
+};
+
+const listItemMetaStyle: CSSProperties = {
+  marginTop: 5,
+  color: "#6f6559",
+  fontSize: 13,
+  lineHeight: 1.5,
+};
+
+const statusPillStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  minHeight: 34,
-  padding: "0 12px",
+  justifyContent: "center",
+  minHeight: 28,
+  padding: "0 10px",
   borderRadius: 999,
-  fontSize: 13,
-  fontWeight: 800,
+  fontSize: 12,
+  fontWeight: 900,
+  textTransform: "capitalize",
+  whiteSpace: "nowrap",
 };
 
-const miniMetaGridStyle: React.CSSProperties = {
+const miniMetaGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  gap: 12,
+  gap: 10,
+  marginTop: 14,
 };
 
-const miniMetaLabelStyle: React.CSSProperties = {
-  fontSize: 12,
+const miniMetaLabelStyle: CSSProperties = {
+  color: "#7b7367",
+  fontSize: 11,
+  fontWeight: 850,
   textTransform: "uppercase",
-  letterSpacing: "0.08em",
-  color: "#7a7166",
-  fontWeight: 800,
-  marginBottom: 6,
+  letterSpacing: "0.06em",
 };
 
-const miniMetaValueStyle: React.CSSProperties = {
+const miniMetaValueStyle: CSSProperties = {
+  marginTop: 5,
   color: "#171717",
-  fontWeight: 700,
-  fontSize: 14,
-  lineHeight: 1.6,
+  fontSize: 13,
+  fontWeight: 850,
 };
 
-const customerGridStyle: React.CSSProperties = {
+const smallActionStyle: CSSProperties = {
+  display: "inline-flex",
+  marginTop: 14,
+  color: "#2f7d62",
+  fontWeight: 900,
+  textDecoration: "none",
+};
+
+const customerRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 14,
+  alignItems: "center",
+  border: "1px solid #e8dfd2",
+  borderRadius: 18,
+  padding: 16,
+};
+
+const customerGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: 14,
 };
 
-const customerCardStyle: React.CSSProperties = {
-  borderRadius: 18,
+const customerCardStyle: CSSProperties = {
   border: "1px solid #e8dfd2",
-  background: "#fcfbf8",
+  borderRadius: 18,
   padding: 16,
-  display: "grid",
-  gap: 8,
+  background: "#fff",
 };
 
-const customerCardTitleStyle: React.CSSProperties = {
+const customerCardTitleStyle: CSSProperties = {
   fontSize: 16,
-  lineHeight: 1.3,
-  fontWeight: 800,
   color: "#171717",
+  fontWeight: 900,
 };
 
-const customerCardMetaStyle: React.CSSProperties = {
-  color: "#665d52",
+const customerCardMetaStyle: CSSProperties = {
+  marginTop: 6,
+  color: "#6f6559",
   fontSize: 13,
-  lineHeight: 1.6,
-  wordBreak: "break-word",
 };
 
-const customerCardBottomStyle: React.CSSProperties = {
+const customerCardBottomStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  alignItems: "center",
   gap: 10,
-  flexWrap: "wrap",
-  marginTop: 8,
+  alignItems: "center",
+  marginTop: 14,
 };
 
-const customerTierBadgeStyle: React.CSSProperties = {
+const customerTierBadgeStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  minHeight: 30,
+  justifyContent: "center",
+  minHeight: 28,
   padding: "0 10px",
   borderRadius: 999,
-  background: "#f3ede3",
-  color: "#6b6256",
-  fontWeight: 800,
+  background: "#f8f5ef",
+  border: "1px solid #e3dbcf",
+  color: "#6f6559",
   fontSize: 12,
-  textTransform: "uppercase",
+  fontWeight: 850,
 };
 
-const errorBoxStyle: React.CSSProperties = {
+const errorBoxStyle: CSSProperties = {
   padding: 18,
-  borderRadius: 16,
-  background: "#fff1f1",
-  border: "1px solid #f0c9c9",
-  color: "#8d2f2f",
-  lineHeight: 1.7,
+  borderRadius: 18,
+  background: "#fff4f2",
+  border: "1px solid rgba(165,74,63,0.18)",
+  color: "#7a2222",
+  fontSize: 14,
+  lineHeight: 1.6,
 };

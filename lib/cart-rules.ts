@@ -40,52 +40,83 @@ function normalizeQuantity(quantity: unknown, fallback: number) {
   return floored > 0 ? floored : fallback;
 }
 
-function getBoxBasedRule(input: QuantityRuleInput) {
-  const boxQuantity = toPositiveInteger(input.boxQuantity, 1);
+function getResolvedRule(input: QuantityRuleInput) {
+  const boxQuantity = toPositiveInteger(input.boxQuantity, 0);
+  const caseQuantity = toPositiveInteger(input.caseQuantity, 0);
+
+  const explicitMinQuantity = toPositiveInteger(input.minQuantity, 0);
+  const packageQuantity = caseQuantity || boxQuantity || 1;
+
+  const minQuantity = Math.max(
+    explicitMinQuantity || packageQuantity,
+    packageQuantity,
+    1
+  );
+
+  const stepQuantity =
+    toPositiveInteger(input.stepQuantity, 0) ||
+    caseQuantity ||
+    boxQuantity ||
+    1;
 
   return {
-    minQuantity: boxQuantity,
+    minQuantity,
     boxQuantity,
-    caseQuantity: 0,
-    stepQuantity: boxQuantity,
+    caseQuantity,
+    stepQuantity,
   };
 }
 
-function adjustQuantityToBoxMultiple(
+function adjustQuantityToRule(
   quantity: number,
   rule: {
     minQuantity: number;
     stepQuantity: number;
   }
 ) {
-  const baseQuantity = Math.max(quantity, rule.minQuantity);
-  const remainder = baseQuantity % rule.stepQuantity;
+  const minimum = Math.max(rule.minQuantity, 1);
+  const step = Math.max(rule.stepQuantity, 1);
+
+  const baseQuantity = Math.max(quantity, minimum);
+  const remainder = (baseQuantity - minimum) % step;
 
   if (remainder === 0) {
     return baseQuantity;
   }
 
-  return baseQuantity + (rule.stepQuantity - remainder);
+  return baseQuantity + (step - remainder);
 }
 
-function buildRuleMessage(rule: { boxQuantity: number }) {
-  if (rule.boxQuantity > 1) {
-    return `Quantity must be ordered in box multiples of ${rule.boxQuantity}.`;
+function buildRuleMessage(rule: {
+  minQuantity: number;
+  boxQuantity: number;
+  caseQuantity: number;
+  stepQuantity: number;
+}) {
+  const parts: string[] = [];
+
+  if (rule.minQuantity > 1) {
+    parts.push(`Minimum quantity is ${rule.minQuantity}.`);
   }
 
-  return "";
+  if (rule.caseQuantity > 1) {
+    parts.push(`Orders must follow case increments of ${rule.caseQuantity}.`);
+  } else if (rule.boxQuantity > 1) {
+    parts.push(`Orders must follow box increments of ${rule.boxQuantity}.`);
+  } else if (rule.stepQuantity > 1) {
+    parts.push(`Orders must increase by ${rule.stepQuantity}.`);
+  }
+
+  return parts.join(" ");
 }
 
 export function resolveQuantityRule(
   input: QuantityRuleInput
 ): QuantityRuleResult {
-  const rule = getBoxBasedRule(input);
+  const rule = getResolvedRule(input);
   const requestedQuantity = normalizeQuantity(input.quantity, rule.minQuantity);
-  const resolvedQuantity = adjustQuantityToBoxMultiple(
-    requestedQuantity,
-    rule
-  );
 
+  const resolvedQuantity = adjustQuantityToRule(requestedQuantity, rule);
   const adjusted = resolvedQuantity !== requestedQuantity;
 
   return {
@@ -102,12 +133,9 @@ export function resolveQuantityRule(
 export function assertValidQuantityRule(
   input: QuantityRuleInput
 ): QuantityRuleResult {
-  const rule = getBoxBasedRule(input);
+  const rule = getResolvedRule(input);
   const requestedQuantity = normalizeQuantity(input.quantity, rule.minQuantity);
-  const resolvedQuantity = adjustQuantityToBoxMultiple(
-    requestedQuantity,
-    rule
-  );
+  const resolvedQuantity = adjustQuantityToRule(requestedQuantity, rule);
 
   if (requestedQuantity < rule.minQuantity) {
     throw new Error(`Minimum quantity for this item is ${rule.minQuantity}.`);

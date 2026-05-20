@@ -324,11 +324,12 @@ async function validateCartItemsForQuote(
   boxQuantity = toNumber(resolved.boxQuantity || boxQuantity);
 }
 
-    if (unitPrice <= 0) {
-      throw new Error(
-        `${productTitle || "Product"} does not have an active price anymore.`
-      );
-    }
+    const isQuoteOnlyItem = unitPrice <= 0;
+
+if (isQuoteOnlyItem) {
+  unitPrice = 0;
+  compareAtPrice = 0;
+}
 
     const quantityRule = assertValidQuantityRule({
       quantity: requestedQuantity,

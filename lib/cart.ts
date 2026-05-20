@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "./supabase/admin";
 import { multiplyMoney, toMoney, toNumber } from "./money";
+import { resolveQuantityRule } from "./cart-rules";
 
 export type CartStatus = "active" | "converted" | "abandoned";
 
@@ -111,6 +112,8 @@ export type AddCartItemInput = {
   box_quantity?: number | string;
   case_quantity?: number | string;
   step_quantity?: number | string;
+
+  meta_json?: Record<string, unknown>;
 };
 
 export type HydratedCartItem = CartItemRecord & {
@@ -257,6 +260,33 @@ function clampQuantity(value: unknown, fallback = 1) {
   const floored = Math.floor(parsed);
 
   return floored > 0 ? floored : fallback;
+}
+
+function getCartItemRuleValue(
+  item: CartItemRecord,
+  directValue: unknown,
+  metaKey: string
+): string | number | null | undefined {
+  const directText = normalizeText(directValue);
+
+  if (directText) {
+    return directText;
+  }
+
+  const metaValue = item.meta_json?.[metaKey];
+  const metaText = normalizeText(metaValue);
+
+  return metaText || undefined;
+}
+
+function resolveCartItemQuantity(item: CartItemRecord, quantity: number) {
+  return resolveQuantityRule({
+    quantity,
+    minQuantity: getCartItemRuleValue(item, item.min_quantity, "min_quantity"),
+    boxQuantity: getCartItemRuleValue(item, item.box_quantity, "box_quantity"),
+    caseQuantity: getCartItemRuleValue(item, item.case_quantity, "case_quantity"),
+    stepQuantity: getCartItemRuleValue(item, item.step_quantity, "step_quantity"),
+  });
 }
 
 function mapCartRow(row: CartDbRow, itemCount = 0): CartRecord {
@@ -649,10 +679,14 @@ export async function addItemToCart(
   const existingItems = await getCartItems(cart.id);
 
   const existing = existingItems.find((item) => {
-    const sameVariant = normalizeText(item.variant_id) === variantId;
-    const sameProductId = productId && normalizeText(item.product_id) === productId;
+    const normalizedItemVariantId = normalizeText(item.variant_id);
+    const normalizedItemProductId = normalizeText(item.product_id);
+    const normalizedItemProductSlug = normalizeText(item.product_slug);
+
+    const sameVariant = normalizedItemVariantId === variantId;
+    const sameProductId = productId && normalizedItemProductId === productId;
     const sameProductSlug =
-      productSlug && normalizeText(item.product_slug) === productSlug;
+      productSlug && normalizedItemProductSlug === productSlug;
 
     return sameVariant && (sameProductId || sameProductSlug);
   });
@@ -661,6 +695,7 @@ export async function addItemToCart(
   const boxQuantity = toPositiveInteger(quantityRules.box_quantity, 0) || null;
 
   const metaJson = {
+    ...(input.meta_json || {}),
     product_slug: productSlug,
     image: normalizeText(input.image),
     compare_at_price: compareAtPrice,
@@ -678,7 +713,9 @@ export async function addItemToCart(
       1
     );
 
-    const lineTotal = multiplyMoney(unitPrice, nextQuantity);
+    const quantityRule = resolveCartItemQuantity(existing, nextQuantity);
+    const finalQuantity = quantityRule.quantity;
+    const lineTotal = multiplyMoney(unitPrice, finalQuantity);
 
     const { data, error } = await supabase
       .from("cart_items")
@@ -686,9 +723,11 @@ export async function addItemToCart(
         product_id: toNullableUuid(productId || existing.product_id),
         variant_id: toNullableUuid(variantId || existing.variant_id),
         product_title: normalizeText(input.product_title || existing.product_title),
-        variant_title: normalizeText(input.variant_title || existing.variant_title),
+        variant_title: normalizeText(
+          input.variant_title || existing.variant_title
+        ),
         sku: normalizeText(input.sku || existing.sku),
-        quantity: nextQuantity,
+        quantity: finalQuantity,
         unit_price: unitPrice,
         box_quantity: boxQuantity,
         line_total: lineTotal,
@@ -715,7 +754,16 @@ export async function addItemToCart(
     return updateCartTotalsFromItems(cart, nextItems);
   }
 
-  const lineTotal = multiplyMoney(unitPrice, quantityToAdd);
+  const quantityRule = resolveQuantityRule({
+    quantity: quantityToAdd,
+    minQuantity: quantityRules.min_quantity,
+    boxQuantity: quantityRules.box_quantity,
+    caseQuantity: quantityRules.case_quantity,
+    stepQuantity: quantityRules.step_quantity,
+  });
+
+  const finalQuantity = quantityRule.quantity;
+  const lineTotal = multiplyMoney(unitPrice, finalQuantity);
 
   const { data, error } = await supabase
     .from("cart_items")
@@ -726,7 +774,7 @@ export async function addItemToCart(
       product_title: normalizeText(input.product_title),
       variant_title: normalizeText(input.variant_title),
       sku: normalizeText(input.sku),
-      quantity: quantityToAdd,
+      quantity: finalQuantity,
       unit_price: unitPrice,
       box_quantity: boxQuantity,
       line_total: lineTotal,
@@ -786,7 +834,8 @@ export async function updateCartItemQuantity(
     const { error } = await supabase
       .from("cart_items")
       .delete()
-      .eq("id", normalizedItemId);
+      .eq("id", normalizedItemId)
+      .eq("cart_id", activeCart.id);
 
     if (error) {
       throw new Error(error.message);
@@ -799,17 +848,21 @@ export async function updateCartItemQuantity(
     return updateCartTotalsFromItems(activeCart, nextItems);
   }
 
+  const quantityRule = resolveCartItemQuantity(item, nextQuantity);
+  const finalQuantity = quantityRule.quantity;
+
   const unitPrice = toNumber(item.unit_price);
-  const lineTotal = multiplyMoney(unitPrice, nextQuantity);
+  const lineTotal = multiplyMoney(unitPrice, finalQuantity);
 
   const { data, error } = await supabase
     .from("cart_items")
     .update({
-      quantity: nextQuantity,
+      quantity: finalQuantity,
       line_total: lineTotal,
       updated_at: nowIso(),
     })
     .eq("id", normalizedItemId)
+    .eq("cart_id", activeCart.id)
     .select("*")
     .single();
 

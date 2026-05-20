@@ -125,16 +125,7 @@ export async function POST(req: Request) {
           }
         );
 
-        await supabase.from("product_collection_links").upsert(
-          {
-            product_id: data.id,
-            collection_id: collection.id,
-            sort_order: 0,
-          },
-          {
-            onConflict: "product_id,collection_id",
-          }
-        );
+        
       }
     }
 

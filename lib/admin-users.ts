@@ -1,28 +1,20 @@
 import bcrypt from "bcryptjs";
-import {
-  appendSheetRow,
-  deleteSheetRowByField,
-  findRowNumberByField,
-  findSheetItemByField,
-  getSheetData,
-  getSheetHeaders,
-  updateSheetRowByRowNumber,
-} from "./sheets";
+import { createSupabaseAdminClient } from "./supabase/admin";
 import { getRolePermissions } from "./admin-roles";
-
-const ADMIN_USERS_SHEET = "admin_users";
 
 export type AdminUserRecord = {
   id: string;
   email: string;
-  name: string;
+  name: string | null;
+  full_name?: string | null;
   password_hash: string;
-  role_key: string;
-  status: string;
-  must_change_password: string;
-  last_login_at: string;
-  created_at: string;
-  updated_at: string;
+  role_key: string | null;
+  role?: string | null;
+  status: string | null;
+  must_change_password: boolean | null;
+  last_login_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 export type AdminUser = {
@@ -49,20 +41,31 @@ function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
-function normalizeBoolean(value: unknown) {
-  return normalizeLower(value) === "true";
+function normalizeStatus(value: unknown) {
+  const status = normalizeLower(value || "active") || "active";
+
+  if (["active", "inactive", "archived"].includes(status)) {
+    return status;
+  }
+
+  return "active";
 }
 
-function booleanToSheetValue(value: boolean) {
-  return value ? "true" : "false";
+function normalizeBoolean(value: unknown) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalized = normalizeLower(value);
+
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+
+  return false;
 }
 
 function nowIso() {
   return new Date().toISOString();
-}
-
-function createId(prefix: string) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function isBcryptHash(value: string) {
@@ -73,9 +76,16 @@ function mapUser(row: Partial<AdminUserRecord>): AdminUser {
   return {
     id: normalizeText(row.id),
     email: normalizeLower(row.email),
-    name: normalizeText(row.name),
-    roleKey: normalizeLower(row.role_key || "viewer") || "viewer",
-    status: normalizeLower(row.status || "active") || "active",
+    name:
+      normalizeText(row.name) ||
+      normalizeText(row.full_name) ||
+      normalizeLower(row.email) ||
+      "Admin User",
+    roleKey:
+      normalizeLower(row.role_key) ||
+      normalizeLower(row.role) ||
+      "viewer",
+    status: normalizeStatus(row.status),
     mustChangePassword: normalizeBoolean(row.must_change_password),
     lastLoginAt: normalizeText(row.last_login_at),
     createdAt: normalizeText(row.created_at),
@@ -83,20 +93,16 @@ function mapUser(row: Partial<AdminUserRecord>): AdminUser {
   };
 }
 
-async function buildRowFromHeaders(record: Record<string, unknown>) {
-  const headers = await getSheetHeaders(ADMIN_USERS_SHEET, {
-    forceFresh: true,
-    ttlSeconds: 0,
-  });
+async function mapUserWithPermissions(
+  row: Partial<AdminUserRecord>
+): Promise<AdminUserWithPermissions> {
+  const user = mapUser(row);
+  const permissions = await getRolePermissions(user.roleKey);
 
-  if (!headers.length) {
-    throw new Error("admin_users sheet headers could not be found.");
-  }
-
-  return headers.map((header) => {
-    const value = record[header];
-    return value == null ? "" : String(value);
-  });
+  return {
+    ...user,
+    permissions,
+  };
 }
 
 export async function hashAdminPassword(password: string) {
@@ -110,12 +116,35 @@ export async function hashAdminPassword(password: string) {
 }
 
 export async function getAdminUsers() {
-  const rows = (await getSheetData(ADMIN_USERS_SHEET, {
-    forceFresh: true,
-    ttlSeconds: 0,
-  })) as AdminUserRecord[];
+  const supabase = createSupabaseAdminClient();
 
-  return rows.map(mapUser).filter((user) => user.id && user.email);
+  const { data, error } = await supabase
+    .from("admin_users")
+    .select(
+      `
+      id,
+      email,
+      name,
+      full_name,
+      password_hash,
+      role_key,
+      role,
+      status,
+      must_change_password,
+      last_login_at,
+      created_at,
+      updated_at
+    `
+    )
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data || []) as AdminUserRecord[])
+    .map(mapUser)
+    .filter((user) => user.id && user.email);
 }
 
 export async function findAdminUserByEmail(email: string) {
@@ -125,14 +154,34 @@ export async function findAdminUserByEmail(email: string) {
     return null;
   }
 
-  const row = (await findSheetItemByField(
-    ADMIN_USERS_SHEET,
-    "email",
-    normalizedEmail,
-    { forceFresh: true, ttlSeconds: 0 }
-  )) as AdminUserRecord | null;
+  const supabase = createSupabaseAdminClient();
 
-  return row ? mapUser(row) : null;
+  const { data, error } = await supabase
+    .from("admin_users")
+    .select(
+      `
+      id,
+      email,
+      name,
+      full_name,
+      password_hash,
+      role_key,
+      role,
+      status,
+      must_change_password,
+      last_login_at,
+      created_at,
+      updated_at
+    `
+    )
+    .eq("email", normalizedEmail)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ? mapUser(data as AdminUserRecord) : null;
 }
 
 export async function findAdminUserRecordByEmail(email: string) {
@@ -142,12 +191,34 @@ export async function findAdminUserRecordByEmail(email: string) {
     return null;
   }
 
-  return (await findSheetItemByField(
-    ADMIN_USERS_SHEET,
-    "email",
-    normalizedEmail,
-    { forceFresh: true, ttlSeconds: 0 }
-  )) as AdminUserRecord | null;
+  const supabase = createSupabaseAdminClient();
+
+  const { data, error } = await supabase
+    .from("admin_users")
+    .select(
+      `
+      id,
+      email,
+      name,
+      full_name,
+      password_hash,
+      role_key,
+      role,
+      status,
+      must_change_password,
+      last_login_at,
+      created_at,
+      updated_at
+    `
+    )
+    .eq("email", normalizedEmail)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as AdminUserRecord | null;
 }
 
 export async function findAdminUserById(id: string) {
@@ -157,29 +228,44 @@ export async function findAdminUserById(id: string) {
     return null;
   }
 
-  const row = (await findSheetItemByField(
-    ADMIN_USERS_SHEET,
-    "id",
-    normalizedId,
-    { forceFresh: true, ttlSeconds: 0 }
-  )) as AdminUserRecord | null;
+  const supabase = createSupabaseAdminClient();
 
-  return row ? mapUser(row) : null;
+  const { data, error } = await supabase
+    .from("admin_users")
+    .select(
+      `
+      id,
+      email,
+      name,
+      full_name,
+      password_hash,
+      role_key,
+      role,
+      status,
+      must_change_password,
+      last_login_at,
+      created_at,
+      updated_at
+    `
+    )
+    .eq("id", normalizedId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ? mapUser(data as AdminUserRecord) : null;
 }
 
 export async function getAdminUserWithPermissionsByEmail(email: string) {
-  const user = await findAdminUserByEmail(email);
+  const record = await findAdminUserRecordByEmail(email);
 
-  if (!user) {
+  if (!record) {
     return null;
   }
 
-  const permissions = await getRolePermissions(user.roleKey);
-
-  return {
-    ...user,
-    permissions,
-  };
+  return mapUserWithPermissions(record);
 }
 
 export async function createAdminUser(input: {
@@ -193,7 +279,7 @@ export async function createAdminUser(input: {
   const email = normalizeLower(input.email);
   const name = normalizeText(input.name);
   const roleKey = normalizeLower(input.roleKey || "viewer") || "viewer";
-  const status = normalizeLower(input.status || "active") || "active";
+  const status = normalizeStatus(input.status);
 
   if (!email) {
     throw new Error("email is required.");
@@ -212,25 +298,46 @@ export async function createAdminUser(input: {
   const passwordHash = await hashAdminPassword(input.password);
   const now = nowIso();
 
-  const record: AdminUserRecord = {
-    id: createId("admin"),
-    email,
-    name,
-    password_hash: passwordHash,
-    role_key: roleKey,
-    status,
-    must_change_password: booleanToSheetValue(
-      input.mustChangePassword ?? true
-    ),
-    last_login_at: "",
-    created_at: now,
-    updated_at: now,
-  };
+  const supabase = createSupabaseAdminClient();
 
-  const row = await buildRowFromHeaders(record);
-  await appendSheetRow(ADMIN_USERS_SHEET, row);
+  const { data, error } = await supabase
+    .from("admin_users")
+    .insert({
+      email,
+      name,
+      full_name: name,
+      password_hash: passwordHash,
+      role_key: roleKey,
+      role: roleKey,
+      status,
+      must_change_password: input.mustChangePassword ?? true,
+      last_login_at: null,
+      created_at: now,
+      updated_at: now,
+    })
+    .select(
+      `
+      id,
+      email,
+      name,
+      full_name,
+      password_hash,
+      role_key,
+      role,
+      status,
+      must_change_password,
+      last_login_at,
+      created_at,
+      updated_at
+    `
+    )
+    .single();
 
-  return mapUser(record);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return mapUser(data as AdminUserRecord);
 }
 
 export async function updateAdminUser(
@@ -248,49 +355,68 @@ export async function updateAdminUser(
     throw new Error("userId is required.");
   }
 
-  const rowNumber = await findRowNumberByField(
-    ADMIN_USERS_SHEET,
-    "id",
-    normalizedUserId
-  );
-
-  if (!rowNumber) {
-    throw new Error("Admin user not found.");
-  }
-
-  const rows = (await getSheetData(ADMIN_USERS_SHEET, {
-    forceFresh: true,
-    ttlSeconds: 0,
-  })) as AdminUserRecord[];
-
-  const currentRecord = rows.find(
-    (row) => normalizeText(row.id) === normalizedUserId
-  );
-
-  if (!currentRecord) {
-    throw new Error("Admin user not found.");
-  }
-
-  const updatedRecord: AdminUserRecord = {
-    id: normalizeText(currentRecord.id),
-    email: normalizeLower(currentRecord.email),
-    name: normalizeText(input.name ?? currentRecord.name),
-    password_hash: normalizeText(currentRecord.password_hash),
-    role_key: normalizeLower(input.roleKey ?? currentRecord.role_key) || "viewer",
-    status: normalizeLower(input.status ?? currentRecord.status) || "active",
-    must_change_password: booleanToSheetValue(
-      input.mustChangePassword ??
-        normalizeBoolean(currentRecord.must_change_password)
-    ),
-    last_login_at: normalizeText(currentRecord.last_login_at),
-    created_at: normalizeText(currentRecord.created_at),
+  const updatePayload: Record<string, unknown> = {
     updated_at: nowIso(),
   };
 
-  const row = await buildRowFromHeaders(updatedRecord);
-  await updateSheetRowByRowNumber(ADMIN_USERS_SHEET, rowNumber, row);
+  if (input.name !== undefined) {
+    const name = normalizeText(input.name);
 
-  return mapUser(updatedRecord);
+    if (!name) {
+      throw new Error("name is required.");
+    }
+
+    updatePayload.name = name;
+    updatePayload.full_name = name;
+  }
+
+  if (input.roleKey !== undefined) {
+    const roleKey = normalizeLower(input.roleKey || "viewer") || "viewer";
+    updatePayload.role_key = roleKey;
+    updatePayload.role = roleKey;
+  }
+
+  if (input.status !== undefined) {
+    updatePayload.status = normalizeStatus(input.status);
+  }
+
+  if (input.mustChangePassword !== undefined) {
+    updatePayload.must_change_password = Boolean(input.mustChangePassword);
+  }
+
+  const supabase = createSupabaseAdminClient();
+
+  const { data, error } = await supabase
+    .from("admin_users")
+    .update(updatePayload)
+    .eq("id", normalizedUserId)
+    .select(
+      `
+      id,
+      email,
+      name,
+      full_name,
+      password_hash,
+      role_key,
+      role,
+      status,
+      must_change_password,
+      last_login_at,
+      created_at,
+      updated_at
+    `
+    )
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    throw new Error("Admin user not found.");
+  }
+
+  return mapUser(data as AdminUserRecord);
 }
 
 export async function updateAdminUserPassword(
@@ -304,40 +430,44 @@ export async function updateAdminUserPassword(
     throw new Error("userId is required.");
   }
 
-  const rowNumber = await findRowNumberByField(
-    ADMIN_USERS_SHEET,
-    "id",
-    normalizedUserId
-  );
+  const passwordHash = await hashAdminPassword(password);
+  const supabase = createSupabaseAdminClient();
 
-  if (!rowNumber) {
+  const { data, error } = await supabase
+    .from("admin_users")
+    .update({
+      password_hash: passwordHash,
+      must_change_password: mustChangePassword,
+      updated_at: nowIso(),
+    })
+    .eq("id", normalizedUserId)
+    .select(
+      `
+      id,
+      email,
+      name,
+      full_name,
+      password_hash,
+      role_key,
+      role,
+      status,
+      must_change_password,
+      last_login_at,
+      created_at,
+      updated_at
+    `
+    )
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
     throw new Error("Admin user not found.");
   }
 
-  const rows = (await getSheetData(ADMIN_USERS_SHEET, {
-    forceFresh: true,
-    ttlSeconds: 0,
-  })) as AdminUserRecord[];
-
-  const currentRecord = rows.find(
-    (row) => normalizeText(row.id) === normalizedUserId
-  );
-
-  if (!currentRecord) {
-    throw new Error("Admin user not found.");
-  }
-
-  const updatedRecord: AdminUserRecord = {
-    ...currentRecord,
-    password_hash: await hashAdminPassword(password),
-    must_change_password: booleanToSheetValue(mustChangePassword),
-    updated_at: nowIso(),
-  };
-
-  const row = await buildRowFromHeaders(updatedRecord);
-  await updateSheetRowByRowNumber(ADMIN_USERS_SHEET, rowNumber, row);
-
-  return mapUser(updatedRecord);
+  return mapUser(data as AdminUserRecord);
 }
 
 async function verifyPasswordAgainstHash(password: string, passwordHash: string) {
@@ -373,7 +503,7 @@ export async function verifyAdminUserCredentials(email: string, password: string
     return null;
   }
 
-  if (normalizeLower(record.status) !== "active") {
+  if (normalizeStatus(record.status) !== "active") {
     return null;
   }
 
@@ -388,13 +518,7 @@ export async function verifyAdminUserCredentials(email: string, password: string
     return null;
   }
 
-  const user = mapUser(record);
-  const permissions = await getRolePermissions(user.roleKey);
-
-  return {
-    ...user,
-    permissions,
-  };
+  return mapUserWithPermissions(record);
 }
 
 export async function updateAdminUserLastLogin(userId: string) {
@@ -404,18 +528,38 @@ export async function updateAdminUserLastLogin(userId: string) {
     return null;
   }
 
-  const user = await findAdminUserById(normalizedUserId);
+  const supabase = createSupabaseAdminClient();
 
-  if (!user) {
-    return null;
+  const { data, error } = await supabase
+    .from("admin_users")
+    .update({
+      last_login_at: nowIso(),
+      updated_at: nowIso(),
+    })
+    .eq("id", normalizedUserId)
+    .select(
+      `
+      id,
+      email,
+      name,
+      full_name,
+      password_hash,
+      role_key,
+      role,
+      status,
+      must_change_password,
+      last_login_at,
+      created_at,
+      updated_at
+    `
+    )
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
   }
 
-  return updateAdminUser(normalizedUserId, {
-    name: user.name,
-    roleKey: user.roleKey,
-    status: user.status,
-    mustChangePassword: user.mustChangePassword,
-  });
+  return data ? mapUser(data as AdminUserRecord) : null;
 }
 
 export async function deleteAdminUser(userId: string) {
@@ -431,5 +575,16 @@ export async function deleteAdminUser(userId: string) {
     throw new Error("Admin user not found.");
   }
 
-  return deleteSheetRowByField(ADMIN_USERS_SHEET, "id", normalizedUserId);
+  const supabase = createSupabaseAdminClient();
+
+  const { error } = await supabase
+    .from("admin_users")
+    .delete()
+    .eq("id", normalizedUserId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return true;
 }

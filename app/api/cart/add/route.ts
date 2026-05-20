@@ -68,10 +68,7 @@ export async function POST(req: Request) {
     });
 
     if (!limited.ok) {
-      return jsonError(
-        "Too many cart requests. Please try again shortly.",
-        429
-      );
+      return jsonError("Too many cart requests. Please try again shortly.", 429);
     }
 
     const body = await req.json().catch(() => ({}));
@@ -86,17 +83,13 @@ export async function POST(req: Request) {
 
     const resolved = await resolveCartCatalogItem(productSlug, variantId);
 
-    if (resolved.unitPrice <= 0) {
-      return jsonError(
-        "This product does not have an active price yet. Please contact sales.",
-        400
-      );
-    }
-
     const quantityRule = resolveQuantityRule({
       quantity: requestedQuantity,
       boxQuantity: resolved.boxQuantity,
-    });
+      caseQuantity: resolved.caseQuantity,
+      minQuantity: resolved.minQuantity,
+      stepQuantity: resolved.stepQuantity,
+    } as any);
 
     const existingCartToken = await getCartTokenFromCookies();
     const cartToken = existingCartToken || createToken("cart");
@@ -104,6 +97,8 @@ export async function POST(req: Request) {
     const cookieHeader = req.headers.get("cookie") || "";
     const customerToken = getCookieValue(cookieHeader, CUSTOMER_COOKIE_NAME);
     const session = await readCustomerFromSessionToken(customerToken);
+
+    const isQuoteOnly = resolved.unitPrice <= 0;
 
     const cart = await addItemToCart(
       cartToken,
@@ -115,14 +110,18 @@ export async function POST(req: Request) {
         variant_title: resolved.variantTitle,
         sku: resolved.sku,
         image: resolved.image,
-        unit_price: resolved.unitPrice,
+        unit_price: isQuoteOnly ? 0 : resolved.unitPrice,
         compare_at_price: resolved.compareAtPrice,
         quantity: quantityRule.quantity,
         min_quantity: quantityRule.minQuantity,
         box_quantity: quantityRule.boxQuantity,
         case_quantity: quantityRule.caseQuantity,
         step_quantity: quantityRule.stepQuantity,
-      },
+        meta_json: {
+          is_quote_only: isQuoteOnly,
+          price_status: isQuoteOnly ? "request_quote" : "priced",
+        },
+      } as any,
       {
         customerCompanyId: session?.companyId || "",
         customerUserId: session?.customerUserId || "",

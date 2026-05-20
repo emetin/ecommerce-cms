@@ -59,7 +59,7 @@ export function proxy(request: NextRequest) {
 
     if (isPortalRoute) {
       if (hasAdminCookie) {
-        return NextResponse.redirect(new URL("/admin/products", request.url));
+        return NextResponse.redirect(new URL("/admin", request.url));
       }
 
       return NextResponse.next();

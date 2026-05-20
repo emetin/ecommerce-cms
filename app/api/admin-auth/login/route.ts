@@ -111,8 +111,8 @@ export async function POST(req: Request) {
         mustChangePassword: adminUser.mustChangePassword,
       },
       nextPath: adminUser.mustChangePassword
-        ? "/admin/change-password"
-        : "/admin/products",
+  ? "/admin/change-password"
+  : "/admin",
     });
 
     response.cookies.set({

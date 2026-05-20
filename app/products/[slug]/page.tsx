@@ -1,9 +1,9 @@
 import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getSheetData } from "../../../lib/sheets";
 import { buildPageMetadata } from "../../../lib/seo";
 import { normalizeImageUrl } from "../../../lib/image-url";
+import { createSupabaseAdminClient } from "../../../lib/supabase/admin";
 import ProductDetailClient from "../../../components/products/ProductDetailClient";
 import type { VariantItem } from "../../../components/products/ProductPurchasePanel";
 
@@ -28,6 +28,15 @@ type ProductItem = {
   product_category?: string;
   type?: string;
   tags?: string;
+
+  sku?: string;
+  price?: string | number;
+  compare_at_price?: string | number;
+  box_quantity?: string | number;
+  case_quantity?: string | number;
+  min_quantity?: string | number;
+  minimum_quantity?: string | number;
+  step_quantity?: string | number;
 };
 
 type ProductImageItem = {
@@ -42,6 +51,10 @@ type ProductImageItem = {
   created_at?: string;
   updated_at?: string;
 };
+
+type ProductRow = Record<string, any>;
+type ProductImageRow = Record<string, any>;
+type VariantRow = Record<string, any>;
 
 function normalizeText(value: unknown) {
   return String(value ?? "").trim();
@@ -61,6 +74,42 @@ function isTrue(value: unknown) {
   return normalized === "true" || normalized === "1" || normalized === "yes";
 }
 
+function isActiveStatus(value: unknown) {
+  const status = normalizeLower(value);
+  return status === "" || status === "published" || status === "active";
+}
+
+function isPublishedProduct(value: unknown) {
+  return normalizeLower(value) === "published";
+}
+
+function isBrokenImageValue(value: unknown) {
+  const raw = normalizeText(value);
+
+  if (!raw) return true;
+  if (raw.startsWith("img_")) return true;
+
+  return false;
+}
+
+function safeImageUrl(...values: unknown[]) {
+  for (const value of values) {
+    const raw = normalizeText(value);
+
+    if (isBrokenImageValue(raw)) {
+      continue;
+    }
+
+    const normalized = normalizeImageUrl(raw);
+
+    if (normalized && !isBrokenImageValue(normalized)) {
+      return normalized;
+    }
+  }
+
+  return "";
+}
+
 function sortProductImages(images: ProductImageItem[]) {
   return [...images].sort((a, b) => {
     const aMain = isTrue(a.is_main);
@@ -77,6 +126,15 @@ function sortProductImages(images: ProductImageItem[]) {
   });
 }
 
+function sortVariants(variants: VariantItem[]) {
+  return [...variants].sort((a, b) => {
+    const byOrder = toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+    if (byOrder !== 0) return byOrder;
+
+    return normalizeText(a.id).localeCompare(normalizeText(b.id));
+  });
+}
+
 function getPrimaryProductImage(
   product: ProductItem,
   productImages: ProductImageItem[]
@@ -85,111 +143,268 @@ function getPrimaryProductImage(
   const mainImage = sortedImages.find((item) => isTrue(item.is_main));
   const firstGalleryImage = sortedImages[0];
 
-  return normalizeImageUrl(
-    mainImage?.image_url || firstGalleryImage?.image_url || product.image || ""
+  return safeImageUrl(
+    mainImage?.image_url,
+    firstGalleryImage?.image_url,
+    product.image
   );
 }
 
-function filterPublishedProducts(products: ProductItem[]) {
-  return products.filter(
-    (item) =>
-      normalizeLower(item.status) === "published" &&
-      Boolean(normalizeLower(item.slug))
+function mapProduct(row: ProductRow): ProductItem {
+  const productImage = safeImageUrl(
+    row.image_url,
+    row.image,
+    row.image_file_id
   );
-}
-
-function filterActiveVariants(variants: VariantItem[]) {
-  return variants.filter((variant) => {
-    const variantStatus = normalizeLower(variant.status);
-    return ["", "published", "active"].includes(variantStatus);
-  });
-}
-
-function groupImagesBySlug(images: ProductImageItem[]) {
-  const map = new Map<string, ProductImageItem[]>();
-
-  for (const image of images) {
-    const slug = normalizeLower(image.product_slug);
-    if (!slug) continue;
-
-    const current = map.get(slug);
-    if (current) {
-      current.push(image);
-    } else {
-      map.set(slug, [image]);
-    }
-  }
-
-  for (const [slug, items] of map.entries()) {
-    map.set(slug, sortProductImages(items));
-  }
-
-  return map;
-}
-
-function groupVariantsBySlug(variants: VariantItem[]) {
-  const map = new Map<string, VariantItem[]>();
-
-  for (const variant of variants) {
-    const slug = normalizeLower(variant.product_slug);
-    if (!slug) continue;
-
-    const status = normalizeLower(variant.status);
-    if (!["", "published", "active"].includes(status)) continue;
-
-    const current = map.get(slug);
-    if (current) {
-      current.push(variant);
-    } else {
-      map.set(slug, [variant]);
-    }
-  }
-
-  return map;
-}
-
-const getCatalogData = cache(async () => {
-  const [allProductsRaw, allProductImagesRaw, allVariantsRaw] =
-    await Promise.all([
-      getSheetData("products", { ttlSeconds: 1800 }),
-      getSheetData("product_images", { ttlSeconds: 1800 }),
-      getSheetData("product_variants", { ttlSeconds: 1800 }),
-    ]);
-
-  const allProducts = allProductsRaw as ProductItem[];
-  const allProductImages = allProductImagesRaw as ProductImageItem[];
-  const allVariants = allVariantsRaw as VariantItem[];
-
-  const publishedProducts = filterPublishedProducts(allProducts);
-  const imagesBySlug = groupImagesBySlug(allProductImages);
-  const variantsBySlug = groupVariantsBySlug(filterActiveVariants(allVariants));
 
   return {
-    allProducts,
-    publishedProducts,
-    allProductImages,
-    allVariants,
-    imagesBySlug,
-    variantsBySlug,
+    id: normalizeText(row.id),
+    title: normalizeText(row.title),
+    slug: normalizeText(row.slug),
+    description: normalizeText(row.description),
+    short_description: normalizeText(row.short_description),
+    image: productImage,
+    gallery: normalizeText(row.gallery),
+    collection_slug: normalizeText(row.collection_slug),
+    status: normalizeText(row.status),
+    featured: isTrue(row.featured) ? "true" : "false",
+    created_at: normalizeText(row.created_at),
+    updated_at: normalizeText(row.updated_at),
+    seo_title: normalizeText(row.seo_title),
+    seo_description: normalizeText(row.seo_description),
+    vendor: normalizeText(row.vendor),
+    product_category: normalizeText(row.product_category),
+    type: normalizeText(row.product_type || row.type),
+    tags: normalizeText(row.tags),
+
+    sku: normalizeText(row.sku),
+    price: row.base_price ?? row.price ?? "",
+    compare_at_price: row.compare_at_price ?? "",
+    box_quantity: row.box_quantity ?? "",
+    case_quantity: row.case_quantity ?? "",
+    min_quantity: row.min_quantity ?? row.min_order_quantity ?? "",
+    minimum_quantity: row.minimum_quantity ?? row.min_order_quantity ?? "",
+    step_quantity: row.step_quantity ?? row.quantity_step ?? "",
   };
-});
+}
 
-const getPublishedProductBySlug = cache(async (slug: string) => {
-  const normalizedSlug = normalizeLower(slug);
-  const { publishedProducts } = await getCatalogData();
+function mapImage(row: ProductImageRow): ProductImageItem {
+  const joinedProduct = row.products || {};
 
-  return (
-    publishedProducts.find(
-      (product) => normalizeLower(product.slug) === normalizedSlug
-    ) || null
+  return {
+    id: normalizeText(row.id),
+    product_slug: normalizeText(row.product_slug || joinedProduct.slug),
+    image_url: safeImageUrl(row.image_url, row.image_file_id),
+    image_file_id: normalizeText(row.image_file_id),
+    image_uploaded_at: normalizeText(row.image_uploaded_at),
+    sort_order: normalizeText(row.sort_order),
+    alt_text: normalizeText(row.alt_text),
+    is_main: isTrue(row.is_main) ? "true" : "false",
+    created_at: normalizeText(row.created_at),
+    updated_at: normalizeText(row.updated_at),
+  };
+}
+
+function mapVariant(row: VariantRow, productSlug: string): VariantItem {
+  const joinedProduct = row.products || {};
+  const resolvedProductSlug =
+    normalizeText(row.product_slug) ||
+    normalizeText(joinedProduct.slug) ||
+    productSlug;
+
+  return {
+    id: normalizeText(row.id),
+    product_slug: resolvedProductSlug,
+    product_id: normalizeText(row.product_id),
+    title: normalizeText(row.title),
+    name: normalizeText(row.name),
+
+    option1_name: normalizeText(row.option1_name),
+    option1_value: normalizeText(row.option1_value),
+    option2_name: normalizeText(row.option2_name),
+    option2_value: normalizeText(row.option2_value),
+    option3_name: normalizeText(row.option3_name),
+    option3_value: normalizeText(row.option3_value),
+
+    sku: normalizeText(row.sku),
+    barcode: normalizeText(row.barcode),
+    price: row.price ?? "",
+    compare_at_price: row.compare_at_price ?? "",
+    status: normalizeText(row.status),
+
+    variant_image: safeImageUrl(
+      row.variant_image,
+      row.variant_image_url,
+      row.variant_image_file_id,
+      row.variant_image_legacy_id,
+      row.image_id
+    ),
+    variant_image_url: safeImageUrl(row.variant_image_url, row.variant_image),
+    image_id: normalizeText(row.image_id),
+    variant_image_file_id: normalizeText(row.variant_image_file_id),
+    variant_image_legacy_id: normalizeText(row.variant_image_legacy_id),
+
+    box_quantity: row.box_quantity ?? "",
+    case_quantity: row.case_quantity ?? "",
+    min_quantity: row.min_quantity ?? row.min_order_quantity ?? "",
+    minimum_quantity: row.minimum_quantity ?? row.min_order_quantity ?? "",
+    step_quantity: row.step_quantity ?? row.quantity_step ?? "",
+
+    sort_order: row.sort_order ?? "",
+    created_at: normalizeText(row.created_at),
+    updated_at: normalizeText(row.updated_at),
+  };
+}
+
+async function fetchProduct(slug: string) {
+  const supabase = createSupabaseAdminClient();
+
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("slug", slug)
+    .eq("status", "published")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to load product: ${error.message}`);
+  }
+
+  return data as ProductRow | null;
+}
+
+async function fetchProductImages(productId: string) {
+  if (!productId) {
+    return [] as ProductImageItem[];
+  }
+
+  const supabase = createSupabaseAdminClient();
+
+  const { data, error } = await supabase
+    .from("product_images")
+    .select(
+      `
+      *,
+      products (
+        id,
+        slug,
+        title
+      )
+    `
+    )
+    .eq("product_id", productId)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to load product images: ${error.message}`);
+  }
+
+  return ((data || []) as ProductImageRow[])
+    .map(mapImage)
+    .filter((image) => Boolean(image.image_url));
+}
+
+async function fetchProductVariants(productId: string, productSlug: string) {
+  if (!productId) {
+    return [] as VariantItem[];
+  }
+
+  const supabase = createSupabaseAdminClient();
+
+  const { data, error } = await supabase
+    .from("product_variants")
+    .select(
+      `
+      *,
+      products (
+        id,
+        slug,
+        title
+      )
+    `
+    )
+    .eq("product_id", productId)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to load product variants: ${error.message}`);
+  }
+
+  return sortVariants(
+    ((data || []) as VariantRow[])
+      .map((variant) => mapVariant(variant, productSlug))
+      .filter((variant) => isActiveStatus(variant.status))
   );
-});
+}
+
+async function fetchRelatedProducts(product: ProductItem) {
+  const collectionSlug = normalizeText(product.collection_slug);
+  const currentProductId = normalizeText(product.id);
+
+  if (!collectionSlug) {
+    return [] as ProductItem[];
+  }
+
+  const supabase = createSupabaseAdminClient();
+
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("status", "published")
+    .eq("collection_slug", collectionSlug)
+    .neq("id", currentProductId)
+    .order("title", { ascending: true })
+    .limit(3);
+
+  if (error) {
+    return [] as ProductItem[];
+  }
+
+  return ((data || []) as ProductRow[])
+    .map(mapProduct)
+    .filter((item) => isPublishedProduct(item.status));
+}
+
+async function fetchImagesForRelatedProducts(products: ProductItem[]) {
+  const productIds = products
+    .map((product) => normalizeText(product.id))
+    .filter(Boolean);
+
+  if (!productIds.length) {
+    return [] as ProductImageItem[];
+  }
+
+  const supabase = createSupabaseAdminClient();
+
+  const { data, error } = await supabase
+    .from("product_images")
+    .select(
+      `
+      *,
+      products (
+        id,
+        slug,
+        title
+      )
+    `
+    )
+    .in("product_id", productIds)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    return [] as ProductImageItem[];
+  }
+
+  return ((data || []) as ProductImageRow[])
+    .map(mapImage)
+    .filter((image) => Boolean(image.image_url));
+}
 
 const getProductPageData = cache(async (slug: string) => {
   const normalizedSlug = normalizeLower(slug);
-  const product = await getPublishedProductBySlug(normalizedSlug);
+  const rawProduct = await fetchProduct(normalizedSlug);
 
-  if (!product) {
+  if (!rawProduct) {
     return {
       product: null,
       relatedProducts: [] as ProductItem[],
@@ -199,32 +414,26 @@ const getProductPageData = cache(async (slug: string) => {
     };
   }
 
-  const { publishedProducts, allProductImages, imagesBySlug, variantsBySlug } =
-    await getCatalogData();
+  const product = mapProduct(rawProduct);
+  const productId = normalizeText(product.id);
+  const productSlug = normalizeText(product.slug);
 
-  const currentProductImages = imagesBySlug.get(normalizedSlug) || [];
-  const filteredVariants = variantsBySlug.get(normalizedSlug) || [];
+  const [productImages, variants, relatedProducts] = await Promise.all([
+    fetchProductImages(productId),
+    fetchProductVariants(productId, productSlug),
+    fetchRelatedProducts(product),
+  ]);
 
-  const currentCollectionSlug = normalizeLower(product.collection_slug);
-
-  const relatedProducts = publishedProducts
-    .filter((item) => {
-      const itemSlug = normalizeLower(item.slug);
-      const itemCollectionSlug = normalizeLower(item.collection_slug);
-
-      return (
-        itemSlug !== normalizedSlug &&
-        itemCollectionSlug === currentCollectionSlug
-      );
-    })
-    .slice(0, 3);
+  const relatedProductImages = await fetchImagesForRelatedProducts(
+    relatedProducts
+  );
 
   return {
     product,
     relatedProducts,
-    variants: filteredVariants,
-    productImages: currentProductImages,
-    allProductImages,
+    variants,
+    productImages: sortProductImages(productImages),
+    allProductImages: relatedProductImages,
   };
 });
 

@@ -27,6 +27,70 @@ type CustomerSessionResponse = {
   } | null;
 };
 
+const CUSTOMER_CACHE_KEY = "ptx_customer_session_cache";
+const CUSTOMER_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function readCustomerCache() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(CUSTOMER_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as {
+      expiresAt?: number;
+      customer?: CustomerSessionResponse["customer"];
+    };
+
+    if (!parsed.expiresAt || parsed.expiresAt < Date.now()) {
+      window.sessionStorage.removeItem(CUSTOMER_CACHE_KEY);
+      return null;
+    }
+
+    return parsed.customer || null;
+  } catch {
+    window.sessionStorage.removeItem(CUSTOMER_CACHE_KEY);
+    return null;
+  }
+}
+
+function writeCustomerCache(customer: CustomerSessionResponse["customer"]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    if (!customer) {
+      window.sessionStorage.removeItem(CUSTOMER_CACHE_KEY);
+      return;
+    }
+
+    window.sessionStorage.setItem(
+      CUSTOMER_CACHE_KEY,
+      JSON.stringify({
+        customer,
+        expiresAt: Date.now() + CUSTOMER_CACHE_TTL_MS,
+      })
+    );
+  } catch {
+    // sessionStorage private mode veya browser kısıtında hata verebilir.
+  }
+}
+
+function clearCustomerCache() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(CUSTOMER_CACHE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 function useResponsiveHeader() {
   const [isMenuLayout, setIsMenuLayout] = useState(false);
 
@@ -59,29 +123,53 @@ export default function Header() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const loadCustomer = useCallback(async () => {
-    try {
-      const response = await fetch("/api/customer-auth/me", {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      });
+  const loadCustomer = useCallback(
+    async (options?: { force?: boolean }) => {
+      try {
+        if (!options?.force) {
+          const cachedCustomer = readCustomerCache();
 
-      const data = (await response.json()) as CustomerSessionResponse;
+          if (cachedCustomer) {
+            setCustomer(cachedCustomer);
+            setLoadingCustomer(false);
+            return;
+          }
+        }
 
-      if (response.ok && data?.authenticated && data?.customer) {
-        setCustomer(data.customer);
-      } else {
+        const response = await fetch("/api/customer-auth/me", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const data = (await response.json()) as CustomerSessionResponse;
+
+        if (response.ok && data?.authenticated && data?.customer) {
+          setCustomer(data.customer);
+          writeCustomerCache(data.customer);
+        } else {
+          setCustomer(null);
+          writeCustomerCache(null);
+        }
+      } catch {
         setCustomer(null);
+        writeCustomerCache(null);
+      } finally {
+        setLoadingCustomer(false);
       }
-    } catch {
-      setCustomer(null);
-    } finally {
-      setLoadingCustomer(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
+    const cachedCustomer = readCustomerCache();
+
+    if (cachedCustomer) {
+      setCustomer(cachedCustomer);
+      setLoadingCustomer(false);
+      return;
+    }
+
     void loadCustomer();
   }, [loadCustomer]);
 
@@ -93,7 +181,7 @@ export default function Header() {
 
     if (!shouldRefreshCustomer) return;
 
-    void loadCustomer();
+    void loadCustomer({ force: true });
   }, [pathname, loadCustomer]);
 
   useEffect(() => {
@@ -132,6 +220,7 @@ export default function Header() {
         credentials: "include",
       });
 
+      clearCustomerCache();
       setCustomer(null);
       window.location.href = "/portal-login";
     } finally {

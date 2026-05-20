@@ -1,28 +1,21 @@
 import { NextResponse } from "next/server";
-import { verifyAdminSessionToken } from "../../../../../lib/admin-auth";
-import { findSheetItemsByField } from "../../../../../lib/sheets";
+import {
+  ADMIN_COOKIE_NAME,
+  verifyAdminSessionToken,
+} from "../../../../../lib/admin-auth";
+import { createSupabaseAdminClient } from "../../../../../lib/supabase/admin";
 
-type OrderItemRecord = {
-  id?: string;
-  order_id?: string;
-  product_slug?: string;
-  variant_id?: string;
-  sku?: string;
-  product_title?: string;
-  variant_title?: string;
-  quantity?: string;
-  unit_price?: string;
-  line_total?: string;
-  created_at?: string;
-};
+function parseCookieValue(cookieHeader: string, cookieName: string) {
+  const escapedCookieName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = cookieHeader.match(
+    new RegExp(`(?:^|;\\s*)${escapedCookieName}=([^;]+)`)
+  );
 
-function parseAdminTokenFromCookie(cookieHeader: string) {
-  const match = cookieHeader.match(/ptx_admin_auth=([^;]+)/);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
 function toNumber(value: unknown) {
@@ -30,59 +23,125 @@ function toNumber(value: unknown) {
   return Number.isFinite(numberValue) ? numberValue : 0;
 }
 
+function getMetaValue(
+  meta: Record<string, unknown> | null | undefined,
+  key: string
+) {
+  return normalizeText(meta?.[key]);
+}
+
+function jsonError(message: string, status = 500) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    { status }
+  );
+}
+
 export async function GET(req: Request) {
   try {
     const cookieHeader = req.headers.get("cookie") || "";
-    const token = parseAdminTokenFromCookie(cookieHeader);
+    const token = parseCookieValue(cookieHeader, ADMIN_COOKIE_NAME);
     const isAdmin = await verifyAdminSessionToken(token);
 
     if (!isAdmin) {
-      return NextResponse.json(
-        { ok: false, error: "Unauthorized." },
-        { status: 401 }
-      );
+      return jsonError("Unauthorized.", 401);
     }
 
     const { searchParams } = new URL(req.url);
-    const orderId = normalizeText(searchParams.get("orderId"));
 
-    if (!orderId) {
-      return NextResponse.json(
-        { ok: false, error: "orderId is required." },
-        { status: 400 }
-      );
+    const orderId = normalizeText(searchParams.get("orderId"));
+    const orderNumber = normalizeText(searchParams.get("orderNumber"));
+
+    if (!orderId && !orderNumber) {
+      return jsonError("orderId or orderNumber is required.", 400);
     }
 
-    const items = (await findSheetItemsByField(
-      "order_items",
-      "order_id",
-      orderId,
-      { forceFresh: true, ttlSeconds: 0 }
-    )) as OrderItemRecord[];
+    const supabase = createSupabaseAdminClient();
 
-    return NextResponse.json({
-      ok: true,
-      items: items.map((item) => ({
+    let resolvedOrderId = orderId;
+
+    if (!resolvedOrderId && orderNumber) {
+      const { data: orderData, error: orderError } = await supabase
+        .from("orders")
+        .select("id")
+        .eq("order_number", orderNumber)
+        .maybeSingle();
+
+      if (orderError) {
+        throw new Error(orderError.message);
+      }
+
+      if (!orderData?.id) {
+        return jsonError("Order not found.", 404);
+      }
+
+      resolvedOrderId = normalizeText(orderData.id);
+    }
+
+    const { data, error } = await supabase
+      .from("order_items")
+      .select("*")
+      .eq("order_id", resolvedOrderId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const items = (data || []).map((item) => {
+      const meta = item.meta_json || {};
+      const snapshot = item.product_snapshot_json || {};
+
+      return {
         id: normalizeText(item.id),
         order_id: normalizeText(item.order_id),
-        product_slug: normalizeText(item.product_slug),
+
+        product_id: normalizeText(item.product_id),
+        product_slug:
+          getMetaValue(meta, "product_slug") ||
+          getMetaValue(snapshot, "product_slug"),
+
         variant_id: normalizeText(item.variant_id),
         sku: normalizeText(item.sku),
-        product_title: normalizeText(item.product_title),
-        variant_label: normalizeText(item.variant_title),
+
+        product_title:
+          normalizeText(item.product_title) ||
+          getMetaValue(snapshot, "product_title"),
+
+        variant_label:
+          normalizeText(item.variant_title) ||
+          getMetaValue(snapshot, "variant_title"),
+
+        image: getMetaValue(snapshot, "image") || getMetaValue(meta, "image"),
+
+        box_quantity: toNumber(item.box_quantity),
         quantity: toNumber(item.quantity),
         unit_price: toNumber(item.unit_price),
         line_total: toNumber(item.line_total),
+
         created_at: normalizeText(item.created_at),
-      })),
+      };
     });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        total: items.length,
+        items,
+      },
+      {
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
+      }
+    );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to load order items.";
 
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
-    );
+    return jsonError(message, 500);
   }
 }

@@ -14,8 +14,23 @@ type OrderCreateApiResponse = {
   };
 };
 
+type CustomerMeResponse = {
+  ok: boolean;
+  authenticated?: boolean;
+  customer?: {
+    customerId?: string;
+    customerUserId?: string;
+    email?: string;
+    companyName?: string;
+    contactName?: string;
+    priceTier?: string;
+    currency?: string;
+  } | null;
+};
+
 type CustomerProfileResponse = {
   ok: boolean;
+  authenticated?: boolean;
   customer?: {
     id?: string;
     email?: string;
@@ -57,6 +72,30 @@ function normalizeText(value: unknown) {
 
 function normalizeEmail(value: unknown) {
   return normalizeText(value).toLowerCase();
+}
+
+function splitContactName(value: unknown) {
+  const fullName = normalizeText(value);
+  if (!fullName) {
+    return {
+      first_name: "",
+      last_name: "",
+    };
+  }
+
+  const parts = fullName.split(/\s+/).filter(Boolean);
+
+  if (parts.length === 1) {
+    return {
+      first_name: parts[0],
+      last_name: "",
+    };
+  }
+
+  return {
+    first_name: parts.slice(0, -1).join(" "),
+    last_name: parts[parts.length - 1],
+  };
 }
 
 function isTechnicalCartError(message: string) {
@@ -130,36 +169,66 @@ export default function CheckoutPageClient() {
 
     async function loadCustomerProfile() {
       try {
-        const response = await fetch("/api/customer-auth/profile", {
+        const meResponse = await fetch("/api/customer-auth/me", {
           method: "GET",
           credentials: "include",
           cache: "no-store",
         });
 
-        const data = (await parseJsonSafe(
-          response
+        const meData = (await parseJsonSafe(
+          meResponse
+        )) as CustomerMeResponse | null;
+
+        if (!active) return;
+
+        if (!meResponse.ok || !meData?.authenticated || !meData.customer) {
+          return;
+        }
+
+        const profileResponse = await fetch("/api/customer-auth/profile", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const profileData = (await parseJsonSafe(
+          profileResponse
         )) as CustomerProfileResponse | null;
 
         if (!active) return;
 
-        if (!response.ok || !data?.ok || !data.customer) {
+        if (profileResponse.ok && profileData?.ok && profileData.customer) {
+          const customer = profileData.customer;
+
+          setForm((prev) => ({
+            ...prev,
+            email: prev.email || customer.email || "",
+            first_name: prev.first_name || customer.first_name || "",
+            last_name: prev.last_name || customer.last_name || "",
+            company: prev.company || customer.company || "",
+            phone: prev.phone || customer.phone || "",
+            country: prev.country || customer.country || "",
+            city: prev.city || customer.city || "",
+            address_line_1:
+              prev.address_line_1 || customer.address_line_1 || "",
+            address_line_2:
+              prev.address_line_2 || customer.address_line_2 || "",
+            postal_code: prev.postal_code || customer.postal_code || "",
+          }));
+
+          setAutofillApplied(true);
           return;
         }
 
-        const customer = data.customer;
+        const sessionCustomer = meData.customer;
+        const splitName = splitContactName(sessionCustomer.contactName);
 
         setForm((prev) => ({
           ...prev,
-          email: prev.email || customer.email || "",
-          first_name: prev.first_name || customer.first_name || "",
-          last_name: prev.last_name || customer.last_name || "",
-          company: prev.company || customer.company || "",
-          phone: prev.phone || customer.phone || "",
-          country: prev.country || customer.country || "",
-          city: prev.city || customer.city || "",
-          address_line_1: prev.address_line_1 || customer.address_line_1 || "",
-          address_line_2: prev.address_line_2 || customer.address_line_2 || "",
-          postal_code: prev.postal_code || customer.postal_code || "",
+          email: prev.email || sessionCustomer.email || "",
+          first_name: prev.first_name || splitName.first_name,
+          last_name: prev.last_name || splitName.last_name,
+          company: prev.company || sessionCustomer.companyName || "",
         }));
 
         setAutofillApplied(true);
@@ -172,7 +241,7 @@ export default function CheckoutPageClient() {
       }
     }
 
-    loadCustomerProfile();
+    void loadCustomerProfile();
 
     return () => {
       active = false;

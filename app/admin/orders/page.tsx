@@ -7,6 +7,8 @@ type OrderItem = {
   order_number: string;
   cart_id?: string;
   customer_id: string;
+  customer_company_id?: string;
+  customer_user_id?: string;
 
   email?: string;
   first_name?: string;
@@ -21,14 +23,16 @@ type OrderItem = {
   postal_code?: string;
 
   status: string;
+  payment_status: string;
+  fulfillment_status: string;
   currency: string;
 
   subtotal: number;
-  discount_total?: number;
-  shipping_total?: number;
-  tax_total?: number;
-  grand_total?: number;
-  item_count?: number;
+  discount_total: number;
+  shipping_total: number;
+  tax_total: number;
+  grand_total: number;
+  item_count: number;
 
   notes: string;
   created_at: string;
@@ -38,11 +42,14 @@ type OrderItem = {
 type OrderLineItem = {
   id: string;
   order_id: string;
+  product_id?: string;
   product_slug: string;
   variant_id: string;
   sku: string;
   product_title: string;
   variant_label: string;
+  image?: string;
+  box_quantity?: number;
   quantity: number;
   unit_price: number;
   line_total: number;
@@ -56,18 +63,24 @@ type ApiListResponse = {
   items?: OrderItem[];
 };
 
+type ApiUpdateResponse = {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+  order?: {
+    order_number?: string;
+    status?: string;
+    payment_status?: string;
+    fulfillment_status?: string;
+    grand_total?: number;
+  };
+};
+
 type ApiOrderItemsResponse = {
   ok?: boolean;
   error?: string;
+  total?: number;
   items?: OrderLineItem[];
-};
-
-type ApiStatusResponse = {
-  ok?: boolean;
-  error?: string;
-  order?: {
-    orderNumber?: string;
-  };
 };
 
 const STATUS_OPTIONS = [
@@ -81,13 +94,27 @@ const STATUS_OPTIONS = [
   "paid",
 ];
 
-const EXPORT_FORMAT_OPTIONS = ["csv", "json", "xml"];
+const PAYMENT_STATUS_OPTIONS = [
+  "pending",
+  "awaiting_payment",
+  "partially_paid",
+  "paid",
+  "refunded",
+  "cancelled",
+];
 
-function normalizeText(value?: string) {
+const FULFILLMENT_STATUS_OPTIONS = [
+  "unfulfilled",
+  "partial",
+  "fulfilled",
+  "cancelled",
+];
+
+function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
-function normalizeLower(value?: string) {
+function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
@@ -95,11 +122,17 @@ function getContactName(item: OrderItem) {
   return [item.first_name, item.last_name].filter(Boolean).join(" ").trim();
 }
 
-function formatMoney(value: number, currency = "USD") {
+function formatMoney(value: unknown, currency = "USD") {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return "-";
+  }
+
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency || "USD",
-  }).format(value || 0);
+  }).format(number || 0);
 }
 
 function formatDate(value?: string) {
@@ -115,13 +148,21 @@ function formatDate(value?: string) {
     month: "short",
     day: "2-digit",
     year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(date);
 }
 
 function getStatusStyle(value?: string): React.CSSProperties {
   const raw = normalizeLower(value);
 
-  if (raw === "completed" || raw === "paid") {
+  if (
+    raw === "completed" ||
+    raw === "paid" ||
+    raw === "approved" ||
+    raw === "processing" ||
+    raw === "fulfilled"
+  ) {
     return {
       background: "#eef8f0",
       color: "#2f7d62",
@@ -129,15 +170,13 @@ function getStatusStyle(value?: string): React.CSSProperties {
     };
   }
 
-  if (raw === "processing" || raw === "approved" || raw === "quoted") {
-    return {
-      background: "#eef4fb",
-      color: "#315f95",
-      border: "1px solid rgba(49,95,149,0.16)",
-    };
-  }
-
-  if (raw === "reviewing" || raw === "submitted") {
+  if (
+    raw === "quoted" ||
+    raw === "reviewing" ||
+    raw === "submitted" ||
+    raw === "awaiting_payment" ||
+    raw === "pending"
+  ) {
     return {
       background: "#fff7e8",
       color: "#8a6418",
@@ -145,7 +184,7 @@ function getStatusStyle(value?: string): React.CSSProperties {
     };
   }
 
-  if (raw === "cancelled") {
+  if (raw === "cancelled" || raw === "refunded") {
     return {
       background: "#fff4f2",
       color: "#a54a3f",
@@ -179,30 +218,72 @@ async function readJsonResponse<T>(response: Response, fallbackMessage: string) 
   }
 }
 
+function getInitialEditState(item: OrderItem) {
+  return {
+    status: item.status || "submitted",
+    payment_status: item.payment_status || "pending",
+    fulfillment_status: item.fulfillment_status || "unfulfilled",
+    discount_total: String(item.discount_total || 0),
+    shipping_total: String(item.shipping_total || 0),
+    tax_total: String(item.tax_total || 0),
+    internal_notes: "",
+  };
+}
+
 export default function AdminOrdersPage() {
   const [items, setItems] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
-  const [statusMap, setStatusMap] = useState<Record<string, string>>({});
-  const [savingId, setSavingId] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [expandedOrderId, setExpandedOrderId] = useState("");
-  const [orderItemsMap, setOrderItemsMap] = useState<
-    Record<string, OrderLineItem[]>
-  >({});
-  const [itemsLoadingId, setItemsLoadingId] = useState("");
+  const [savingOrderNumber, setSavingOrderNumber] = useState("");
 
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [paymentFilter, setPaymentFilter] = useState("all");
+
+  const [editingOrderNumber, setEditingOrderNumber] = useState("");
+  const [editForm, setEditForm] = useState({
+    status: "submitted",
+    payment_status: "pending",
+    fulfillment_status: "unfulfilled",
+    discount_total: "0",
+    shipping_total: "0",
+    tax_total: "0",
+    internal_notes: "",
+  });
+
+  const [expandedOrderNumber, setExpandedOrderNumber] = useState("");
+  const [itemsLoadingOrderNumber, setItemsLoadingOrderNumber] = useState("");
+  const [orderItemsMap, setOrderItemsMap] = useState<
+    Record<string, OrderLineItem[]>
+  >({});
 
   async function loadOrders() {
     try {
       setLoading(true);
       setErrorMessage("");
 
-      const response = await fetch("/api/admin/orders/list", {
+      const params = new URLSearchParams();
+
+      if (searchInput.trim()) {
+        params.set("q", searchInput.trim());
+      }
+
+      if (statusFilter !== "all") {
+        params.set("status", statusFilter);
+      }
+
+      if (paymentFilter !== "all") {
+        params.set("payment_status", paymentFilter);
+      }
+
+      const url = params.toString()
+        ? `/api/admin/orders/list?${params.toString()}`
+        : "/api/admin/orders/list";
+
+      const response = await fetch(url, {
         cache: "no-store",
+        credentials: "include",
       });
 
       const data = await readJsonResponse<ApiListResponse>(
@@ -214,16 +295,7 @@ export default function AdminOrdersPage() {
         throw new Error(data.error || "Failed to load quote requests.");
       }
 
-      const nextItems = Array.isArray(data.items) ? data.items : [];
-      setItems(nextItems);
-
-      const nextStatusMap: Record<string, string> = {};
-
-      nextItems.forEach((item) => {
-        nextStatusMap[item.id] = item.status || "submitted";
-      });
-
-      setStatusMap(nextStatusMap);
+      setItems(Array.isArray(data.items) ? data.items : []);
     } catch (error) {
       setItems([]);
       setErrorMessage(
@@ -235,36 +307,8 @@ export default function AdminOrdersPage() {
   }
 
   useEffect(() => {
-    loadOrders();
+    void loadOrders();
   }, []);
-
-  const filteredItems = useMemo(() => {
-    const query = normalizeLower(searchInput);
-
-    return items.filter((item) => {
-      const contactName = getContactName(item);
-
-      const matchesSearch =
-        !query ||
-        normalizeLower(item.order_number).includes(query) ||
-        normalizeLower(item.company_name).includes(query) ||
-        normalizeLower(contactName).includes(query) ||
-        normalizeLower(item.customer_id).includes(query) ||
-        normalizeLower(item.email).includes(query) ||
-        normalizeLower(item.phone).includes(query) ||
-        normalizeLower(item.city).includes(query) ||
-        normalizeLower(item.country).includes(query) ||
-        normalizeLower(item.status).includes(query) ||
-        normalizeLower(item.notes).includes(query);
-
-      const matchesStatus =
-        statusFilter === "all"
-          ? true
-          : normalizeLower(item.status) === normalizeLower(statusFilter);
-
-      return matchesSearch && matchesStatus;
-    });
-  }, [items, searchInput, statusFilter]);
 
   const stats = useMemo(() => {
     return {
@@ -272,110 +316,210 @@ export default function AdminOrdersPage() {
       submitted: items.filter(
         (item) => normalizeLower(item.status) === "submitted"
       ).length,
-      reviewing: items.filter(
-        (item) => normalizeLower(item.status) === "reviewing"
-      ).length,
       quoted: items.filter((item) => normalizeLower(item.status) === "quoted")
         .length,
       approved: items.filter(
         (item) => normalizeLower(item.status) === "approved"
       ).length,
-      processing: items.filter(
-        (item) => normalizeLower(item.status) === "processing"
+      paid: items.filter(
+        (item) => normalizeLower(item.payment_status) === "paid"
       ).length,
       completed: items.filter(
         (item) => normalizeLower(item.status) === "completed"
       ).length,
-      cancelled: items.filter(
-        (item) => normalizeLower(item.status) === "cancelled"
-      ).length,
-      paid: items.filter((item) => normalizeLower(item.status) === "paid")
-        .length,
     };
   }, [items]);
 
-  async function handleUpdateStatus(orderId: string) {
+  function openEdit(item: OrderItem) {
+    setEditingOrderNumber(item.order_number);
+    setEditForm(getInitialEditState(item));
+    setSuccessMessage("");
+    setErrorMessage("");
+  }
+
+  function closeEdit() {
+    setEditingOrderNumber("");
+    setEditForm({
+      status: "submitted",
+      payment_status: "pending",
+      fulfillment_status: "unfulfilled",
+      discount_total: "0",
+      shipping_total: "0",
+      tax_total: "0",
+      internal_notes: "",
+    });
+  }
+
+  async function updateOrder(
+    orderNumber: string,
+    payload: Partial<typeof editForm>
+  ) {
     try {
-      setSavingId(orderId);
+      setSavingOrderNumber(orderNumber);
       setSuccessMessage("");
       setErrorMessage("");
 
-      const response = await fetch("/api/admin/orders/update-status", {
+      const response = await fetch("/api/admin/orders/update", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
+        cache: "no-store",
         body: JSON.stringify({
-          orderId,
-          status: statusMap[orderId] || "submitted",
+          order_number: orderNumber,
+          ...payload,
         }),
       });
 
-      const data = await readJsonResponse<ApiStatusResponse>(
+      const data = await readJsonResponse<ApiUpdateResponse>(
         response,
-        "Failed to update quote request status."
+        "Failed to update order."
       );
 
       if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Failed to update quote request status.");
+        throw new Error(data.error || "Failed to update order.");
       }
 
       setSuccessMessage(
-        `Quote request ${data.order?.orderNumber || ""} updated successfully.`
+        `Order ${data.order?.order_number || orderNumber} updated successfully.`
       );
 
       await loadOrders();
+      closeEdit();
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "An unknown error occurred."
       );
     } finally {
-      setSavingId("");
+      setSavingOrderNumber("");
     }
   }
 
-  async function loadOrderItems(orderId: string) {
+  async function saveEdit(orderNumber: string) {
+    await updateOrder(orderNumber, {
+      status: editForm.status,
+      payment_status: editForm.payment_status,
+      fulfillment_status: editForm.fulfillment_status,
+      discount_total: editForm.discount_total,
+      shipping_total: editForm.shipping_total,
+      tax_total: editForm.tax_total,
+      internal_notes: editForm.internal_notes,
+    });
+  }
+
+  async function quickAction(
+    item: OrderItem,
+    action:
+      | "reviewing"
+      | "quoted"
+      | "approved"
+      | "paid"
+      | "processing"
+      | "completed"
+      | "cancelled"
+  ) {
+    if (action === "reviewing") {
+      await updateOrder(item.order_number, {
+        status: "reviewing",
+      });
+      return;
+    }
+
+    if (action === "quoted") {
+      await updateOrder(item.order_number, {
+        status: "quoted",
+        payment_status: "awaiting_payment",
+      });
+      return;
+    }
+
+    if (action === "approved") {
+      await updateOrder(item.order_number, {
+        status: "approved",
+        payment_status: "awaiting_payment",
+      });
+      return;
+    }
+
+    if (action === "paid") {
+      await updateOrder(item.order_number, {
+        status: "processing",
+        payment_status: "paid",
+      });
+      return;
+    }
+
+    if (action === "processing") {
+      await updateOrder(item.order_number, {
+        status: "processing",
+      });
+      return;
+    }
+
+    if (action === "completed") {
+      await updateOrder(item.order_number, {
+        status: "completed",
+        payment_status: "paid",
+        fulfillment_status: "fulfilled",
+      });
+      return;
+    }
+
+    if (action === "cancelled") {
+      await updateOrder(item.order_number, {
+        status: "cancelled",
+        payment_status: "cancelled",
+        fulfillment_status: "cancelled",
+      });
+    }
+  }
+
+  async function loadOrderItems(item: OrderItem) {
     try {
-      setItemsLoadingId(orderId);
+      setItemsLoadingOrderNumber(item.order_number);
       setErrorMessage("");
 
       const response = await fetch(
-        `/api/admin/orders/items?orderId=${encodeURIComponent(orderId)}`,
-        { cache: "no-store" }
+        `/api/admin/orders/items?orderId=${encodeURIComponent(item.id)}`,
+        {
+          cache: "no-store",
+          credentials: "include",
+        }
       );
 
       const data = await readJsonResponse<ApiOrderItemsResponse>(
         response,
-        "Failed to load quote request items."
+        "Failed to load order items."
       );
 
       if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Failed to load quote request items.");
+        throw new Error(data.error || "Failed to load order items.");
       }
 
       setOrderItemsMap((prev) => ({
         ...prev,
-        [orderId]: Array.isArray(data.items) ? data.items : [],
+        [item.order_number]: Array.isArray(data.items) ? data.items : [],
       }));
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "An unknown error occurred."
       );
     } finally {
-      setItemsLoadingId("");
+      setItemsLoadingOrderNumber("");
     }
   }
 
-  async function handleToggleItems(orderId: string) {
-    if (expandedOrderId === orderId) {
-      setExpandedOrderId("");
+  async function toggleOrderItems(item: OrderItem) {
+    if (expandedOrderNumber === item.order_number) {
+      setExpandedOrderNumber("");
       return;
     }
 
-    setExpandedOrderId(orderId);
+    setExpandedOrderNumber(item.order_number);
 
-    if (!orderItemsMap[orderId]) {
-      await loadOrderItems(orderId);
+    if (!orderItemsMap[item.order_number]) {
+      await loadOrderItems(item);
     }
   }
 
@@ -385,58 +529,31 @@ export default function AdminOrdersPage() {
         <div>
           <h1 style={titleStyle}>Quote Requests</h1>
           <p style={subtitleStyle}>
-            Review submitted B2B quote requests, inspect buyer contact details,
-            open line items, and update the sales review status.
+            Review B2B quote requests, update final quote totals, payment
+            status, and fulfillment status.
           </p>
         </div>
 
-        <div style={headerActionsStyle}>
-          <div style={exportMenuWrapStyle}>
-            <button
-              type="button"
-              onClick={() => setExportMenuOpen((previous) => !previous)}
-              style={exportDropdownButtonStyle}
-            >
-              Export
-              <span style={exportChevronStyle}>▾</span>
-            </button>
-
-            {exportMenuOpen ? (
-              <div style={exportDropdownMenuStyle}>
-                {EXPORT_FORMAT_OPTIONS.map((format) => (
-                  <a
-                    key={format}
-                    href={`/api/admin/orders/export?format=${format}`}
-                    style={exportDropdownItemStyle}
-                    onClick={() => setExportMenuOpen(false)}
-                  >
-                    {format.toUpperCase()}
-                  </a>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        </div>
+        <button type="button" onClick={loadOrders} style={refreshButtonStyle}>
+          Refresh
+        </button>
       </div>
 
       <section style={toolbarStyle}>
         <div style={statsBarStyle}>
           <Metric label="Total" value={stats.total} />
           <Metric label="Submitted" value={stats.submitted} warning />
-          <Metric label="Reviewing" value={stats.reviewing} />
           <Metric label="Quoted" value={stats.quoted} />
           <Metric label="Approved" value={stats.approved} />
-          <Metric label="Processing" value={stats.processing} />
-          <Metric label="Completed" value={stats.completed} />
-          <Metric label="Cancelled" value={stats.cancelled} warning />
           <Metric label="Paid" value={stats.paid} />
+          <Metric label="Completed" value={stats.completed} />
         </div>
 
         <div style={filterGridStyle}>
           <input
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Search quote number, company, email, phone, city, country, notes..."
+            placeholder="Search order number, company, email, phone, city, country..."
             style={inputStyle}
           />
 
@@ -452,6 +569,23 @@ export default function AdminOrdersPage() {
               </option>
             ))}
           </select>
+
+          <select
+            value={paymentFilter}
+            onChange={(event) => setPaymentFilter(event.target.value)}
+            style={selectStyle}
+          >
+            <option value="all">All payments</option>
+            {PAYMENT_STATUS_OPTIONS.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+
+          <button type="button" onClick={loadOrders} style={applyButtonStyle}>
+            Apply
+          </button>
         </div>
       </section>
 
@@ -463,41 +597,37 @@ export default function AdminOrdersPage() {
 
       <section style={tableWrapStyle}>
         <div style={tableHeaderStyle}>
-          <div style={checkCellStyle}></div>
           <div>Request</div>
           <div>Buyer</div>
-          <div>Location</div>
           <div>Total</div>
           <div>Status</div>
+          <div>Payment</div>
+          <div>Fulfillment</div>
           <div>Created</div>
           <div style={{ textAlign: "right" }}>Actions</div>
         </div>
 
         {loading ? (
           <div style={emptyStateStyle}>Loading quote requests...</div>
-        ) : filteredItems.length === 0 ? (
-          <div style={emptyStateStyle}>No quote requests matched your filters.</div>
+        ) : items.length === 0 ? (
+          <div style={emptyStateStyle}>No quote requests found.</div>
         ) : (
-          filteredItems.map((item) => {
-            const isExpanded = expandedOrderId === item.id;
-            const orderLines = orderItemsMap[item.id] || [];
+          items.map((item) => {
+            const isEditing = editingOrderNumber === item.order_number;
+            const isExpanded = expandedOrderNumber === item.order_number;
             const contactName = getContactName(item);
-            const grandTotal = Number(item.grand_total ?? item.subtotal ?? 0);
+            const orderLines = orderItemsMap[item.order_number] || [];
 
             return (
               <div key={item.id || item.order_number}>
                 <div style={tableRowStyle}>
-                  <div style={checkCellStyle}>
-                    <input type="checkbox" />
-                  </div>
-
                   <div>
                     <div style={orderNumberStyle}>
                       {item.order_number || "-"}
                     </div>
 
                     <div style={subTextStyle}>
-                      {Number(item.item_count || 0)} items
+                      Total Qty: {Number(item.item_count || 0)}
                     </div>
 
                     {item.notes ? (
@@ -511,32 +641,18 @@ export default function AdminOrdersPage() {
                     </div>
 
                     <div style={subTextStyle}>{contactName || "-"}</div>
-
                     <div style={subTextStyle}>{item.email || "-"}</div>
-
                     <div style={subTextStyle}>{item.phone || "-"}</div>
                   </div>
 
                   <div>
                     <div style={cellStrongStyle}>
-                      {[item.city, item.country].filter(Boolean).join(", ") ||
-                        "-"}
+                      {formatMoney(item.grand_total, item.currency)}
                     </div>
 
                     <div style={subTextStyle}>
-                      {item.address_line_1 || "-"}
+                      Subtotal: {formatMoney(item.subtotal, item.currency)}
                     </div>
-
-                    {item.postal_code ? (
-                      <div style={subTextStyle}>{item.postal_code}</div>
-                    ) : null}
-                  </div>
-
-                  <div>
-                    <div style={cellStrongStyle}>
-                      {formatMoney(grandTotal, item.currency)}
-                    </div>
-                    <div style={subTextStyle}>{item.currency || "USD"}</div>
                   </div>
 
                   <div>
@@ -551,6 +667,28 @@ export default function AdminOrdersPage() {
                   </div>
 
                   <div>
+                    <span
+                      style={{
+                        ...statusPillStyle,
+                        ...getStatusStyle(item.payment_status),
+                      }}
+                    >
+                      {item.payment_status || "pending"}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span
+                      style={{
+                        ...statusPillStyle,
+                        ...getStatusStyle(item.fulfillment_status),
+                      }}
+                    >
+                      {item.fulfillment_status || "unfulfilled"}
+                    </span>
+                  </div>
+
+                  <div>
                     <div>{formatDate(item.created_at)}</div>
                     <div style={subTextStyle}>
                       Updated: {formatDate(item.updated_at)}
@@ -558,120 +696,282 @@ export default function AdminOrdersPage() {
                   </div>
 
                   <div style={rowActionsStyle}>
-                    <select
-                      value={statusMap[item.id] || item.status || "submitted"}
-                      onChange={(event) =>
-                        setStatusMap((prev) => ({
-                          ...prev,
-                          [item.id]: event.target.value,
-                        }))
-                      }
-                      style={rowSelectStyle}
-                    >
-                      {STATUS_OPTIONS.map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
-
                     <button
                       type="button"
-                      onClick={() => handleUpdateStatus(item.id)}
-                      disabled={savingId === item.id}
-                      style={{
-                        ...compactPrimaryButtonStyle,
-                        opacity: savingId === item.id ? 0.7 : 1,
-                        cursor:
-                          savingId === item.id ? "not-allowed" : "pointer",
-                      }}
+                      onClick={() => quickAction(item, "reviewing")}
+                      disabled={savingOrderNumber === item.order_number}
+                      style={compactButtonStyle}
                     >
-                      {savingId === item.id ? "Saving" : "Save"}
+                      Reviewing
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => handleToggleItems(item.id)}
+                      onClick={() => quickAction(item, "paid")}
+                      disabled={savingOrderNumber === item.order_number}
+                      style={compactPrimaryButtonStyle}
+                    >
+                      Paid
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openEdit(item)}
+                      disabled={savingOrderNumber === item.order_number}
                       style={compactButtonStyle}
                     >
-                      {isExpanded ? "Hide" : "Items"}
+                      Edit
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleOrderItems(item)}
+                      disabled={itemsLoadingOrderNumber === item.order_number}
+                      style={compactButtonStyle}
+                    >
+                      {isExpanded ? "Hide" : "Details"}
                     </button>
                   </div>
                 </div>
 
-                {isExpanded ? (
-                  <div style={expandedRowStyle}>
-                    <div style={detailsGridStyle}>
-                      <div style={detailCardStyle}>
-                        <div style={detailTitleStyle}>Contact</div>
-                        <div style={detailTextStyle}>
-                          Company: {item.company_name || "-"}
-                        </div>
-                        <div style={detailTextStyle}>
-                          Contact: {contactName || "-"}
-                        </div>
-                        <div style={detailTextStyle}>
-                          Email: {item.email || "-"}
-                        </div>
-                        <div style={detailTextStyle}>
-                          Phone: {item.phone || "-"}
-                        </div>
-                      </div>
+                {isEditing ? (
+                  <div style={editPanelStyle}>
+                    <div style={editGridStyle}>
+                      <label style={fieldStyle}>
+                        <span>Status</span>
+                        <select
+                          value={editForm.status}
+                          onChange={(event) =>
+                            setEditForm((prev) => ({
+                              ...prev,
+                              status: event.target.value,
+                            }))
+                          }
+                          style={selectStyle}
+                        >
+                          {STATUS_OPTIONS.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                      <div style={detailCardStyle}>
-                        <div style={detailTitleStyle}>Shipping</div>
-                        <div style={detailTextStyle}>
-                          Country: {item.country || "-"}
-                        </div>
-                        <div style={detailTextStyle}>City: {item.city || "-"}</div>
-                        <div style={detailTextStyle}>
-                          Address: {item.address_line_1 || "-"}
-                        </div>
-                        <div style={detailTextStyle}>
-                          Postal Code: {item.postal_code || "-"}
-                        </div>
-                      </div>
+                      <label style={fieldStyle}>
+                        <span>Payment</span>
+                        <select
+                          value={editForm.payment_status}
+                          onChange={(event) =>
+                            setEditForm((prev) => ({
+                              ...prev,
+                              payment_status: event.target.value,
+                            }))
+                          }
+                          style={selectStyle}
+                        >
+                          {PAYMENT_STATUS_OPTIONS.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                      <div style={detailCardStyle}>
-                        <div style={detailTitleStyle}>Request Note</div>
-                        <div style={detailTextStyle}>{item.notes || "-"}</div>
-                      </div>
+                      <label style={fieldStyle}>
+                        <span>Fulfillment</span>
+                        <select
+                          value={editForm.fulfillment_status}
+                          onChange={(event) =>
+                            setEditForm((prev) => ({
+                              ...prev,
+                              fulfillment_status: event.target.value,
+                            }))
+                          }
+                          style={selectStyle}
+                        >
+                          {FULFILLMENT_STATUS_OPTIONS.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label style={fieldStyle}>
+                        <span>Discount</span>
+                        <input
+                          value={editForm.discount_total}
+                          onChange={(event) =>
+                            setEditForm((prev) => ({
+                              ...prev,
+                              discount_total: event.target.value,
+                            }))
+                          }
+                          type="number"
+                          step="0.01"
+                          style={inputStyle}
+                        />
+                      </label>
+
+                      <label style={fieldStyle}>
+                        <span>Shipping / Freight</span>
+                        <input
+                          value={editForm.shipping_total}
+                          onChange={(event) =>
+                            setEditForm((prev) => ({
+                              ...prev,
+                              shipping_total: event.target.value,
+                            }))
+                          }
+                          type="number"
+                          step="0.01"
+                          style={inputStyle}
+                        />
+                      </label>
+
+                      <label style={fieldStyle}>
+                        <span>Tax</span>
+                        <input
+                          value={editForm.tax_total}
+                          onChange={(event) =>
+                            setEditForm((prev) => ({
+                              ...prev,
+                              tax_total: event.target.value,
+                            }))
+                          }
+                          type="number"
+                          step="0.01"
+                          style={inputStyle}
+                        />
+                      </label>
                     </div>
 
-                    {itemsLoadingId === item.id ? (
-                      <div style={lineEmptyStyle}>Loading quote items...</div>
-                    ) : orderLines.length === 0 ? (
-                      <div style={lineEmptyStyle}>
-                        No line items found for this quote request.
+                    <label style={fieldStyle}>
+                      <span>Internal Notes</span>
+                      <textarea
+                        value={editForm.internal_notes}
+                        onChange={(event) =>
+                          setEditForm((prev) => ({
+                            ...prev,
+                            internal_notes: event.target.value,
+                          }))
+                        }
+                        rows={3}
+                        style={textareaStyle}
+                      />
+                    </label>
+
+                    <div style={editActionsStyle}>
+                      <button
+                        type="button"
+                        onClick={() => saveEdit(item.order_number)}
+                        disabled={savingOrderNumber === item.order_number}
+                        style={compactPrimaryButtonStyle}
+                      >
+                        {savingOrderNumber === item.order_number
+                          ? "Saving..."
+                          : "Save Changes"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => quickAction(item, "quoted")}
+                        disabled={savingOrderNumber === item.order_number}
+                        style={compactButtonStyle}
+                      >
+                        Mark Quoted
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => quickAction(item, "approved")}
+                        disabled={savingOrderNumber === item.order_number}
+                        style={compactButtonStyle}
+                      >
+                        Approve
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => quickAction(item, "completed")}
+                        disabled={savingOrderNumber === item.order_number}
+                        style={compactButtonStyle}
+                      >
+                        Complete
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => quickAction(item, "cancelled")}
+                        disabled={savingOrderNumber === item.order_number}
+                        style={dangerButtonStyle}
+                      >
+                        Cancel
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={closeEdit}
+                        style={compactButtonStyle}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {isExpanded ? (
+                  <div style={itemsPanelStyle}>
+                    {itemsLoadingOrderNumber === item.order_number ? (
+                      <div style={itemsEmptyStyle}>
+                        Loading order items...
                       </div>
+                    ) : !orderLines.length ? (
+                      <div style={itemsEmptyStyle}>No order items found.</div>
                     ) : (
-                      <div style={lineTableStyle}>
-                        <div style={lineHeaderStyle}>
+                      <div style={itemsTableStyle}>
+                        <div style={itemsHeaderStyle}>
                           <div>Product</div>
                           <div>Variant</div>
                           <div>SKU</div>
+                          <div>Box</div>
                           <div>Qty</div>
                           <div>Unit</div>
                           <div>Total</div>
                         </div>
 
                         {orderLines.map((line) => (
-                          <div key={line.id} style={lineRowStyle}>
-                            <div>
-                              <div style={cellStrongStyle}>
-                                {line.product_title || "-"}
-                              </div>
-                              <div style={subTextStyle}>
-                                {line.product_slug || "-"}
+                          <div key={line.id} style={itemsRowStyle}>
+                            <div style={productCellStyle}>
+                              {line.image ? (
+                                <img
+                                  src={line.image}
+                                  alt={line.product_title || "Product"}
+                                  loading="lazy"
+                                  decoding="async"
+                                  style={itemImageStyle}
+                                />
+                              ) : (
+                                <div style={itemImagePlaceholderStyle}>
+                                  No
+                                </div>
+                              )}
+
+                              <div style={{ minWidth: 0 }}>
+                                <div style={cellStrongStyle}>
+                                  {line.product_title || "-"}
+                                </div>
+                                <div style={subTextStyle}>
+                                  {line.product_slug || "-"}
+                                </div>
                               </div>
                             </div>
 
                             <div>{line.variant_label || "-"}</div>
                             <div>{line.sku || "-"}</div>
-                            <div>{line.quantity}</div>
-                            <div>
-                              {formatMoney(line.unit_price, item.currency)}
-                            </div>
+                            <div>{line.box_quantity || "-"}</div>
+                            <div>{line.quantity || 0}</div>
+                            <div>{formatMoney(line.unit_price, item.currency)}</div>
                             <div style={cellStrongStyle}>
                               {formatMoney(line.line_total, item.currency)}
                             </div>
@@ -736,24 +1036,8 @@ const subtitleStyle: React.CSSProperties = {
   maxWidth: 760,
 };
 
-const headerActionsStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  flexWrap: "wrap",
-};
-
-const exportMenuWrapStyle: React.CSSProperties = {
-  position: "relative",
-  display: "inline-flex",
-};
-
-const exportDropdownButtonStyle: React.CSSProperties = {
+const refreshButtonStyle: React.CSSProperties = {
   minHeight: 36,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 8,
   borderRadius: 10,
   border: "1px solid #d8cebf",
   background: "#fff",
@@ -762,37 +1046,6 @@ const exportDropdownButtonStyle: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 900,
   cursor: "pointer",
-};
-
-const exportChevronStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: "#756b60",
-  lineHeight: 1,
-};
-
-const exportDropdownMenuStyle: React.CSSProperties = {
-  position: "absolute",
-  top: "calc(100% + 6px)",
-  right: 0,
-  width: 150,
-  background: "#fff",
-  border: "1px solid #d8cebf",
-  borderRadius: 12,
-  boxShadow: "0 14px 34px rgba(23,23,23,0.12)",
-  padding: 6,
-  zIndex: 20,
-};
-
-const exportDropdownItemStyle: React.CSSProperties = {
-  minHeight: 36,
-  display: "flex",
-  alignItems: "center",
-  borderRadius: 8,
-  padding: "0 10px",
-  color: "#171717",
-  textDecoration: "none",
-  fontSize: 13,
-  fontWeight: 800,
 };
 
 const toolbarStyle: React.CSSProperties = {
@@ -833,7 +1086,7 @@ const metricWarningStyle: React.CSSProperties = {
 
 const filterGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 220px",
+  gridTemplateColumns: "minmax(0, 1fr) 180px 180px 90px",
   gap: 10,
 };
 
@@ -848,6 +1101,18 @@ const inputStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
+const textareaStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 90,
+  border: "1px solid #d8cebf",
+  borderRadius: 10,
+  background: "#fcfbf8",
+  padding: 12,
+  outline: "none",
+  fontSize: 13,
+  resize: "vertical",
+};
+
 const selectStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 38,
@@ -859,6 +1124,18 @@ const selectStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
+const applyButtonStyle: React.CSSProperties = {
+  minHeight: 38,
+  border: "1px solid #171717",
+  borderRadius: 10,
+  background: "#171717",
+  color: "#fff",
+  padding: "0 14px",
+  fontSize: 13,
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
 const tableWrapStyle: React.CSSProperties = {
   background: "#fff",
   border: "1px solid #e2d8cb",
@@ -868,7 +1145,7 @@ const tableWrapStyle: React.CSSProperties = {
 
 const tableHeaderStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "34px 1fr 1.45fr 1.1fr 0.75fr 0.75fr 0.8fr 1.7fr",
+  gridTemplateColumns: "1fr 1.3fr 0.8fr 0.8fr 0.9fr 0.9fr 0.9fr 1.55fr",
   gap: 10,
   alignItems: "center",
   minHeight: 40,
@@ -882,20 +1159,14 @@ const tableHeaderStyle: React.CSSProperties = {
 
 const tableRowStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "34px 1fr 1.45fr 1.1fr 0.75fr 0.75fr 0.8fr 1.7fr",
+  gridTemplateColumns: "1fr 1.3fr 0.8fr 0.8fr 0.9fr 0.9fr 0.9fr 1.55fr",
   gap: 10,
   alignItems: "center",
-  minHeight: 66,
-  padding: "8px 12px",
+  minHeight: 72,
+  padding: "10px 12px",
   borderBottom: "1px solid #f0e7da",
   fontSize: 13,
   color: "#171717",
-};
-
-const checkCellStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
 };
 
 const orderNumberStyle: React.CSSProperties = {
@@ -942,17 +1213,7 @@ const rowActionsStyle: React.CSSProperties = {
   justifyContent: "flex-end",
   alignItems: "center",
   gap: 6,
-};
-
-const rowSelectStyle: React.CSSProperties = {
-  width: 116,
-  minHeight: 32,
-  border: "1px solid #d8cebf",
-  borderRadius: 8,
-  background: "#fcfbf8",
-  padding: "0 8px",
-  outline: "none",
-  fontSize: 12,
+  flexWrap: "wrap",
 };
 
 const compactButtonStyle: React.CSSProperties = {
@@ -974,85 +1235,120 @@ const compactPrimaryButtonStyle: React.CSSProperties = {
   color: "#fff",
 };
 
-const expandedRowStyle: React.CSSProperties = {
+const dangerButtonStyle: React.CSSProperties = {
+  ...compactButtonStyle,
+  background: "#fff4f2",
+  border: "1px solid rgba(165,74,63,0.22)",
+  color: "#a54a3f",
+};
+
+const editPanelStyle: React.CSSProperties = {
   background: "#fcfbf8",
   borderBottom: "1px solid #f0e7da",
-  padding: "12px 46px 14px",
+  padding: "14px 18px",
   display: "grid",
   gap: 12,
 };
 
-const detailsGridStyle: React.CSSProperties = {
+const editGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
   gap: 10,
 };
 
-const detailCardStyle: React.CSSProperties = {
-  border: "1px solid #e2d8cb",
-  borderRadius: 12,
-  background: "#fff",
-  padding: 12,
+const fieldStyle: React.CSSProperties = {
   display: "grid",
-  gap: 5,
-};
-
-const detailTitleStyle: React.CSSProperties = {
-  color: "#171717",
-  fontSize: 13,
-  fontWeight: 900,
-};
-
-const detailTextStyle: React.CSSProperties = {
-  color: "#5f554b",
+  gap: 6,
   fontSize: 12,
-  lineHeight: 1.45,
-  wordBreak: "break-word",
+  fontWeight: 800,
+  color: "#6f6559",
 };
 
-const lineTableStyle: React.CSSProperties = {
+const editActionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const itemsPanelStyle: React.CSSProperties = {
+  background: "#fcfbf8",
+  borderBottom: "1px solid #f0e7da",
+  padding: "14px 18px",
+};
+
+const itemsTableStyle: React.CSSProperties = {
   border: "1px solid #e2d8cb",
   borderRadius: 12,
   overflow: "hidden",
   background: "#fff",
 };
 
-const lineHeaderStyle: React.CSSProperties = {
+const itemsHeaderStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1.6fr 1fr 0.8fr 0.4fr 0.6fr 0.7fr",
+  gridTemplateColumns: "1.8fr 0.9fr 0.9fr 0.45fr 0.45fr 0.7fr 0.7fr",
   gap: 10,
-  minHeight: 34,
+  minHeight: 38,
   alignItems: "center",
-  padding: "0 10px",
+  padding: "0 12px",
   background: "#f8f5ef",
   borderBottom: "1px solid #e2d8cb",
+  color: "#6f6559",
   fontSize: 12,
   fontWeight: 800,
-  color: "#6f6559",
 };
 
-const lineRowStyle: React.CSSProperties = {
+const itemsRowStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1.6fr 1fr 0.8fr 0.4fr 0.6fr 0.7fr",
+  gridTemplateColumns: "1.8fr 0.9fr 0.9fr 0.45fr 0.45fr 0.7fr 0.7fr",
   gap: 10,
-  minHeight: 44,
+  minHeight: 54,
   alignItems: "center",
-  padding: "8px 10px",
+  padding: "10px 12px",
   borderBottom: "1px solid #f0e7da",
   fontSize: 12,
+  color: "#171717",
+};
+
+const productCellStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "44px minmax(0, 1fr)",
+  gap: 10,
+  alignItems: "center",
+};
+
+const itemImageStyle: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  borderRadius: 8,
+  objectFit: "cover",
+  background: "#f8f5ef",
+  border: "1px solid #e2d8cb",
+};
+
+const itemImagePlaceholderStyle: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  borderRadius: 8,
+  background: "#f8f5ef",
+  border: "1px solid #e2d8cb",
+  color: "#9a9084",
+  fontSize: 10,
+  fontWeight: 800,
+  display: "grid",
+  placeItems: "center",
+};
+
+const itemsEmptyStyle: React.CSSProperties = {
+  padding: 14,
+  color: "#756b60",
+  fontWeight: 700,
+  fontSize: 13,
 };
 
 const emptyStateStyle: React.CSSProperties = {
   padding: 18,
   color: "#756b60",
   fontWeight: 700,
-};
-
-const lineEmptyStyle: React.CSSProperties = {
-  padding: 12,
-  color: "#756b60",
-  fontWeight: 700,
-  fontSize: 13,
 };
 
 const successBoxStyle: React.CSSProperties = {

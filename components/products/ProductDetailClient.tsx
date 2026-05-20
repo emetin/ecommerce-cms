@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { memo, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import Container from "../ui/Container";
 import Section from "../ui/Section";
 import SectionHeading from "../ui/SectionHeading";
@@ -33,7 +34,7 @@ const ProductPurchasePanel = dynamic(() => import("./ProductPurchasePanel"), {
     <div
       style={{
         width: "100%",
-        minHeight: 220,
+        minHeight: 260,
         borderRadius: 24,
         border: "1px solid #e7ddcf",
         background: "#fffaf4",
@@ -61,6 +62,15 @@ type ProductItem = {
   product_category?: string;
   type?: string;
   tags?: string;
+
+  sku?: string;
+  price?: string | number;
+  compare_at_price?: string | number;
+  box_quantity?: string | number;
+  case_quantity?: string | number;
+  min_quantity?: string | number;
+  minimum_quantity?: string | number;
+  step_quantity?: string | number;
 };
 
 type ProductImageItem = {
@@ -74,11 +84,19 @@ type ProductImageItem = {
   updated_at?: string;
 };
 
-function normalizeText(value?: string) {
-  return String(value || "").trim();
+type ProductDetailClientProps = {
+  product: ProductItem;
+  relatedProducts: ProductItem[];
+  variants: VariantItem[];
+  productImages: ProductImageItem[];
+  allProductImages: ProductImageItem[];
+};
+
+function normalizeText(value?: unknown) {
+  return String(value ?? "").trim();
 }
 
-function normalizeLower(value?: string) {
+function normalizeLower(value?: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
@@ -105,8 +123,21 @@ function toSafeOrder(value?: string) {
   return Number.isFinite(num) ? num : 999999;
 }
 
+function toPositiveInteger(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const floored = Math.floor(parsed);
+
+  return floored > 0 ? floored : fallback;
+}
+
 function isTrue(value?: string) {
-  return normalizeLower(value) === "true";
+  const normalized = normalizeLower(value);
+  return normalized === "true" || normalized === "1" || normalized === "yes";
 }
 
 function sortProductImages(images: ProductImageItem[]) {
@@ -162,7 +193,12 @@ function buildOrderedGallery(
 
   const variantUrls = variants
     .map((variant) =>
-      normalizeImageUrl(variant.variant_image || variant.image_id || "")
+      normalizeImageUrl(
+        variant.variant_image ||
+          variant.variant_image_url ||
+          variant.image_id ||
+          ""
+      )
     )
     .filter(Boolean);
 
@@ -174,13 +210,115 @@ function buildOrderedGallery(
   ]);
 }
 
-type ProductDetailClientProps = {
-  product: ProductItem;
-  relatedProducts: ProductItem[];
-  variants: VariantItem[];
-  productImages: ProductImageItem[];
-  allProductImages: ProductImageItem[];
-};
+function buildVariantTitle(variant: VariantItem | null) {
+  if (!variant) return "";
+
+  const directTitle =
+    normalizeText(variant.title) ||
+    normalizeText(variant.name) ||
+    normalizeText(variant.option1_value) ||
+    normalizeText(variant.option2_value) ||
+    normalizeText(variant.option3_value);
+
+  const lowered = directTitle.toLowerCase();
+
+  if (
+    lowered === "default" ||
+    lowered === "default title" ||
+    lowered === "default variant"
+  ) {
+    return "";
+  }
+
+  return directTitle;
+}
+
+function getVariantSku(variant: VariantItem | null, product: ProductItem) {
+  return normalizeText(variant?.sku) || normalizeText(product.sku) || "-";
+}
+
+function getQuantityInfo(product: ProductItem, selectedVariant: VariantItem | null) {
+  const variantBox =
+    toPositiveInteger(selectedVariant?.box_quantity) ||
+    toPositiveInteger(selectedVariant?.case_quantity);
+
+  const productBox =
+    toPositiveInteger(product.box_quantity) ||
+    toPositiveInteger(product.case_quantity);
+
+  const variantMin =
+    toPositiveInteger(selectedVariant?.min_quantity) ||
+    toPositiveInteger(selectedVariant?.minimum_quantity);
+
+  const productMin =
+    toPositiveInteger(product.min_quantity) ||
+    toPositiveInteger(product.minimum_quantity);
+
+  const packageQuantity =
+    variantBox || productBox || variantMin || productMin || 1;
+
+  const minQuantity = Math.max(
+    variantMin || productMin || packageQuantity || 1,
+    packageQuantity
+  );
+
+  const stepQuantity =
+    toPositiveInteger(selectedVariant?.step_quantity) ||
+    toPositiveInteger(product.step_quantity) ||
+    packageQuantity ||
+    minQuantity ||
+    1;
+
+  return {
+    packageQuantity,
+    minQuantity,
+    stepQuantity,
+  };
+}
+
+function buildSpecs(product: ProductItem, selectedVariant: VariantItem | null) {
+  const quantityInfo = getQuantityInfo(product, selectedVariant);
+  const variantTitle = buildVariantTitle(selectedVariant);
+
+  return [
+    {
+      label: "Collection",
+      value: formatCollectionLabel(product.collection_slug),
+    },
+    {
+      label: "Vendor",
+      value: normalizeText(product.vendor) || "-",
+    },
+    {
+      label: "Category",
+      value: normalizeText(product.product_category) || "-",
+    },
+    {
+      label: "Type",
+      value: normalizeText(product.type) || "-",
+    },
+    {
+      label: "Selected Variant",
+      value: variantTitle || "Standard",
+    },
+    {
+      label: "SKU",
+      value: getVariantSku(selectedVariant, product),
+    },
+    {
+      label: "Package Quantity",
+      value: String(quantityInfo.packageQuantity),
+    },
+    {
+      label: "Minimum Order",
+      value: String(quantityInfo.minQuantity),
+    },
+    {
+      label: "Order Increment",
+      value: String(quantityInfo.stepQuantity),
+    },
+  ];
+}
 
 function ProductDetailClientComponent({
   product,
@@ -207,7 +345,10 @@ function ProductDetailClientComponent({
   const selectedVariantImage = useMemo(() => {
     return normalizeImageUrl(
       String(
-        selectedVariant?.variant_image || selectedVariant?.image_id || ""
+        selectedVariant?.variant_image ||
+          selectedVariant?.variant_image_url ||
+          selectedVariant?.image_id ||
+          ""
       ).trim()
     );
   }, [selectedVariant]);
@@ -242,6 +383,9 @@ function ProductDetailClientComponent({
 
   const collectionLabel = formatCollectionLabel(product.collection_slug);
   const productTags = formatTags(product.tags);
+  const variantTitle = buildVariantTitle(selectedVariant);
+  const quantityInfo = getQuantityInfo(product, selectedVariant);
+  const specs = buildSpecs(product, selectedVariant);
 
   const relatedPrimaryImageMap = useMemo(() => {
     const imagesBySlug = new Map<string, ProductImageItem[]>();
@@ -277,66 +421,35 @@ function ProductDetailClientComponent({
     <>
       <Section>
         <Container>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 16,
-              flexWrap: "wrap",
-              alignItems: "center",
-              marginBottom: 24,
-            }}
-          >
+          <div style={breadcrumbWrapStyle}>
             <ButtonLink href="/products" variant="secondary">
               ← Back to Products
             </ButtonLink>
 
-            <div
-              style={{
-                color: "#7b7367",
-                fontWeight: 700,
-                fontSize: 14,
-              }}
-            >
+            <div style={breadcrumbStyle}>
               Home / Products / {product.title || "Product"}
             </div>
           </div>
 
-          <div
-            className="product-detail-grid"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.05fr 0.95fr",
-              gap: 42,
-              alignItems: "start",
-            }}
-          >
-            <ProductGallery
-              title={product.title || "Product"}
-              images={galleryImages}
-              controlledActiveImage={controlledActiveImage || undefined}
-              onActiveImageChange={setSelectedImage}
-            />
+          <div className="product-detail-grid" style={productGridStyle}>
+            <div style={galleryColumnStyle}>
+              <ProductGallery
+                title={product.title || "Product"}
+                images={galleryImages}
+                controlledActiveImage={controlledActiveImage || undefined}
+                onActiveImageChange={setSelectedImage}
+              />
 
-            <div
-              style={{
-                display: "grid",
-                gap: 22,
-              }}
-            >
-              <div
-                style={{
-                  display: "grid",
-                  gap: 14,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 10,
-                    flexWrap: "wrap",
-                  }}
-                >
+              <div className="desktop-only" style={trustStripStyle}>
+                <MiniTrustCard title="B2B Quote Flow" text="Final pricing is reviewed by the sales team." />
+                <MiniTrustCard title="Pack Control" text={`Orders follow pack multiples of ${quantityInfo.packageQuantity}.`} />
+                <MiniTrustCard title="Project Support" text="Suitable for hospitality and contract sourcing." />
+              </div>
+            </div>
+
+            <div style={contentColumnStyle}>
+              <div style={introCardStyle}>
+                <div style={badgeWrapStyle}>
                   <div style={mainBadgeStyle}>{collectionLabel}</div>
 
                   {product.vendor ? (
@@ -354,132 +467,75 @@ function ProductDetailClientComponent({
                   ) : null}
                 </div>
 
-                <h1
-                  style={{
-                    margin: 0,
-                    fontSize: "clamp(2rem, 3.2vw, 3.4rem)",
-                    lineHeight: 1.04,
-                    fontWeight: 800,
-                    letterSpacing: "-0.03em",
-                    color: "#171717",
-                  }}
-                >
+                <h1 style={titleStyle}>
                   {product.title || "Untitled Product"}
                 </h1>
 
-                <p
-                  style={{
-                    margin: 0,
-                    color: "#5d554a",
-                    fontSize: 16,
-                    lineHeight: 1.9,
-                    maxWidth: 760,
-                  }}
-                >
+                <p style={leadTextStyle}>
                   {product.short_description ||
                     product.description ||
-                    "Explore this product for hospitality and project-based sourcing."}
+                    "Explore this product for hospitality, wholesale, and project-based sourcing."}
                 </p>
 
-                {(product.vendor ||
-                  product.product_category ||
-                  product.type ||
-                  productTags.length > 0) ? (
-                  <div style={metaPanelStyle}>
-                    <MetaRow label="Vendor" value={product.vendor || "-"} />
-                    <MetaRow
-                      label="Product Category"
-                      value={product.product_category || "-"}
-                    />
-                    <MetaRow label="Type" value={product.type || "-"} />
-                    <MetaRow
-                      label="Tags"
-                      value={productTags.length ? productTags.join(", ") : "-"}
-                    />
+                <div style={highlightGridStyle}>
+                  <HighlightCard
+                    label="Current Selection"
+                    value={variantTitle || "Standard"}
+                  />
+                  <HighlightCard
+                    label="Minimum Order"
+                    value={`${quantityInfo.minQuantity} units`}
+                  />
+                  <HighlightCard
+                    label="Order Increment"
+                    value={`${quantityInfo.stepQuantity} units`}
+                  />
+                </div>
+
+                {productTags.length > 0 ? (
+                  <div style={tagWrapStyle}>
+                    {productTags.slice(0, 8).map((tag) => (
+                      <span key={tag} style={tagStyle}>
+                        {tag}
+                      </span>
+                    ))}
                   </div>
                 ) : null}
               </div>
 
               <ProductPurchasePanel
-  product={{
-    id: product.id,
-    title: product.title,
-    slug: product.slug,
-    image: primaryImage || product.image,
-    sku: (product as any).sku,
-    price: (product as any).price,
-    compare_at_price: (product as any).compare_at_price,
-    box_quantity: (product as any).box_quantity,
-  }}
-  variants={variants}
-  onVariantChange={setSelectedVariant}
-/>
-            </div>
-          </div>
-        </Container>
-      </Section>
-
-      <Section tone="soft">
-        <Container>
-          <div
-            className="product-support-grid"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.1fr 0.9fr",
-              gap: 24,
-              alignItems: "start",
-            }}
-          >
-            <div
-              style={{
-                background: "#fff",
-                border: "1px solid #e5ddd2",
-                borderRadius: 24,
-                padding: 24,
-              }}
-            >
-              <SectionHeading
-                kicker="Product Overview"
-                title="Designed for wholesale review and project discussion"
-                text="This product page supports B2B evaluation through category context, variant structure, and a more organized media presentation."
+                product={{
+                  id: product.id,
+                  title: product.title,
+                  slug: product.slug,
+                  image: primaryImage || product.image,
+                  sku: product.sku,
+                  price: product.price,
+                  compare_at_price: product.compare_at_price,
+                  box_quantity: product.box_quantity,
+                  case_quantity: product.case_quantity,
+                  min_quantity: product.min_quantity,
+                  minimum_quantity: product.minimum_quantity,
+                  step_quantity: product.step_quantity,
+                }}
+                variants={variants}
+                onVariantChange={setSelectedVariant}
               />
 
-              <div
-                style={{
-                  color: "#5d554a",
-                  lineHeight: 1.9,
-                  fontSize: 15,
-                }}
-              >
-                {product.description ||
-                  product.short_description ||
-                  "No detailed product description has been added yet."}
-              </div>
-            </div>
+              <div style={supportCardStyle}>
+                <div>
+                  <div style={supportKickerStyle}>Need help with this item?</div>
+                  <div style={supportTitleStyle}>
+                    Share your quantity, property type, and project deadline.
+                  </div>
+                  <p style={supportTextStyle}>
+                    Our team can review availability, pack requirements, freight,
+                    and wholesale pricing before final approval.
+                  </p>
+                </div>
 
-            <div
-              style={{
-                background: "#fff",
-                border: "1px solid #e5ddd2",
-                borderRadius: 24,
-                padding: 24,
-              }}
-            >
-              <SectionHeading
-                kicker="Need Project Support?"
-                title="Share your category or quantity requirements"
-                text="If you are reviewing this product for a hotel, resort, residence, or contract project, send a detailed inquiry for faster direction."
-              />
-
-              <div
-                style={{
-                  display: "grid",
-                  gap: 12,
-                }}
-              >
-                <ButtonLink href="/contact-us">Request Information</ButtonLink>
-                <ButtonLink href="/collections" variant="secondary">
-                  Explore More Collections
+                <ButtonLink href="/contact-us" variant="secondary">
+                  Contact Sales
                 </ButtonLink>
               </div>
             </div>
@@ -487,8 +543,61 @@ function ProductDetailClientComponent({
         </Container>
       </Section>
 
+      <Section tone="soft">
+        <Container>
+          <div className="product-info-grid" style={infoGridStyle}>
+            <div style={infoCardStyle}>
+              <SectionHeading
+                kicker="Product Overview"
+                title="Built for hospitality procurement"
+                text="Review product details, ordering structure, and category information before adding the item to your quote cart."
+              />
+
+              <div style={descriptionStyle}>
+                {product.description ||
+                  product.short_description ||
+                  "No detailed product description has been added yet."}
+              </div>
+            </div>
+
+            <div style={infoCardStyle}>
+              <SectionHeading
+                kicker="Specifications"
+                title="Product and ordering details"
+                text="Use this summary to quickly validate SKU, category, pack quantity, and order increment."
+              />
+
+              <div style={specGridStyle}>
+                {specs.map((item) => (
+                  <MetaRow key={item.label} label={item.label} value={item.value} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </Container>
+      </Section>
+
+      <Section>
+        <Container>
+          <div className="procurement-grid" style={procurementGridStyle}>
+            <ProcurementCard
+              title="Quote-based checkout"
+              text="This store is structured for B2B quote requests. No online payment is collected during checkout."
+            />
+            <ProcurementCard
+              title="Wholesale quantity rules"
+              text="Products can follow package, minimum, and step quantity rules to match operational sourcing needs."
+            />
+            <ProcurementCard
+              title="Final review by sales"
+              text="Pricing, freight, availability, and payment terms are reviewed before the order is finalized."
+            />
+          </div>
+        </Container>
+      </Section>
+
       {relatedProducts.length > 0 ? (
-        <Section>
+        <Section tone="soft">
           <Container>
             <SectionHeading
               kicker="Related Products"
@@ -525,30 +634,132 @@ function ProductDetailClientComponent({
           </Container>
         </Section>
       ) : null}
+
+      <style>{`
+        @media (max-width: 1040px) {
+          .product-detail-grid,
+          .product-info-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .desktop-only {
+            display: none !important;
+          }
+        }
+
+        @media (max-width: 760px) {
+          .procurement-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </>
+  );
+}
+
+function MiniTrustCard({ title, text }: { title: string; text: string }) {
+  return (
+    <div style={miniTrustCardStyle}>
+      <div style={miniTrustTitleStyle}>{title}</div>
+      <div style={miniTrustTextStyle}>{text}</div>
+    </div>
+  );
+}
+
+function HighlightCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={highlightCardStyle}>
+      <span style={highlightLabelStyle}>{label}</span>
+      <strong style={highlightValueStyle}>{value}</strong>
+    </div>
+  );
+}
+
+function ProcurementCard({ title, text }: { title: string; text: string }) {
+  return (
+    <div style={procurementCardStyle}>
+      <div style={procurementIconStyle}>✓</div>
+      <div>
+        <h3 style={procurementTitleStyle}>{title}</h3>
+        <p style={procurementTextStyle}>{text}</p>
+      </div>
+    </div>
   );
 }
 
 function MetaRow({ label, value }: { label: string; value: string }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 12,
-        paddingBottom: 10,
-        borderBottom: "1px solid #eee5d9",
-      }}
-    >
+    <div style={metaRowStyle}>
       <span style={{ color: "#7b7367", fontWeight: 700 }}>{label}</span>
-      <span style={{ fontWeight: 800, textAlign: "right", color: "#171717" }}>
+      <span style={{ fontWeight: 850, textAlign: "right", color: "#171717" }}>
         {value}
       </span>
     </div>
   );
 }
 
-const mainBadgeStyle: React.CSSProperties = {
+const breadcrumbWrapStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 16,
+  flexWrap: "wrap",
+  alignItems: "center",
+  marginBottom: 24,
+};
+
+const breadcrumbStyle: CSSProperties = {
+  color: "#7b7367",
+  fontWeight: 700,
+  fontSize: 14,
+};
+
+const productGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.05fr 0.95fr",
+  gap: 42,
+  alignItems: "start",
+};
+
+const galleryColumnStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+};
+
+const contentColumnStyle: CSSProperties = {
+  display: "grid",
+  gap: 18,
+};
+
+const introCardStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+  padding: 0,
+};
+
+const badgeWrapStyle: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
+const titleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: "clamp(2.1rem, 3.2vw, 3.5rem)",
+  lineHeight: 1.03,
+  fontWeight: 850,
+  letterSpacing: "-0.04em",
+  color: "#171717",
+};
+
+const leadTextStyle: CSSProperties = {
+  margin: 0,
+  color: "#5d554a",
+  fontSize: 16,
+  lineHeight: 1.9,
+  maxWidth: 760,
+};
+
+const mainBadgeStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   minHeight: 32,
@@ -558,12 +769,12 @@ const mainBadgeStyle: React.CSSProperties = {
   background: "#f3ede3",
   color: "#2f7d62",
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 850,
   letterSpacing: "0.08em",
   textTransform: "uppercase",
 };
 
-const secondaryBadgeStyle: React.CSSProperties = {
+const secondaryBadgeStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   minHeight: 32,
@@ -573,18 +784,191 @@ const secondaryBadgeStyle: React.CSSProperties = {
   background: "#faf7f1",
   color: "#6b6256",
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 850,
   letterSpacing: "0.06em",
   textTransform: "uppercase",
 };
 
-const metaPanelStyle: React.CSSProperties = {
+const highlightGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 10,
+};
+
+const highlightCardStyle: CSSProperties = {
+  display: "grid",
+  gap: 5,
+  padding: 14,
+  borderRadius: 18,
+  background: "#fffaf4",
+  border: "1px solid #e8dfd2",
+};
+
+const highlightLabelStyle: CSSProperties = {
+  color: "#7b7367",
+  fontSize: 11,
+  fontWeight: 850,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+};
+
+const highlightValueStyle: CSSProperties = {
+  color: "#171717",
+  fontSize: 15,
+  lineHeight: 1.25,
+};
+
+const tagWrapStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+};
+
+const tagStyle: CSSProperties = {
+  display: "inline-flex",
+  minHeight: 28,
+  alignItems: "center",
+  padding: "0 10px",
+  borderRadius: 999,
+  background: "#fff",
+  border: "1px solid #e8dfd2",
+  color: "#6b6256",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const trustStripStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 12,
+};
+
+const miniTrustCardStyle: CSSProperties = {
+  padding: 14,
+  borderRadius: 18,
+  background: "#fff",
+  border: "1px solid #e5ddd2",
+};
+
+const miniTrustTitleStyle: CSSProperties = {
+  color: "#171717",
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const miniTrustTextStyle: CSSProperties = {
+  marginTop: 5,
+  color: "#6b6256",
+  fontSize: 12,
+  lineHeight: 1.55,
+};
+
+const supportCardStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gap: 16,
+  alignItems: "center",
+  padding: 18,
+  borderRadius: 22,
+  border: "1px solid #e5ddd2",
+  background: "#fff",
+};
+
+const supportKickerStyle: CSSProperties = {
+  color: "#2f7d62",
+  fontSize: 11,
+  fontWeight: 850,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
+const supportTitleStyle: CSSProperties = {
+  marginTop: 5,
+  color: "#171717",
+  fontSize: 16,
+  fontWeight: 850,
+};
+
+const supportTextStyle: CSSProperties = {
+  margin: "6px 0 0",
+  color: "#6b6256",
+  fontSize: 13,
+  lineHeight: 1.65,
+};
+
+const infoGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.05fr 0.95fr",
+  gap: 24,
+  alignItems: "start",
+};
+
+const infoCardStyle: CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e5ddd2",
+  borderRadius: 24,
+  padding: 24,
+};
+
+const descriptionStyle: CSSProperties = {
+  color: "#5d554a",
+  lineHeight: 1.9,
+  fontSize: 15,
+};
+
+const specGridStyle: CSSProperties = {
   display: "grid",
   gap: 12,
-  padding: 18,
-  borderRadius: 20,
-  border: "1px solid #e8dfd2",
-  background: "#fffaf4",
+};
+
+const metaRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  paddingBottom: 10,
+  borderBottom: "1px solid #eee5d9",
+};
+
+const procurementGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 16,
+};
+
+const procurementCardStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "42px minmax(0, 1fr)",
+  gap: 14,
+  alignItems: "start",
+  padding: 20,
+  borderRadius: 24,
+  background: "#fff",
+  border: "1px solid #e5ddd2",
+};
+
+const procurementIconStyle: CSSProperties = {
+  width: 42,
+  height: 42,
+  borderRadius: 14,
+  display: "grid",
+  placeItems: "center",
+  background: "#eef8f0",
+  color: "#2f7d62",
+  fontWeight: 900,
+};
+
+const procurementTitleStyle: CSSProperties = {
+  margin: 0,
+  color: "#171717",
+  fontSize: 16,
+  fontWeight: 850,
+};
+
+const procurementTextStyle: CSSProperties = {
+  margin: "7px 0 0",
+  color: "#6b6256",
+  fontSize: 13,
+  lineHeight: 1.7,
 };
 
 export default memo(ProductDetailClientComponent);

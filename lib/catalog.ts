@@ -167,10 +167,14 @@ function getVariantMinQuantity(variant: CatalogVariant | null) {
 }
 
 function resolveQuantityRules(product: CatalogProduct, variant: CatalogVariant | null) {
-  const minQuantity = getVariantMinQuantity(variant) || getProductMinQuantity(product) || 1;
+  const minQuantity =
+    getVariantMinQuantity(variant) || getProductMinQuantity(product) || 1;
 
   const boxQuantity =
-    getVariantBoxQuantity(variant) || getProductBoxQuantity(product) || minQuantity || 1;
+    getVariantBoxQuantity(variant) ||
+    getProductBoxQuantity(product) ||
+    minQuantity ||
+    1;
 
   const caseQuantity =
     getVariantCaseQuantity(variant) || getProductCaseQuantity(product) || 0;
@@ -191,16 +195,38 @@ function resolveQuantityRules(product: CatalogProduct, variant: CatalogVariant |
   };
 }
 
+function variantMatchesId(variant: CatalogVariant, variantId: string) {
+  const normalizedVariantId = normalizeLower(variantId);
+
+  if (!normalizedVariantId) {
+    return false;
+  }
+
+  return (
+    normalizeLower((variant as any).id) === normalizedVariantId ||
+    normalizeLower((variant as any).variant_id) === normalizedVariantId ||
+    normalizeLower((variant as any).sku) === normalizedVariantId ||
+    normalizeLower((variant as any).title) === normalizedVariantId ||
+    normalizeLower((variant as any).name) === normalizedVariantId ||
+    normalizeLower((variant as any).option1_value) === normalizedVariantId ||
+    normalizeLower((variant as any).option2_value) === normalizedVariantId ||
+    normalizeLower((variant as any).option3_value) === normalizedVariantId
+  );
+}
+
 function getBackendVariant(options: {
   allVariants: CatalogVariant[];
   variantsBySlug: Map<string, CatalogVariant[]>;
   product: CatalogProduct;
   productSlug: string;
+  variantId?: string;
 }) {
-  const { allVariants, variantsBySlug, product, productSlug } = options;
+  const { allVariants, variantsBySlug, product, productSlug, variantId } =
+    options;
 
   const productId = normalize((product as any).id);
   const normalizedProductSlug = normalizeLower(productSlug);
+  const normalizedVariantId = normalizeLower(variantId);
 
   const fromMap = variantsBySlug.get(normalizedProductSlug) || [];
 
@@ -225,12 +251,24 @@ function getBackendVariant(options: {
       );
     });
 
-  return active[0] || scoped[0] || null;
+  const candidates = active.length ? active : scoped;
+
+  if (normalizedVariantId) {
+    const exactVariant = candidates.find((variant) =>
+      variantMatchesId(variant, normalizedVariantId)
+    );
+
+    if (exactVariant) {
+      return exactVariant;
+    }
+  }
+
+  return candidates[0] || null;
 }
 
 export async function resolveCartCatalogItem(
   productSlug: string,
-  _variantId?: string
+  variantId?: string
 ): Promise<ResolvedCartCatalogItem> {
   const normalizedProductSlug = normalizeLower(productSlug);
 
@@ -256,6 +294,7 @@ export async function resolveCartCatalogItem(
     variantsBySlug,
     product,
     productSlug: normalizedProductSlug,
+    variantId,
   });
 
   const productPrice = getProductPrice(product);
@@ -266,11 +305,11 @@ export async function resolveCartCatalogItem(
     (backendVariant as any)?.compare_at_price ?? "0"
   );
 
-  const unitPrice = productPrice || variantPrice;
-  const compareAtPrice = productCompareAtPrice || variantCompareAtPrice;
+  const unitPrice = variantPrice || productPrice;
+  const compareAtPrice = variantCompareAtPrice || productCompareAtPrice;
 
-  const sku = getProductSku(product) || normalize((backendVariant as any)?.sku);
-  const image = getProductImage(product) || getVariantImage(backendVariant);
+  const sku = normalize((backendVariant as any)?.sku) || getProductSku(product);
+  const image = getVariantImage(backendVariant) || getProductImage(product);
 
   const quantityRules = resolveQuantityRules(product, backendVariant);
 
@@ -279,6 +318,7 @@ export async function resolveCartCatalogItem(
     variant: backendVariant,
     variantId:
       normalize((backendVariant as any)?.id) ||
+      normalize((backendVariant as any)?.variant_id) ||
       normalize((product as any).id) ||
       normalizedProductSlug,
     productTitle: normalize((product as any).title) || "Product",

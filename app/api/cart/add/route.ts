@@ -77,13 +77,14 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
 
     const productSlug = normalizeText(body?.product_slug);
+    const variantId = normalizeText(body?.variant_id);
     const requestedQuantity = toPositiveNumber(body?.quantity, 1);
 
     if (!productSlug) {
       return jsonError("product_slug is required.", 400);
     }
 
-    const resolved = await resolveCartCatalogItem(productSlug);
+    const resolved = await resolveCartCatalogItem(productSlug, variantId);
 
     if (resolved.unitPrice <= 0) {
       return jsonError(
@@ -129,27 +130,32 @@ export async function POST(req: Request) {
       }
     );
 
-    const response = NextResponse.json({
-      ok: true,
-      cart,
-      quantity_rule: {
-        quantity: quantityRule.quantity,
-        min_quantity: quantityRule.minQuantity,
-        box_quantity: quantityRule.boxQuantity,
-        case_quantity: quantityRule.caseQuantity,
-        step_quantity: quantityRule.stepQuantity,
-        adjusted: quantityRule.adjusted,
-        message: quantityRule.message,
+    const response = NextResponse.json(
+      {
+        ok: true,
+        cart,
+        quantity_rule: {
+          quantity: quantityRule.quantity,
+          min_quantity: quantityRule.minQuantity,
+          box_quantity: quantityRule.boxQuantity,
+          case_quantity: quantityRule.caseQuantity,
+          step_quantity: quantityRule.stepQuantity,
+          adjusted: quantityRule.adjusted,
+          message: quantityRule.message,
+        },
       },
-    });
+      {
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
+      }
+    );
 
-    if (!existingCartToken) {
-      response.cookies.set(
-        CART_COOKIE_NAME,
-        cartToken,
-        getCartCookieOptions(60 * 60 * 24 * 30)
-      );
-    }
+    response.cookies.set(
+      CART_COOKIE_NAME,
+      cartToken,
+      getCartCookieOptions(60 * 60 * 24 * 30)
+    );
 
     return response;
   } catch (error) {

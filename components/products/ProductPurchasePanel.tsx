@@ -29,6 +29,10 @@ export type VariantItem = {
   variant_image_file_id?: string | null;
   variant_image_legacy_id?: string | null;
   box_quantity?: string | number | null;
+  case_quantity?: string | number | null;
+  min_quantity?: string | number | null;
+  minimum_quantity?: string | number | null;
+  step_quantity?: string | number | null;
   sort_order?: string | number | null;
   created_at?: string;
   updated_at?: string;
@@ -44,21 +48,27 @@ type ProductPurchasePanelProps = {
     price?: string | number | null;
     compare_at_price?: string | number | null;
     box_quantity?: string | number | null;
+    case_quantity?: string | number | null;
+    min_quantity?: string | number | null;
+    minimum_quantity?: string | number | null;
+    step_quantity?: string | number | null;
   };
   variants?: VariantItem[];
   onVariantChange?: (variant: VariantItem | null) => void;
 };
 
 type QuantityRule = {
-  boxQuantity: number;
+  packageQuantity: number;
+  minQuantity: number;
+  stepQuantity: number;
   message: string;
 };
 
-function normalize(value?: string | number | boolean | null) {
+function normalize(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function normalizeLower(value?: string | number | boolean | null) {
+function normalizeLower(value: unknown) {
   return normalize(value).toLowerCase();
 }
 
@@ -129,6 +139,29 @@ function getBackendVariant(variants: VariantItem[]) {
   return usableVariants[0] || null;
 }
 
+function buildVariantTitle(variant: VariantItem | null) {
+  if (!variant) return "";
+
+  const directTitle =
+    normalize(variant.title) ||
+    normalize(variant.name) ||
+    normalize(variant.option1_value) ||
+    normalize(variant.option2_value) ||
+    normalize(variant.option3_value);
+
+  const lowered = directTitle.toLowerCase();
+
+  if (
+    lowered === "default" ||
+    lowered === "default title" ||
+    lowered === "default variant"
+  ) {
+    return "";
+  }
+
+  return directTitle;
+}
+
 function getVariantImage(variant: VariantItem | null) {
   if (!variant) return "";
 
@@ -142,47 +175,92 @@ function getVariantImage(variant: VariantItem | null) {
 }
 
 function getQuantityRule(
-  product: ProductPurchasePanelProps["product"]
+  product: ProductPurchasePanelProps["product"],
+  variant: VariantItem | null
 ): QuantityRule {
-  const boxQuantity = toPositiveInteger(product.box_quantity, 0) || 1;
+  const variantBoxQuantity =
+    toPositiveInteger(variant?.box_quantity, 0) ||
+    toPositiveInteger(variant?.case_quantity, 0);
+
+  const productBoxQuantity =
+    toPositiveInteger(product.box_quantity, 0) ||
+    toPositiveInteger(product.case_quantity, 0);
+
+  const variantMinQuantity =
+    toPositiveInteger(variant?.min_quantity, 0) ||
+    toPositiveInteger(variant?.minimum_quantity, 0);
+
+  const productMinQuantity =
+    toPositiveInteger(product.min_quantity, 0) ||
+    toPositiveInteger(product.minimum_quantity, 0);
+
+  const packageQuantity =
+    variantBoxQuantity ||
+    productBoxQuantity ||
+    variantMinQuantity ||
+    productMinQuantity ||
+    1;
+
+  const minQuantity =
+    variantMinQuantity ||
+    productMinQuantity ||
+    packageQuantity ||
+    1;
+
+  const stepQuantity =
+    toPositiveInteger(variant?.step_quantity, 0) ||
+    toPositiveInteger(product.step_quantity, 0) ||
+    packageQuantity ||
+    minQuantity ||
+    1;
+
+  const finalMinQuantity = Math.max(minQuantity, packageQuantity);
 
   return {
-    boxQuantity,
+    packageQuantity,
+    minQuantity: finalMinQuantity,
+    stepQuantity,
     message:
-      boxQuantity > 1
-        ? `This product is ordered in box multiples of ${boxQuantity}.`
+      packageQuantity > 1
+        ? `Minimum order: ${finalMinQuantity} units.`
         : "",
   };
 }
 
-function normalizeQuantityToBox(quantity: unknown, rule: QuantityRule) {
+function normalizeQuantityToRule(quantity: unknown, rule: QuantityRule) {
   const parsed = Number(quantity);
   const requested = Number.isFinite(parsed)
     ? Math.floor(parsed)
-    : rule.boxQuantity;
+    : rule.minQuantity;
 
-  const safeQuantity = Math.max(rule.boxQuantity, requested);
-  const remainder = safeQuantity % rule.boxQuantity;
+  const minimum = Math.max(rule.minQuantity, rule.packageQuantity, 1);
+  const step = Math.max(rule.stepQuantity || rule.packageQuantity || 1, 1);
+
+  const safeQuantity = Math.max(minimum, requested);
+  const remainder = (safeQuantity - minimum) % step;
 
   if (remainder === 0) {
     return safeQuantity;
   }
 
-  return safeQuantity + (rule.boxQuantity - remainder);
+  return safeQuantity + (step - remainder);
 }
 
 function getNextDecreaseQuantity(quantity: number, rule: QuantityRule) {
-  const next = quantity - rule.boxQuantity;
+  const step = Math.max(rule.stepQuantity || rule.packageQuantity || 1, 1);
+  const next = quantity - step;
 
-  if (next < rule.boxQuantity) {
-    return rule.boxQuantity;
+  if (next < rule.minQuantity) {
+    return rule.minQuantity;
   }
 
-  return normalizeQuantityToBox(next, rule);
+  return normalizeQuantityToRule(next, rule);
 }
 
 function getNextIncreaseQuantity(quantity: number, rule: QuantityRule) {
-  return normalizeQuantityToBox(quantity + rule.boxQuantity, rule);
+  const step = Math.max(rule.stepQuantity || rule.packageQuantity || 1, 1);
+
+  return normalizeQuantityToRule(quantity + step, rule);
 }
 
 function ProductPurchasePanelComponent({
@@ -202,28 +280,43 @@ function ProductPurchasePanelComponent({
   }, [variants]);
 
   const quantityRule = useMemo(() => {
-    return getQuantityRule(product);
-  }, [product]);
+    return getQuantityRule(product, backendVariant);
+  }, [product, backendVariant]);
 
   useEffect(() => {
     onVariantChange?.(backendVariant);
   }, [backendVariant, onVariantChange]);
 
+  const quantityRuleKey = useMemo(() => {
+    return [
+      quantityRule.minQuantity,
+      quantityRule.packageQuantity,
+      quantityRule.stepQuantity,
+    ].join(":");
+  }, [
+    quantityRule.minQuantity,
+    quantityRule.packageQuantity,
+    quantityRule.stepQuantity,
+  ]);
+
   useEffect(() => {
-    const initialQuantity = quantityRule.boxQuantity;
+    const initialQuantity = normalizeQuantityToRule(
+      quantityRule.minQuantity,
+      quantityRule
+    );
 
     setQuantity(initialQuantity);
     setQuantityInput(String(initialQuantity));
     setLocalError("");
     setSuccessMessage("");
-  }, [quantityRule.boxQuantity]);
+  }, [quantityRuleKey]);
 
   const price =
-    parsePrice(product.price) || parsePrice(backendVariant?.price) || 0;
+    parsePrice(backendVariant?.price) || parsePrice(product.price) || 0;
 
   const compareAtPrice =
-    parsePrice(product.compare_at_price) ||
     parsePrice(backendVariant?.compare_at_price) ||
+    parsePrice(product.compare_at_price) ||
     0;
 
   const hasDiscount = compareAtPrice > price && price > 0;
@@ -233,20 +326,28 @@ function ProductPurchasePanelComponent({
     : 0;
 
   const effectiveSku =
-    normalize(product.sku) || normalize(backendVariant?.sku) || "";
+    normalize(backendVariant?.sku) || normalize(product.sku) || "";
 
   const effectiveImage =
     getVariantImage(backendVariant) || normalize(product.image) || "";
+
+  const effectiveVariantId =
+    normalize(backendVariant?.id) ||
+    normalize(backendVariant?.sku) ||
+    normalize(backendVariant?.title) ||
+    "";
+
+  const effectiveVariantTitle = buildVariantTitle(backendVariant);
 
   const inquiryHref = `/contact-us?product=${encodeURIComponent(
     product.title || "Product"
   )}`;
 
   const canAddToCart =
-    Boolean(product.slug) && price > 0 && quantity >= quantityRule.boxQuantity;
+    Boolean(product.slug) && price > 0 && quantity >= quantityRule.minQuantity;
 
   function commitQuantity(rawValue: unknown) {
-    const next = normalizeQuantityToBox(rawValue, quantityRule);
+    const next = normalizeQuantityToRule(rawValue, quantityRule);
 
     setQuantity(next);
     setQuantityInput(String(next));
@@ -280,16 +381,16 @@ function ProductPurchasePanelComponent({
         return;
       }
 
-      const normalizedQuantity = normalizeQuantityToBox(quantity, quantityRule);
+      const normalizedQuantity = normalizeQuantityToRule(quantity, quantityRule);
 
       setQuantity(normalizedQuantity);
       setQuantityInput(String(normalizedQuantity));
 
       const result = await handleAddToCart({
         product_slug: product.slug || "",
-        variant_id: "",
+        variant_id: effectiveVariantId,
         product_title: product.title || "",
-        variant_title: "",
+        variant_title: effectiveVariantTitle,
         sku: effectiveSku,
         image: effectiveImage,
         unit_price: price,
@@ -350,15 +451,15 @@ function ProductPurchasePanelComponent({
             <button
               type="button"
               onClick={decreaseQuantity}
-              disabled={isAdding || quantity <= quantityRule.boxQuantity}
+              disabled={isAdding || quantity <= quantityRule.minQuantity}
               style={{
                 ...qtyButtonStyle,
                 cursor:
-                  isAdding || quantity <= quantityRule.boxQuantity
+                  isAdding || quantity <= quantityRule.minQuantity
                     ? "not-allowed"
                     : "pointer",
                 opacity:
-                  isAdding || quantity <= quantityRule.boxQuantity ? 0.65 : 1,
+                  isAdding || quantity <= quantityRule.minQuantity ? 0.65 : 1,
               }}
             >
               -
@@ -367,8 +468,8 @@ function ProductPurchasePanelComponent({
             <input
               type="number"
               inputMode="numeric"
-              min={quantityRule.boxQuantity}
-              step={quantityRule.boxQuantity}
+              min={quantityRule.minQuantity}
+              step={quantityRule.stepQuantity}
               value={quantityInput}
               disabled={isAdding}
               onChange={(event) => {
@@ -406,10 +507,13 @@ function ProductPurchasePanelComponent({
 
         <div style={infoGridStyle}>
           <InfoRow label="SKU" value={effectiveSku || "-"} />
-          <InfoRow
-            label="Box Quantity"
-            value={String(quantityRule.boxQuantity)}
-          />
+
+          {quantityRule.minQuantity > 1 ? (
+            <InfoRow
+              label="Minimum Order"
+              value={`${quantityRule.minQuantity} units`}
+            />
+          ) : null}
         </div>
 
         {localError ? (

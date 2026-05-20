@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -34,6 +35,10 @@ type CartMutationResult = {
   quantityRule: CartQuantityRuleResponse | null;
 };
 
+type RefreshCartOptions = {
+  force?: boolean;
+};
+
 type CartContextType = {
   cart: any | null;
   isLoading: boolean;
@@ -48,7 +53,7 @@ type CartContextType = {
   closeDrawer: () => void;
   clearError: () => void;
   clearLastQuantityRule: () => void;
-  refreshCart: () => Promise<void>;
+  refreshCart: (options?: RefreshCartOptions) => Promise<void>;
   handleAddToCart: (payload: CartPayload) => Promise<CartMutationResult>;
   handleUpdateQuantity: (
     itemId: string,
@@ -60,6 +65,8 @@ type CartContextType = {
 };
 
 const CartContext = createContext<CartContextType | null>(null);
+
+const CART_REFRESH_DEDUPE_MS = 1500;
 
 function createEmptyCartFallback() {
   return {
@@ -117,6 +124,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const mountedRef = useRef(true);
   const hasLoadedCartRef = useRef(false);
+  const lastRefreshAtRef = useRef(0);
+  const refreshPromiseRef = useRef<Promise<void> | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const safeSetCart = useCallback((nextCart: any) => {
     if (!mountedRef.current) return;
@@ -131,33 +148,61 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setLastQuantityRule(null);
   }, []);
 
-  const refreshCart = useCallback(async () => {
-    const controller = new AbortController();
+  const refreshCart = useCallback(
+    async (options?: RefreshCartOptions) => {
+      const force = Boolean(options?.force);
+      const now = Date.now();
 
-    try {
-      if (mountedRef.current) {
-        setIsBootstrapping(true);
-        setError("");
+      if (!force && refreshPromiseRef.current) {
+        return refreshPromiseRef.current;
       }
 
-      const nextCart = await fetchCart(controller.signal);
-
-      safeSetCart(nextCart);
-      hasLoadedCartRef.current = true;
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load cart.";
-
-      if (mountedRef.current && message !== "The operation was aborted.") {
-        setError(message);
-        safeSetCart(createEmptyCartFallback());
+      if (
+        !force &&
+        hasLoadedCartRef.current &&
+        now - lastRefreshAtRef.current < CART_REFRESH_DEDUPE_MS
+      ) {
+        return;
       }
-    } finally {
-      if (mountedRef.current) {
-        setIsBootstrapping(false);
-      }
-    }
-  }, [safeSetCart]);
+
+      const controller = new AbortController();
+
+      const run = async () => {
+        try {
+          if (mountedRef.current) {
+            setIsBootstrapping(true);
+            setError("");
+          }
+
+          const nextCart = await fetchCart(controller.signal);
+
+          safeSetCart(nextCart);
+          hasLoadedCartRef.current = true;
+          lastRefreshAtRef.current = Date.now();
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Failed to load cart.";
+
+          if (mountedRef.current && message !== "The operation was aborted.") {
+            setError(message);
+            safeSetCart(createEmptyCartFallback());
+          }
+        } finally {
+          if (mountedRef.current) {
+            setIsBootstrapping(false);
+          }
+
+          refreshPromiseRef.current = null;
+        }
+      };
+
+      const promise = run();
+      refreshPromiseRef.current = promise;
+
+      return promise;
+    },
+    [safeSetCart]
+  );
 
   const openDrawer = useCallback(() => {
     setIsDrawerOpen(true);
@@ -185,6 +230,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         safeSetCart(result.cart);
         setLastQuantityRule(result.quantityRule);
         hasLoadedCartRef.current = true;
+        lastRefreshAtRef.current = Date.now();
 
         if (mountedRef.current) {
           setIsDrawerOpen(true);
@@ -229,6 +275,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         safeSetCart(result.cart);
         setLastQuantityRule(result.quantityRule);
         hasLoadedCartRef.current = true;
+        lastRefreshAtRef.current = Date.now();
 
         return createMutationResult(result.cart, result.quantityRule);
       } catch (err) {
@@ -264,6 +311,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
         safeSetCart(result.cart);
         hasLoadedCartRef.current = true;
+        lastRefreshAtRef.current = Date.now();
 
         return createMutationResult(result.cart, result.quantityRule);
       } catch (err) {
@@ -296,6 +344,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       safeSetCart(result.cart);
       hasLoadedCartRef.current = true;
+      lastRefreshAtRef.current = Date.now();
 
       return createMutationResult(result.cart, result.quantityRule);
     } catch (err) {

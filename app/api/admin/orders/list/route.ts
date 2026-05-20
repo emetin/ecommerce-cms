@@ -6,8 +6,6 @@ import {
 } from "../../../../../lib/admin-auth";
 import { toNumber } from "../../../../../lib/money";
 
-const ORDERS_TTL_SECONDS = 300;
-
 function parseCookieValue(cookieHeader: string, cookieName: string) {
   const escapedCookieName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = cookieHeader.match(
@@ -21,8 +19,35 @@ function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
+}
+
 function normalizeEmail(value: unknown) {
   return normalizeText(value).toLowerCase();
+}
+
+function matchesQuery(item: Record<string, unknown>, query: string) {
+  if (!query) return true;
+
+  const combined = [
+    item.order_number,
+    item.email,
+    item.first_name,
+    item.last_name,
+    item.company_name,
+    item.phone,
+    item.city,
+    item.country,
+    item.status,
+    item.payment_status,
+    item.fulfillment_status,
+    item.notes,
+  ]
+    .map((value) => normalizeLower(value))
+    .join(" ");
+
+  return combined.includes(query);
 }
 
 export async function GET(req: Request) {
@@ -38,16 +63,27 @@ export async function GET(req: Request) {
       );
     }
 
+    const url = new URL(req.url);
+
+    const statusFilter = normalizeLower(url.searchParams.get("status"));
+    const paymentFilter = normalizeLower(url.searchParams.get("payment_status"));
+    const fulfillmentFilter = normalizeLower(
+      url.searchParams.get("fulfillment_status")
+    );
+    const searchQuery = normalizeLower(url.searchParams.get("q"));
+
     const orders = await getAllOrders({
-      forceFresh: false,
-      ttlSeconds: ORDERS_TTL_SECONDS,
+      forceFresh: true,
+      ttlSeconds: 0,
     });
 
-    const items = orders.map((order) => ({
+    const mappedItems = orders.map((order) => ({
       id: normalizeText(order.id),
       order_number: normalizeText(order.order_number),
       cart_id: normalizeText(order.cart_id),
       customer_id: normalizeText(order.customer_id),
+      customer_company_id: normalizeText(order.customer_company_id),
+      customer_user_id: normalizeText(order.customer_user_id),
 
       email: normalizeEmail(order.email),
       first_name: normalizeText(order.first_name),
@@ -61,7 +97,13 @@ export async function GET(req: Request) {
       address_line_2: normalizeText(order.address_line_2),
       postal_code: normalizeText(order.postal_code),
 
-      status: normalizeText(order.status || "submitted"),
+      status: normalizeLower(order.status || "submitted") || "submitted",
+      payment_status:
+        normalizeLower(order.payment_status || "pending") || "pending",
+      fulfillment_status:
+        normalizeLower(order.fulfillment_status || "unfulfilled") ||
+        "unfulfilled",
+
       currency: normalizeText(order.currency || "USD") || "USD",
 
       subtotal: toNumber(order.subtotal),
@@ -76,6 +118,26 @@ export async function GET(req: Request) {
       updated_at: normalizeText(order.updated_at),
     }));
 
+    const items = mappedItems.filter((item) => {
+      const matchesStatus = statusFilter
+        ? item.status === statusFilter
+        : true;
+
+      const matchesPayment = paymentFilter
+        ? item.payment_status === paymentFilter
+        : true;
+
+      const matchesFulfillment = fulfillmentFilter
+        ? item.fulfillment_status === fulfillmentFilter
+        : true;
+
+      const matchesSearch = matchesQuery(item, searchQuery);
+
+      return (
+        matchesStatus && matchesPayment && matchesFulfillment && matchesSearch
+      );
+    });
+
     return NextResponse.json(
       {
         ok: true,
@@ -84,7 +146,7 @@ export async function GET(req: Request) {
       },
       {
         headers: {
-          "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
+          "Cache-Control": "private, no-store",
         },
       }
     );

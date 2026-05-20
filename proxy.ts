@@ -144,7 +144,6 @@ export const config = {
 
     "/portal-login",
     "/account/:path*",
-    "/api/customer-auth/:path*",
     "/api/orders/:path*",
   ],
 };

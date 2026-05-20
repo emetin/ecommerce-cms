@@ -309,20 +309,20 @@ async function validateCartItemsForQuote(
     let boxQuantity = toNumber(cartItem.box_quantity);
 
     if (productSlug) {
-      const resolved = await resolveCartCatalogItem(productSlug);
+  const resolved = await resolveCartCatalogItem(productSlug, resolvedVariantId);
 
-      resolvedProductId = normalize(
-        (resolved.product as any)?.id || resolvedProductId
-      );
-      resolvedVariantId = normalize(resolved.variantId || resolvedVariantId);
-      productTitle = normalize(resolved.productTitle || productTitle);
-      variantTitle = normalize(resolved.variantTitle || variantTitle);
-      sku = normalize(resolved.sku || sku);
-      image = normalize(resolved.image || image);
-      unitPrice = toNumber(resolved.unitPrice || unitPrice);
-      compareAtPrice = toNumber(resolved.compareAtPrice || compareAtPrice);
-      boxQuantity = toNumber(resolved.boxQuantity || boxQuantity);
-    }
+  resolvedProductId = normalize(
+    (resolved.product as any)?.id || resolvedProductId
+  );
+  resolvedVariantId = normalize(resolved.variantId || resolvedVariantId);
+  productTitle = normalize(resolved.productTitle || productTitle);
+  variantTitle = normalize(resolved.variantTitle || variantTitle);
+  sku = normalize(resolved.sku || sku);
+  image = normalize(resolved.image || image);
+  unitPrice = toNumber(resolved.unitPrice || unitPrice);
+  compareAtPrice = toNumber(resolved.compareAtPrice || compareAtPrice);
+  boxQuantity = toNumber(resolved.boxQuantity || boxQuantity);
+}
 
     if (unitPrice <= 0) {
       throw new Error(

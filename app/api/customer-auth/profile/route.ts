@@ -17,6 +17,15 @@ function getCookieValue(cookieHeader: string, name: string) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
 export async function GET(req: Request) {
   try {
     const cookieHeader = req.headers.get("cookie") || "";
@@ -24,10 +33,11 @@ export async function GET(req: Request) {
     const session = await readCustomerFromSessionToken(token);
 
     if (!session?.customerUserId && !session?.customerId) {
-      return NextResponse.json(
-        { ok: false, error: "Customer login required." },
-        { status: 401 }
-      );
+      return jsonResponse({
+        ok: true,
+        authenticated: false,
+        customer: null,
+      });
     }
 
     const customer = await findCustomerById(
@@ -35,24 +45,32 @@ export async function GET(req: Request) {
     );
 
     if (!customer) {
-      return NextResponse.json(
-        { ok: false, error: "Customer not found." },
-        { status: 404 }
+      return jsonResponse(
+        {
+          ok: false,
+          authenticated: true,
+          customer: null,
+          error: "Customer not found.",
+        },
+        404
       );
     }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
+      authenticated: true,
       customer: sanitizeCustomer(customer),
     });
   } catch (error) {
-    return NextResponse.json(
+    return jsonResponse(
       {
         ok: false,
+        authenticated: false,
+        customer: null,
         error:
           error instanceof Error ? error.message : "Failed to load profile.",
       },
-      { status: 500 }
+      500
     );
   }
 }
@@ -64,9 +82,13 @@ export async function PATCH(req: Request) {
     const session = await readCustomerFromSessionToken(token);
 
     if (!session?.customerUserId && !session?.customerId) {
-      return NextResponse.json(
-        { ok: false, error: "Customer login required." },
-        { status: 401 }
+      return jsonResponse(
+        {
+          ok: false,
+          authenticated: false,
+          error: "Customer login required.",
+        },
+        401
       );
     }
 
@@ -88,25 +110,30 @@ export async function PATCH(req: Request) {
     );
 
     if (!updated) {
-      return NextResponse.json(
-        { ok: false, error: "Customer profile could not be updated." },
-        { status: 404 }
+      return jsonResponse(
+        {
+          ok: false,
+          authenticated: true,
+          error: "Customer profile could not be updated.",
+        },
+        404
       );
     }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
+      authenticated: true,
       customer: sanitizeCustomer(updated),
       message: "Profile updated successfully.",
     });
   } catch (error) {
-    return NextResponse.json(
+    return jsonResponse(
       {
         ok: false,
         error:
           error instanceof Error ? error.message : "Failed to update profile.",
       },
-      { status: 400 }
+      400
     );
   }
 }

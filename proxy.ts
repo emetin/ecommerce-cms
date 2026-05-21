@@ -120,6 +120,12 @@ export const config = {
     "/api/admin-auth/:path*",
 
     "/api/upload/:path*",
+    "/api/media/:path*",
+
+    "/api/customer-applications/list",
+    "/api/customer-applications/update-status",
+
+    "/api/customers/:path*",
 
     "/api/products/create",
     "/api/products/update",

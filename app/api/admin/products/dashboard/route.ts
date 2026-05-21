@@ -1,36 +1,61 @@
 import { NextResponse } from "next/server";
-import { getSheetData } from "../../../../../lib/sheets";
+import { createSupabaseAdminClient } from "../../../../../lib/supabase/admin";
 import {
   ADMIN_COOKIE_NAME,
   verifyAdminSessionToken,
 } from "../../../../../lib/admin-auth";
 
-type ProductRecord = Record<string, string>;
+type ProductRecord = {
+  id?: string | null;
+  title?: string | null;
+  slug?: string | null;
+  image_url?: string | null;
+  image_file_id?: string | null;
+  image_alt?: string | null;
+  primary_collection_id?: string | null;
+  status?: string | null;
+  featured?: boolean | string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+  short_description?: string | null;
+  vendor?: string | null;
+  product_category?: string | null;
+  product_type?: string | null;
+  tags?: string | null;
+  product_images?: ProductImageRecord[] | null;
+  product_collections?: ProductCollectionRecord[] | null;
+};
 
 type ProductImageRecord = {
-  id?: string;
-  product_slug?: string;
-  image_url?: string;
-  image_file_id?: string;
-  image_uploaded_at?: string;
-  sort_order?: string;
-  alt_text?: string;
-  is_main?: string;
-  created_at?: string;
-  updated_at?: string;
+  id?: string | null;
+  product_id?: string | null;
+  image_url?: string | null;
+  image_file_id?: string | null;
+  alt_text?: string | null;
+  sort_order?: number | string | null;
+  is_main?: boolean | string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type ProductCollectionRecord = {
+  id?: string | null;
+  product_id?: string | null;
+  collection_id?: string | null;
+  collections?: {
+    id?: string | null;
+    title?: string | null;
+    slug?: string | null;
+  } | null;
 };
 
 const ALLOWED_STATUS = ["published", "draft", "archived"] as const;
 
-const PRODUCTS_SHEET_NAME = "products";
-const PRODUCT_IMAGES_SHEET_NAME = "product_images";
-
-const DASHBOARD_TTL_SECONDS = 300;
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
 function normalizeLower(value: unknown) {
@@ -38,6 +63,7 @@ function normalizeLower(value: unknown) {
 }
 
 function isTrue(value: unknown) {
+  if (typeof value === "boolean") return value;
   return normalizeLower(value) === "true";
 }
 
@@ -48,6 +74,7 @@ function toSafeOrder(value: unknown) {
 
 function parseCookieValue(cookieHeader: string, cookieName: string) {
   const escapedCookieName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
   const match = cookieHeader.match(
     new RegExp(`(?:^|;\\s*)${escapedCookieName}=([^;]+)`)
   );
@@ -55,27 +82,24 @@ function parseCookieValue(cookieHeader: string, cookieName: string) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-function compareByUpdatedAtDesc(a: ProductRecord, b: ProductRecord) {
-  const aUpdated = normalizeText(a.updated_at);
-  const bUpdated = normalizeText(b.updated_at);
+function normalizeLimit(value: unknown) {
+  const number = Number(value || DEFAULT_LIMIT);
 
-  return bUpdated.localeCompare(aUpdated);
+  if (!Number.isFinite(number) || number <= 0) {
+    return DEFAULT_LIMIT;
+  }
+
+  return Math.min(Math.floor(number), MAX_LIMIT);
 }
 
-function matchesQuery(item: ProductRecord, query: string) {
-  if (!query) return true;
+function normalizePage(value: unknown) {
+  const number = Number(value || 1);
 
-  const title = normalizeLower(item.title);
-  const slug = normalizeLower(item.slug);
-  const collectionSlug = normalizeLower(item.collection_slug);
-  const shortDescription = normalizeLower(item.short_description);
+  if (!Number.isFinite(number) || number <= 0) {
+    return 1;
+  }
 
-  return (
-    title.includes(query) ||
-    slug.includes(query) ||
-    collectionSlug.includes(query) ||
-    shortDescription.includes(query)
-  );
+  return Math.floor(number);
 }
 
 function sortImages(images: ProductImageRecord[]) {
@@ -87,77 +111,66 @@ function sortImages(images: ProductImageRecord[]) {
       return aMain ? -1 : 1;
     }
 
-    return toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+    const orderDiff = toSafeOrder(a.sort_order) - toSafeOrder(b.sort_order);
+
+    if (orderDiff !== 0) {
+      return orderDiff;
+    }
+
+    return normalizeText(a.created_at).localeCompare(normalizeText(b.created_at));
   });
 }
 
-function buildImageMapForVisibleProducts(
-  images: ProductImageRecord[],
-  visibleProductSlugs: Set<string>
-) {
-  const map = new Map<string, ProductImageRecord[]>();
+function getCollectionSlug(product: ProductRecord) {
+  const firstCollection = product.product_collections?.[0]?.collections;
 
-  images.forEach((image) => {
-    const slug = normalizeLower(image.product_slug);
-
-    if (!slug || !visibleProductSlugs.has(slug)) {
-      return;
-    }
-
-    if (!map.has(slug)) {
-      map.set(slug, []);
-    }
-
-    map.get(slug)!.push(image);
-  });
-
-  for (const [slug, currentImages] of map.entries()) {
-    map.set(slug, sortImages(currentImages));
-  }
-
-  return map;
+  return normalizeText(firstCollection?.slug);
 }
 
 function getGalleryStateFromImages(
   product: ProductRecord,
   images: ProductImageRecord[]
 ) {
-  const mainImage = images.find((item) => isTrue(item.is_main)) || null;
-  const firstImage = images[0] || null;
-  const altCount = images.filter((item) => normalizeText(item.alt_text)).length;
+  const sortedImages = sortImages(images);
+  const mainImage = sortedImages.find((item) => isTrue(item.is_main)) || null;
+  const firstImage = sortedImages[0] || null;
+
+  const altCount = sortedImages.filter((item) =>
+    normalizeText(item.alt_text)
+  ).length;
 
   const primaryImage =
     normalizeText(mainImage?.image_url) ||
     normalizeText(firstImage?.image_url) ||
-    normalizeText(product.image);
+    normalizeText(product.image_url);
 
   const issues: string[] = [];
 
-  if (images.length === 0) {
+  if (sortedImages.length === 0) {
     issues.push("No gallery images");
   }
 
-  if (images.length > 0 && !mainImage) {
+  if (sortedImages.length > 0 && !mainImage) {
     issues.push("No main image");
   }
 
-  if (images.length > 0 && altCount < images.length) {
+  if (sortedImages.length > 0 && altCount < sortedImages.length) {
     issues.push("Missing alt text");
   }
 
-  if (images.length > 0 && images.length < 3) {
+  if (sortedImages.length > 0 && sortedImages.length < 3) {
     issues.push("Low image count");
   }
 
   let score = 0;
 
-  if (images.length > 0) score += 35;
+  if (sortedImages.length > 0) score += 35;
   if (mainImage) score += 35;
-  if (images.length >= 3) score += 15;
-  if (images.length > 0 && altCount === images.length) score += 15;
+  if (sortedImages.length >= 3) score += 15;
+  if (sortedImages.length > 0 && altCount === sortedImages.length) score += 15;
 
   return {
-    imageCount: images.length,
+    imageCount: sortedImages.length,
     mainImageExists: Boolean(mainImage),
     altCount,
     primaryImage,
@@ -166,24 +179,31 @@ function getGalleryStateFromImages(
   };
 }
 
-function toDashboardItem(
-  product: ProductRecord,
-  imageMap: Map<string, ProductImageRecord[]>
-) {
-  const slug = normalizeLower(product.slug);
-  const images = imageMap.get(slug) || [];
+function toDashboardItem(product: ProductRecord) {
+  const images = product.product_images || [];
   const gallery = getGalleryStateFromImages(product, images);
 
   return {
     id: normalizeText(product.id),
     title: normalizeText(product.title),
     slug: normalizeText(product.slug),
-    image: normalizeText(product.image),
-    collection_slug: normalizeText(product.collection_slug),
+
+    image: normalizeText(product.image_url),
+    image_url: normalizeText(product.image_url),
+    image_file_id: normalizeText(product.image_file_id),
+    image_alt: normalizeText(product.image_alt),
+
+    collection_slug: getCollectionSlug(product),
     status: normalizeText(product.status),
-    featured: normalizeText(product.featured || "false"),
+    featured: isTrue(product.featured) ? "true" : "false",
     updated_at: normalizeText(product.updated_at),
+    created_at: normalizeText(product.created_at),
     short_description: normalizeText(product.short_description),
+
+    vendor: normalizeText(product.vendor),
+    product_category: normalizeText(product.product_category),
+    product_type: normalizeText(product.product_type),
+    tags: normalizeText(product.tags),
 
     gallery_image_count: gallery.imageCount,
     gallery_main_image_exists: gallery.mainImageExists,
@@ -192,28 +212,6 @@ function toDashboardItem(
     gallery_issues: gallery.issues,
     gallery_score: gallery.score,
   };
-}
-
-function getBasicSummary(products: ProductRecord[]) {
-  return products.reduce(
-    (acc, item) => {
-      const status = normalizeLower(item.status);
-
-      if (status === "published") {
-        acc.publishedCount += 1;
-      }
-
-      if (status === "draft") {
-        acc.draftCount += 1;
-      }
-
-      return acc;
-    },
-    {
-      publishedCount: 0,
-      draftCount: 0,
-    }
-  );
 }
 
 function getGallerySummary(items: ReturnType<typeof toDashboardItem>[]) {
@@ -249,6 +247,33 @@ function getGallerySummary(items: ReturnType<typeof toDashboardItem>[]) {
   );
 }
 
+async function getStatusSummary() {
+  const supabase = createSupabaseAdminClient();
+
+  const { count: publishedCount, error: publishedError } = await supabase
+    .from("products")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "published");
+
+  if (publishedError) {
+    throw new Error(publishedError.message);
+  }
+
+  const { count: draftCount, error: draftError } = await supabase
+    .from("products")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "draft");
+
+  if (draftError) {
+    throw new Error(draftError.message);
+  }
+
+  return {
+    publishedCount: publishedCount || 0,
+    draftCount: draftCount || 0,
+  };
+}
+
 export async function GET(req: Request) {
   try {
     const cookieHeader = req.headers.get("cookie") || "";
@@ -265,17 +290,10 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
 
     const statusParam = normalizeLower(searchParams.get("status"));
-    const queryParam = normalizeLower(searchParams.get("q"));
+    const queryParam = normalizeText(searchParams.get("q"));
 
-    const limitParam = Number(searchParams.get("limit") || DEFAULT_LIMIT);
-    const pageParam = Number(searchParams.get("page") || "1");
-
-    const limit =
-      Number.isFinite(limitParam) && limitParam > 0
-        ? Math.min(limitParam, MAX_LIMIT)
-        : DEFAULT_LIMIT;
-
-    const page = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
+    const limit = normalizeLimit(searchParams.get("limit"));
+    const page = normalizePage(searchParams.get("page"));
 
     if (
       statusParam &&
@@ -287,58 +305,92 @@ export async function GET(req: Request) {
       );
     }
 
-    const products = (await getSheetData(PRODUCTS_SHEET_NAME, {
-      ttlSeconds: DASHBOARD_TTL_SECONDS,
-    })) as ProductRecord[];
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
-    let filteredProducts = products.filter(
-      (item) => item && normalizeLower(item.slug)
-    );
+    const supabase = createSupabaseAdminClient();
+
+    let productsQuery = supabase
+      .from("products")
+      .select(
+        `
+        id,
+        title,
+        slug,
+        image_url,
+        image_file_id,
+        image_alt,
+        primary_collection_id,
+        status,
+        featured,
+        updated_at,
+        created_at,
+        short_description,
+        vendor,
+        product_category,
+        product_type,
+        tags,
+        product_images (
+          id,
+          product_id,
+          image_url,
+          image_file_id,
+          alt_text,
+          sort_order,
+          is_main,
+          created_at,
+          updated_at
+        ),
+        product_collections (
+          id,
+          product_id,
+          collection_id,
+          collections (
+            id,
+            title,
+            slug
+          )
+        )
+      `,
+        { count: "exact" }
+      )
+      .order("updated_at", { ascending: false })
+      .range(from, to);
 
     if (statusParam) {
-      filteredProducts = filteredProducts.filter(
-        (item) => normalizeLower(item.status) === statusParam
-      );
+      productsQuery = productsQuery.eq("status", statusParam);
     }
 
     if (queryParam) {
-      filteredProducts = filteredProducts.filter((item) =>
-        matchesQuery(item, queryParam)
+      const safeQuery = queryParam.replace(/[%]/g, "");
+
+      productsQuery = productsQuery.or(
+        [
+          `title.ilike.%${safeQuery}%`,
+          `slug.ilike.%${safeQuery}%`,
+          `short_description.ilike.%${safeQuery}%`,
+          `vendor.ilike.%${safeQuery}%`,
+          `product_type.ilike.%${safeQuery}%`,
+          `product_category.ilike.%${safeQuery}%`,
+          `tags.ilike.%${safeQuery}%`,
+        ].join(",")
       );
     }
 
-    filteredProducts.sort(compareByUpdatedAtDesc);
+    const [{ data, count, error }, basicSummary] = await Promise.all([
+      productsQuery,
+      getStatusSummary(),
+    ]);
 
-    const total = filteredProducts.length;
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const total = count || 0;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const safePage = Math.min(page, totalPages);
-    const start = (safePage - 1) * limit;
-    const end = start + limit;
 
-    const paginatedProducts = filteredProducts.slice(start, end);
-
-    const visibleProductSlugs = new Set(
-      paginatedProducts
-        .map((product) => normalizeLower(product.slug))
-        .filter(Boolean)
-    );
-
-    const productImages = visibleProductSlugs.size
-      ? ((await getSheetData(PRODUCT_IMAGES_SHEET_NAME, {
-          ttlSeconds: DASHBOARD_TTL_SECONDS,
-        })) as ProductImageRecord[])
-      : [];
-
-    const imageMap = buildImageMapForVisibleProducts(
-      productImages,
-      visibleProductSlugs
-    );
-
-    const items = paginatedProducts.map((product) =>
-      toDashboardItem(product, imageMap)
-    );
-
-    const basicSummary = getBasicSummary(filteredProducts);
+    const items = ((data || []) as ProductRecord[]).map(toDashboardItem);
     const gallerySummary = getGallerySummary(items);
 
     return NextResponse.json(

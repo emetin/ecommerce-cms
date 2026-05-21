@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { appendSheetRow, getSheetData } from "../../../../lib/sheets";
+import { createSupabaseAdminClient } from "../../../../lib/supabase/admin";
 
 type ApplicationBody = {
   company_name?: string;
@@ -13,20 +13,8 @@ type ApplicationBody = {
   notes?: string;
 };
 
-type ExistingApplicationRow = {
-  id?: string;
-  email?: string;
-  status?: string;
-};
-
-type ExistingCustomerRow = {
-  id?: string;
-  email?: string;
-  status?: string;
-};
-
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
 function normalizeLower(value: unknown) {
@@ -39,14 +27,26 @@ function isValidEmail(value: string) {
 
 function normalizeWebsite(value: string) {
   const clean = normalizeText(value);
+
   if (!clean) return "";
   if (/^https?:\/\//i.test(clean)) return clean;
+
   return `https://${clean}`;
+}
+
+function jsonError(message: string, status = 500) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    { status }
+  );
 }
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as ApplicationBody;
+    const body = (await req.json().catch(() => ({}))) as ApplicationBody;
 
     const companyName = normalizeText(body?.company_name);
     const contactName = normalizeText(body?.contact_name);
@@ -59,99 +59,91 @@ export async function POST(req: Request) {
     const notes = normalizeText(body?.notes);
 
     if (!companyName || !contactName || !email) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Company name, contact name, and email are required.",
-        },
-        { status: 400 }
+      return jsonError(
+        "Company name, contact name, and email are required.",
+        400
       );
     }
 
     if (!isValidEmail(email)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Please enter a valid email address.",
-        },
-        { status: 400 }
-      );
+      return jsonError("Please enter a valid email address.", 400);
     }
 
-    const [applications, customers] = await Promise.all([
-      getSheetData("customer_applications", { ttlSeconds: 30 }),
-      getSheetData("customers", { ttlSeconds: 30 }),
-    ]);
+    const supabase = createSupabaseAdminClient();
 
-    const existingApplication = (applications as ExistingApplicationRow[]).find(
-      (item) => normalizeLower(item.email) === email
-    );
+    const { data: existingApplication, error: applicationError } =
+      await supabase
+        .from("customer_applications")
+        .select("id, email, status")
+        .eq("email", email)
+        .maybeSingle();
+
+    if (applicationError) {
+      throw new Error(applicationError.message);
+    }
 
     if (existingApplication) {
-      const existingStatus = normalizeLower(existingApplication.status || "pending");
+      const existingStatus = normalizeLower(existingApplication.status);
 
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            existingStatus === "approved"
-              ? "An approved application already exists for this email."
-              : "An application already exists for this email and is currently under review.",
-        },
-        { status: 400 }
+      return jsonError(
+        existingStatus === "approved"
+          ? "An approved application already exists for this email."
+          : "An application already exists for this email and is currently under review.",
+        400
       );
     }
 
-    const existingCustomer = (customers as ExistingCustomerRow[]).find(
-      (item) => normalizeLower(item.email) === email
-    );
+    const { data: existingCustomer, error: customerError } = await supabase
+      .from("customers")
+      .select("id, email, status")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (customerError) {
+      throw new Error(customerError.message);
+    }
 
     if (existingCustomer) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "A customer account already exists for this email.",
-        },
-        { status: 400 }
-      );
+      return jsonError("A customer account already exists for this email.", 400);
     }
 
     const now = new Date().toISOString();
-    const id = crypto.randomUUID();
 
-    await appendSheetRow("customer_applications", [
-      id,
-      companyName,
-      contactName,
-      email,
-      phone,
-      country,
-      businessType,
-      taxId,
-      website,
-      notes,
-      "pending",
-      now,
-      "",
-      "",
-    ]);
+    const { data: application, error: insertError } = await supabase
+      .from("customer_applications")
+      .insert({
+        company_name: companyName,
+        contact_name: contactName,
+        email,
+        phone: phone || null,
+        country: country || null,
+        business_type: businessType || null,
+        tax_id: taxId || null,
+        website: website || null,
+        notes: notes || null,
+        status: "pending",
+        created_at: now,
+        approved_at: null,
+        reviewed_by: null,
+      })
+      .select("id")
+      .single();
+
+    if (insertError) {
+      throw new Error(insertError.message);
+    }
 
     return NextResponse.json({
       ok: true,
       message:
         "Your application has been received successfully. Our team will review your company information and contact you after approval.",
-      id,
+      id: application.id,
     });
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unknown error while submitting application.",
-      },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error
+        ? error.message
+        : "Unknown error while submitting application."
     );
   }
 }

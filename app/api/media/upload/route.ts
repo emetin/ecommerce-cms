@@ -1,65 +1,91 @@
 import { NextResponse } from "next/server";
-import { appendSheetRow, getSheetData } from "../../../../lib/sheets";
+import fs from "fs";
+import path from "path";
 
-const SHEET_NAME = "media";
+const ALLOWED_FOLDERS = ["product", "collection", "blog"] as const;
 
-const APPS_SCRIPT_MEDIA_URL = process.env.GOOGLE_APPS_SCRIPT_MEDIA_URL;
-const APPS_SCRIPT_MEDIA_SECRET = process.env.GOOGLE_APPS_SCRIPT_MEDIA_SECRET;
+const ALLOWED_MIME_TYPES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+];
 
-async function fileToBase64(file: File) {
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-
-  return buffer.toString("base64");
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim();
 }
 
-async function generateUniqueFileName(originalName: string) {
-  const existingFiles = await getSheetData(SHEET_NAME, {
-    forceFresh: true,
-    ttlSeconds: 0,
-  });
+function sanitizeFileName(fileName: string) {
+  return String(fileName || "image")
+    .toLowerCase()
+    .trim()
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9.\-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
-  const dotIndex = originalName.lastIndexOf(".");
-  const baseName =
-    dotIndex >= 0 ? originalName.slice(0, dotIndex) : originalName;
-  const extension = dotIndex >= 0 ? originalName.slice(dotIndex) : "";
+function getUploadsBaseDir() {
+  return path.resolve(process.cwd(), "public", "uploads");
+}
 
-  const existingNames = new Set(
-    Array.isArray(existingFiles)
-      ? existingFiles.map((item: any) =>
-          String(item.file_name || "").toLowerCase()
-        )
-      : []
-  );
+function isSafeUploadPath(fullPath: string) {
+  return path.resolve(fullPath).startsWith(getUploadsBaseDir());
+}
 
-  let finalName = originalName || `image-${Date.now()}`;
-  let counter = 1;
+function getMimeType(fileName: string, fallback = "") {
+  const ext = path.extname(fileName).toLowerCase();
 
-  while (existingNames.has(finalName.toLowerCase())) {
-    finalName = `${baseName}(${counter})${extension}`;
-    counter++;
-  }
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
 
-  return finalName;
+  return fallback || "application/octet-stream";
+}
+
+function normalizeMediaItem(params: {
+  folder: string;
+  fileName: string;
+  filePath: string;
+  altText: string;
+  uploadedAt: string;
+}) {
+  const stat = fs.statSync(params.filePath);
+  const url = `/uploads/${params.folder}/${params.fileName}`;
+  const id = `${params.folder}/${params.fileName}`;
+
+  return {
+    id,
+    file_name: params.fileName,
+    file_id: id,
+    image_url: url,
+    preview_url: url,
+    mime_type: getMimeType(params.fileName),
+    size_bytes: String(stat.size),
+    folder: params.folder,
+    alt_text:
+      params.altText ||
+      params.fileName.replace(/\.[a-z0-9]+$/i, "").replace(/[-_]+/g, " "),
+    created_at: params.uploadedAt,
+  };
 }
 
 export async function POST(req: Request) {
   try {
-    if (!APPS_SCRIPT_MEDIA_URL) {
-      throw new Error("Missing GOOGLE_APPS_SCRIPT_MEDIA_URL.");
-    }
-
-    if (!APPS_SCRIPT_MEDIA_SECRET) {
-      throw new Error("Missing GOOGLE_APPS_SCRIPT_MEDIA_SECRET.");
-    }
-
     const formData = await req.formData();
 
     const file = formData.get("file");
-    const folder = String(formData.get("folder") || "general").trim();
-    const altText = String(formData.get("alt_text") || "").trim();
+    const folder = normalizeText(formData.get("folder") || "product");
+    const altText = normalizeText(formData.get("alt_text"));
 
-    if (!file || !(file instanceof File)) {
+    if (!(file instanceof File)) {
       return NextResponse.json(
         {
           ok: false,
@@ -69,15 +95,17 @@ export async function POST(req: Request) {
       );
     }
 
-    const allowedTypes = [
-      "image/jpeg",
-      "image/jpg",
-      "image/png",
-      "image/webp",
-      "image/gif",
-    ];
+    if (!ALLOWED_FOLDERS.includes(folder as any)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Folder is required. Use "product", "collection", or "blog".',
+        },
+        { status: 400 }
+      );
+    }
 
-    if (!allowedTypes.includes(file.type)) {
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
       return NextResponse.json(
         {
           ok: false,
@@ -87,73 +115,58 @@ export async function POST(req: Request) {
       );
     }
 
-    const uniqueFileName = await generateUniqueFileName(file.name);
-    const fileBase64 = await fileToBase64(file);
+    const maxSizeMb = 8;
 
-    const scriptResponse = await fetch(APPS_SCRIPT_MEDIA_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/plain;charset=utf-8",
-      },
-      body: JSON.stringify({
-        action: "upload",
-        secret: APPS_SCRIPT_MEDIA_SECRET,
-        fileBase64,
-        fileName: uniqueFileName,
-        mimeType: file.type,
-        folder,
-      }),
-    });
-
-    const scriptData = await scriptResponse.json();
-
-    if (!scriptResponse.ok || !scriptData.ok) {
-      throw new Error(
-        scriptData.message ||
-          scriptData.error ||
-          "Apps Script upload failed."
+    if (file.size > maxSizeMb * 1024 * 1024) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Image must be smaller than ${maxSizeMb}MB.`,
+        },
+        { status: 400 }
       );
     }
 
-    const now = new Date().toISOString();
-    const id = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
 
-    const fileId = String(scriptData.fileId || "");
-    const imageUrl = String(scriptData.url || "");
-    const previewUrl = fileId
-      ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w300`
-      : imageUrl;
+    const uploadedAt = new Date().toISOString();
+    const safeOriginalName = sanitizeFileName(file.name || "image");
+    const fileName = `${folder}-${Date.now()}-${safeOriginalName}`;
 
-    const item = {
-      id,
-      file_name: uniqueFileName,
-      file_id: fileId,
-      image_url: imageUrl,
-      preview_url: previewUrl,
-      mime_type: file.type,
-      size_bytes: String(file.size || 0),
-      folder: folder || "general",
-      alt_text: altText,
-      created_at: now,
-    };
+    const uploadDir = path.resolve(getUploadsBaseDir(), folder);
 
-    await appendSheetRow(SHEET_NAME, [
-      item.id,
-      item.file_name,
-      item.file_id,
-      item.image_url,
-      item.preview_url,
-      item.mime_type,
-      item.size_bytes,
-      item.folder,
-      item.alt_text,
-      item.created_at,
-    ]);
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    const filePath = path.resolve(uploadDir, fileName);
+
+    if (!isSafeUploadPath(filePath)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid upload path.",
+        },
+        { status: 400 }
+      );
+    }
+
+    fs.writeFileSync(filePath, buffer);
+
+    const item = normalizeMediaItem({
+      folder,
+      fileName,
+      filePath,
+      altText,
+      uploadedAt,
+    });
 
     return NextResponse.json({
       ok: true,
-      message: "Media uploaded successfully.",
+      message: "Image uploaded successfully.",
       item,
+      items: [item],
     });
   } catch (error) {
     console.error("MEDIA_UPLOAD_ERROR:", error);

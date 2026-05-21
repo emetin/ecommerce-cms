@@ -1,27 +1,25 @@
 import { NextResponse } from "next/server";
-import { appendSheetRow, getSheetData } from "../../../../lib/sheets";
+import { createSupabaseAdminClient } from "../../../../lib/supabase/admin";
 
 type CollectionRecord = {
-  id?: string;
   title?: string;
   slug?: string;
   description?: string;
   image?: string;
+  image_url?: string;
   image_file_id?: string;
   image_alt?: string;
   image_uploaded_at?: string;
   status?: string;
-  created_at?: string;
-  updated_at?: string;
+  sort_order?: string | number;
   seo_title?: string;
   seo_description?: string;
 };
 
-const SHEET_NAME = "collections";
 const ALLOWED_STATUS = ["published", "draft", "archived"];
 
 function makeSlug(text: string) {
-  return text
+  return String(text || "")
     .toLowerCase()
     .trim()
     .replace(/ğ/g, "g")
@@ -37,149 +35,173 @@ function makeSlug(text: string) {
 }
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
+}
+
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
 }
 
 function normalizeStatus(value: unknown) {
-  return String(value || "draft").trim().toLowerCase();
+  return normalizeLower(value || "draft");
+}
+
+function toIntegerOrNull(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return null;
+  }
+
+  return Math.floor(number);
+}
+
+function jsonError(message: string, status = 500) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    { status }
+  );
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = (await req.json().catch(() => ({}))) as CollectionRecord;
 
     const title = normalizeText(body?.title);
     const slugInput = normalizeText(body?.slug);
     const description = normalizeText(body?.description);
-    const image = normalizeText(body?.image);
+    const image = normalizeText(body?.image_url || body?.image);
     const imageFileId = normalizeText(body?.image_file_id);
-    const imageAlt = normalizeText(body?.image_alt);
-    const imageUploadedAt = normalizeText(body?.image_uploaded_at);
+    const imageAlt = normalizeText(body?.image_alt || title);
     const status = normalizeStatus(body?.status);
-    const seoTitle = normalizeText(body?.seo_title);
-    const seoDescription = normalizeText(body?.seo_description);
+    const sortOrder = toIntegerOrNull(body?.sort_order);
+    const seoTitle = normalizeText(body?.seo_title || title);
+    const seoDescription = normalizeText(body?.seo_description || description);
 
     if (!title) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Title is required.",
-        },
-        { status: 400 }
-      );
+      return jsonError("Title is required.", 400);
     }
 
     const finalSlug = makeSlug(slugInput || title);
 
     if (!finalSlug) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "A valid slug could not be generated.",
-        },
-        { status: 400 }
-      );
+      return jsonError("A valid slug could not be generated.", 400);
     }
 
     if (!ALLOWED_STATUS.includes(status)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Status must be one of: "published", "draft", or "archived".',
-        },
-        { status: 400 }
+      return jsonError(
+        'Status must be one of: "published", "draft", or "archived".',
+        400
       );
     }
 
-    const existingCollections = (await getSheetData(
-      SHEET_NAME
-    )) as CollectionRecord[];
+    const supabase = createSupabaseAdminClient();
 
-    const normalizedTitle = title.toLowerCase();
-    const normalizedSlug = finalSlug.toLowerCase();
+    const { data: existingSlug, error: existingSlugError } = await supabase
+      .from("collections")
+      .select("id, slug")
+      .eq("slug", finalSlug)
+      .maybeSingle();
 
-    const slugExists = existingCollections.some(
-      (item) => String(item.slug || "").trim().toLowerCase() === normalizedSlug
-    );
-
-    if (slugExists) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "This slug is already in use.",
-        },
-        { status: 400 }
-      );
+    if (existingSlugError) {
+      throw new Error(existingSlugError.message);
     }
 
-    const titleExists = existingCollections.some(
-      (item) => String(item.title || "").trim().toLowerCase() === normalizedTitle
-    );
+    if (existingSlug) {
+      return jsonError("This slug is already in use.", 400);
+    }
 
-    if (titleExists) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "A collection with this title already exists.",
-        },
-        { status: 400 }
-      );
+    const { data: existingTitle, error: existingTitleError } = await supabase
+      .from("collections")
+      .select("id, title")
+      .ilike("title", title)
+      .maybeSingle();
+
+    if (existingTitleError) {
+      throw new Error(existingTitleError.message);
+    }
+
+    if (existingTitle) {
+      return jsonError("A collection with this title already exists.", 400);
     }
 
     const now = new Date().toISOString();
-    const id = `col_${Date.now()}`;
 
-    const finalSeoTitle = seoTitle || title;
-    const finalSeoDescription = seoDescription || description;
+    const { data: collection, error: createError } = await supabase
+      .from("collections")
+      .insert({
+        title,
+        slug: finalSlug,
+        description: description || null,
+        image_url: image || null,
+        image_file_id: imageFileId || null,
+        image_alt: imageAlt || null,
+        status,
+        sort_order: sortOrder,
+        seo_title: seoTitle || null,
+        seo_description: seoDescription || null,
+        created_at: now,
+        updated_at: now,
+      })
+      .select(
+        `
+        id,
+        title,
+        slug,
+        description,
+        image_url,
+        image_file_id,
+        image_alt,
+        status,
+        sort_order,
+        seo_title,
+        seo_description,
+        created_at,
+        updated_at
+      `
+      )
+      .single();
 
-    await appendSheetRow(SHEET_NAME, [
-      id,
-      title,
-      finalSlug,
-      description,
-      image,
-      imageFileId,
-      imageAlt,
-      imageUploadedAt,
-      status,
-      now,
-      now,
-      finalSeoTitle,
-      finalSeoDescription,
-    ]);
+    if (createError) {
+      throw new Error(createError.message);
+    }
 
     return NextResponse.json(
       {
         ok: true,
         message: "Collection created successfully.",
         item: {
-          id,
-          title,
-          slug: finalSlug,
-          description,
-          image,
-          image_file_id: imageFileId,
-          image_alt: imageAlt,
-          image_uploaded_at: imageUploadedAt,
-          status,
-          created_at: now,
-          updated_at: now,
-          seo_title: finalSeoTitle,
-          seo_description: finalSeoDescription,
+          id: normalizeText(collection.id),
+          title: normalizeText(collection.title),
+          slug: normalizeText(collection.slug),
+          description: normalizeText(collection.description),
+          image: normalizeText(collection.image_url),
+          image_url: normalizeText(collection.image_url),
+          image_file_id: normalizeText(collection.image_file_id),
+          image_alt: normalizeText(collection.image_alt),
+          image_uploaded_at: now,
+          status: normalizeText(collection.status),
+          sort_order: normalizeText(collection.sort_order),
+          created_at: normalizeText(collection.created_at),
+          updated_at: normalizeText(collection.updated_at),
+          seo_title: normalizeText(collection.seo_title),
+          seo_description: normalizeText(collection.seo_description),
         },
       },
       { status: 201 }
     );
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "An unexpected error occurred while creating the collection.",
-      },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error
+        ? error.message
+        : "An unexpected error occurred while creating the collection."
     );
   }
 }

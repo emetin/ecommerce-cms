@@ -1,27 +1,53 @@
 import { NextResponse } from "next/server";
-import { getSheetData } from "../../../../lib/sheets";
+import { createSupabaseAdminClient } from "../../../../lib/supabase/admin";
 
-type CollectionItem = Record<string, string>;
+type CollectionRow = {
+  id?: string | null;
+  title?: string | null;
+  slug?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  image_file_id?: string | null;
+  image_alt?: string | null;
+  status?: string | null;
+  sort_order?: number | string | null;
+  seo_title?: string | null;
+  seo_description?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
 
 const ALLOWED_STATUS = ["published", "draft", "archived"];
-const COLLECTIONS_TTL_SECONDS = 300;
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
 function normalizeLower(value: unknown) {
   return normalizeText(value).toLowerCase();
 }
 
-function toCollectionItem(item: CollectionItem) {
+function toSafeOrder(value: unknown) {
+  const num = Number(normalizeText(value));
+  return Number.isFinite(num) ? num : 999999;
+}
+
+function toCollectionItem(item: CollectionRow) {
   return {
     id: normalizeText(item.id),
     title: normalizeText(item.title),
     slug: normalizeText(item.slug),
     description: normalizeText(item.description),
-    image: normalizeText(item.image),
+
+    image: normalizeText(item.image_url),
+    image_url: normalizeText(item.image_url),
+    image_file_id: normalizeText(item.image_file_id),
+    image_alt: normalizeText(item.image_alt),
+
     status: normalizeText(item.status),
+    sort_order: String(toSafeOrder(item.sort_order)),
+    seo_title: normalizeText(item.seo_title),
+    seo_description: normalizeText(item.seo_description),
     created_at: normalizeText(item.created_at),
     updated_at: normalizeText(item.updated_at),
   };
@@ -42,19 +68,43 @@ export async function GET(req: Request) {
       );
     }
 
-    const collections = (await getSheetData("collections", {
-      ttlSeconds: COLLECTIONS_TTL_SECONDS,
-    })) as CollectionItem[];
+    const supabase = createSupabaseAdminClient();
 
-    let items = collections.filter((item) => item && normalizeText(item.slug));
+    let query = supabase
+      .from("collections")
+      .select(
+        `
+        id,
+        title,
+        slug,
+        description,
+        image_url,
+        image_file_id,
+        image_alt,
+        status,
+        sort_order,
+        seo_title,
+        seo_description,
+        created_at,
+        updated_at
+      `
+      )
+      .order("sort_order", { ascending: true })
+      .order("title", { ascending: true });
 
     if (statusParam) {
-      items = items.filter((item) => normalizeLower(item.status) === statusParam);
+      query = query.eq("status", statusParam);
     }
 
-    items = items
-      .map(toCollectionItem)
-      .sort((a, b) => normalizeText(a.title).localeCompare(normalizeText(b.title)));
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const items = ((data || []) as CollectionRow[])
+      .filter((item) => item && normalizeText(item.slug))
+      .map(toCollectionItem);
 
     return NextResponse.json(
       {

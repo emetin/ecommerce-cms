@@ -1,109 +1,166 @@
 import { NextResponse } from "next/server";
-import {
-  getSheetData,
-  getSheetHeaders,
-  updateSheetRowBySlug,
-} from "../../../../lib/sheets";
+import { createSupabaseAdminClient } from "../../../../lib/supabase/admin";
 
-type CollectionRecord = Record<string, string>;
+type CollectionRecord = {
+  slug?: string;
+  title?: string;
+  description?: string;
+  image?: string;
+  image_url?: string;
+  image_file_id?: string;
+  image_alt?: string;
+  image_uploaded_at?: string;
+  status?: string;
+  sort_order?: string | number;
+  seo_title?: string;
+  seo_description?: string;
+};
 
-const SHEET_NAME = "collections";
 const ALLOWED_STATUS = ["published", "draft", "archived"];
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
+}
+
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
 }
 
 function normalizeStatus(value: unknown) {
-  return String(value || "draft").trim().toLowerCase();
+  return normalizeLower(value || "draft");
+}
+
+function toIntegerOrNull(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return null;
+  }
+
+  return Math.floor(number);
+}
+
+function jsonError(message: string, status = 500) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    { status }
+  );
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = (await req.json().catch(() => ({}))) as CollectionRecord;
 
-    const slug = normalizeText(body?.slug).toLowerCase();
+    const slug = normalizeLower(body?.slug);
     const title = normalizeText(body?.title);
     const description = normalizeText(body?.description);
-    const image = normalizeText(body?.image);
+    const image = normalizeText(body?.image_url || body?.image);
     const imageFileId = normalizeText(body?.image_file_id);
-    const imageAlt = normalizeText(body?.image_alt);
-    const imageUploadedAt = normalizeText(body?.image_uploaded_at);
+    const imageAlt = normalizeText(body?.image_alt || title);
     const status = normalizeStatus(body?.status);
-    const seoTitle = normalizeText(body?.seo_title);
-    const seoDescription = normalizeText(body?.seo_description);
+    const sortOrder = toIntegerOrNull(body?.sort_order);
+    const seoTitle = normalizeText(body?.seo_title || title);
+    const seoDescription = normalizeText(body?.seo_description || description);
 
     if (!slug) {
-      return NextResponse.json(
-        { ok: false, error: "Slug is required." },
-        { status: 400 }
-      );
+      return jsonError("Slug is required.", 400);
     }
 
     if (!title) {
-      return NextResponse.json(
-        { ok: false, error: "Title is required." },
-        { status: 400 }
-      );
+      return jsonError("Title is required.", 400);
     }
 
     if (!ALLOWED_STATUS.includes(status)) {
-      return NextResponse.json(
-        { ok: false, error: "Invalid status value." },
-        { status: 400 }
-      );
+      return jsonError("Invalid status value.", 400);
     }
 
-    const items = (await getSheetData(SHEET_NAME)) as CollectionRecord[];
-    const current =
-      items.find(
-        (item) => String(item.slug || "").trim().toLowerCase() === slug
-      ) || null;
+    const supabase = createSupabaseAdminClient();
+
+    const { data: current, error: currentError } = await supabase
+      .from("collections")
+      .select("id, slug")
+      .eq("slug", slug)
+      .maybeSingle();
+
+    if (currentError) {
+      throw new Error(currentError.message);
+    }
 
     if (!current) {
-      return NextResponse.json(
-        { ok: false, error: "Collection not found." },
-        { status: 404 }
-      );
+      return jsonError("Collection not found.", 404);
     }
 
-    const headers = await getSheetHeaders(SHEET_NAME);
     const updatedAt = new Date().toISOString();
 
-    const merged: Record<string, string> = {
-      ...current,
-      title,
-      slug,
-      description,
-      image,
-      image_file_id: imageFileId,
-      image_alt: imageAlt,
-      image_uploaded_at: imageUploadedAt,
-      status,
-      updated_at: updatedAt,
-      seo_title: seoTitle || title,
-      seo_description: seoDescription || description,
-    };
+    const { data: updated, error: updateError } = await supabase
+      .from("collections")
+      .update({
+        title,
+        description: description || null,
+        image_url: image || null,
+        image_file_id: imageFileId || null,
+        image_alt: imageAlt || null,
+        status,
+        sort_order: sortOrder,
+        seo_title: seoTitle || null,
+        seo_description: seoDescription || null,
+        updated_at: updatedAt,
+      })
+      .eq("id", current.id)
+      .select(
+        `
+        id,
+        title,
+        slug,
+        description,
+        image_url,
+        image_file_id,
+        image_alt,
+        status,
+        sort_order,
+        seo_title,
+        seo_description,
+        created_at,
+        updated_at
+      `
+      )
+      .single();
 
-    const rowValues = headers.map((header) => merged[header] || "");
-
-    await updateSheetRowBySlug(SHEET_NAME, slug, rowValues);
+    if (updateError) {
+      throw new Error(updateError.message);
+    }
 
     return NextResponse.json({
       ok: true,
       message: "Collection updated successfully.",
-      item: merged,
+      item: {
+        id: normalizeText(updated.id),
+        title: normalizeText(updated.title),
+        slug: normalizeText(updated.slug),
+        description: normalizeText(updated.description),
+        image: normalizeText(updated.image_url),
+        image_url: normalizeText(updated.image_url),
+        image_file_id: normalizeText(updated.image_file_id),
+        image_alt: normalizeText(updated.image_alt),
+        image_uploaded_at: updatedAt,
+        status: normalizeText(updated.status),
+        sort_order: normalizeText(updated.sort_order),
+        created_at: normalizeText(updated.created_at),
+        updated_at: normalizeText(updated.updated_at),
+        seo_title: normalizeText(updated.seo_title),
+        seo_description: normalizeText(updated.seo_description),
+      },
     });
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to update collection.",
-      },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error ? error.message : "Failed to update collection."
     );
   }
 }

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { requireAdminFromRequest } from "../../../../../lib/api/admin";
 import { getCustomersList } from "../../../../../lib/db/customers";
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
 function normalizeLower(value: unknown) {
@@ -11,6 +12,8 @@ function normalizeLower(value: unknown) {
 
 export async function GET(req: Request) {
   try {
+    await requireAdminFromRequest(req);
+
     const { searchParams } = new URL(req.url);
 
     const status = normalizeLower(searchParams.get("status"));

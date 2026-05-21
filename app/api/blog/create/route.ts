@@ -1,27 +1,26 @@
 import { NextResponse } from "next/server";
-import { appendSheetRow, getSheetData } from "../../../../lib/sheets";
+import { createSupabaseAdminClient } from "../../../../lib/supabase/admin";
 
 type BlogRecord = {
-  id?: string;
   title?: string;
   slug?: string;
   excerpt?: string;
   content?: string;
   image?: string;
+  image_url?: string;
   image_file_id?: string;
   image_alt?: string;
   image_uploaded_at?: string;
   status?: string;
-  featured?: string;
-  created_at?: string;
-  updated_at?: string;
+  featured?: string | boolean;
+  seo_title?: string;
+  seo_description?: string;
 };
 
 const ALLOWED_STATUS = ["published", "draft", "archived"];
-const ALLOWED_FEATURED = ["true", "false"];
 
 function makeSlug(text: string) {
-  return text
+  return String(text || "")
     .toLowerCase()
     .trim()
     .replace(/ğ/g, "g")
@@ -37,158 +36,186 @@ function makeSlug(text: string) {
 }
 
 function normalizeText(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
+}
+
+function normalizeLower(value: unknown) {
+  return normalizeText(value).toLowerCase();
 }
 
 function normalizeStatus(value: unknown) {
-  return String(value || "draft").trim().toLowerCase();
+  return normalizeLower(value || "draft");
 }
 
-function normalizeBooleanString(value: unknown, fallback = "false") {
-  return String(value || fallback).trim().toLowerCase();
+function normalizeBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalized = normalizeLower(value);
+
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
+}
+
+function jsonError(message: string, status = 500) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    { status }
+  );
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = (await req.json().catch(() => ({}))) as BlogRecord;
 
     const title = normalizeText(body?.title);
     const slugInput = normalizeText(body?.slug);
     const excerpt = normalizeText(body?.excerpt);
     const content = normalizeText(body?.content);
-    const image = normalizeText(body?.image);
+    const image = normalizeText(body?.image_url || body?.image);
     const imageFileId = normalizeText(body?.image_file_id);
-    const imageAlt = normalizeText(body?.image_alt);
-    const imageUploadedAt = normalizeText(body?.image_uploaded_at);
+    const imageAlt = normalizeText(body?.image_alt || title);
     const status = normalizeStatus(body?.status);
-    const featured = normalizeBooleanString(body?.featured, "false");
+    const featured = normalizeBoolean(body?.featured, false);
+    const seoTitle = normalizeText(body?.seo_title || title);
+    const seoDescription = normalizeText(
+      body?.seo_description || excerpt || content
+    );
 
     if (!title) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Title is required.",
-        },
-        { status: 400 }
-      );
+      return jsonError("Title is required.", 400);
     }
 
     const finalSlug = makeSlug(slugInput || title);
 
     if (!finalSlug) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "A valid slug could not be generated.",
-        },
-        { status: 400 }
-      );
+      return jsonError("A valid slug could not be generated.", 400);
     }
 
     if (!ALLOWED_STATUS.includes(status)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Status must be one of: "published", "draft", or "archived".',
-        },
-        { status: 400 }
+      return jsonError(
+        'Status must be one of: "published", "draft", or "archived".',
+        400
       );
     }
 
-    if (!ALLOWED_FEATURED.includes(featured)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Featured must be either "true" or "false".',
-        },
-        { status: 400 }
-      );
+    const supabase = createSupabaseAdminClient();
+
+    const { data: existingSlug, error: existingSlugError } = await supabase
+      .from("blog")
+      .select("id, slug")
+      .eq("slug", finalSlug)
+      .maybeSingle();
+
+    if (existingSlugError) {
+      throw new Error(existingSlugError.message);
     }
 
-    const existingPosts = (await getSheetData("blog")) as BlogRecord[];
-
-    const normalizedTitle = title.toLowerCase();
-    const normalizedSlug = finalSlug.toLowerCase();
-
-    const slugExists = existingPosts.some(
-      (item) => String(item.slug || "").trim().toLowerCase() === normalizedSlug
-    );
-
-    if (slugExists) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "This slug is already in use.",
-        },
-        { status: 400 }
-      );
+    if (existingSlug) {
+      return jsonError("This slug is already in use.", 400);
     }
 
-    const titleExists = existingPosts.some(
-      (item) => String(item.title || "").trim().toLowerCase() === normalizedTitle
-    );
+    const { data: existingTitle, error: existingTitleError } = await supabase
+      .from("blog")
+      .select("id, title")
+      .ilike("title", title)
+      .maybeSingle();
 
-    if (titleExists) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "A blog post with this title already exists.",
-        },
-        { status: 400 }
-      );
+    if (existingTitleError) {
+      throw new Error(existingTitleError.message);
+    }
+
+    if (existingTitle) {
+      return jsonError("A blog post with this title already exists.", 400);
     }
 
     const now = new Date().toISOString();
-    const id = `blog_${Date.now()}`;
 
-    await appendSheetRow("blog", [
-      id,
-      title,
-      finalSlug,
-      excerpt,
-      content,
-      image,
-      imageFileId,
-      imageAlt,
-      imageUploadedAt,
-      status,
-      featured,
-      now,
-      now,
-    ]);
+    const { data: post, error: createError } = await supabase
+      .from("blog")
+      .insert({
+        title,
+        slug: finalSlug,
+        excerpt: excerpt || null,
+        content: content || null,
+        image_url: image || null,
+        image_file_id: imageFileId || null,
+        image_alt: imageAlt || null,
+        status,
+        featured,
+        published_at: status === "published" ? now : null,
+        seo_title: seoTitle || null,
+        seo_description: seoDescription || null,
+        created_at: now,
+        updated_at: now,
+      })
+      .select(
+        `
+        id,
+        title,
+        slug,
+        excerpt,
+        content,
+        image_url,
+        image_file_id,
+        image_alt,
+        status,
+        featured,
+        published_at,
+        seo_title,
+        seo_description,
+        created_at,
+        updated_at
+      `
+      )
+      .single();
+
+    if (createError) {
+      throw new Error(createError.message);
+    }
 
     return NextResponse.json(
       {
         ok: true,
         message: "Blog post created successfully.",
         item: {
-          id,
-          title,
-          slug: finalSlug,
-          excerpt,
-          content,
-          image,
-          image_file_id: imageFileId,
-          image_alt: imageAlt,
-          image_uploaded_at: imageUploadedAt,
-          status,
-          featured,
-          created_at: now,
-          updated_at: now,
+          id: normalizeText(post.id),
+          title: normalizeText(post.title),
+          slug: normalizeText(post.slug),
+          excerpt: normalizeText(post.excerpt),
+          content: normalizeText(post.content),
+          image: normalizeText(post.image_url),
+          image_url: normalizeText(post.image_url),
+          image_file_id: normalizeText(post.image_file_id),
+          image_alt: normalizeText(post.image_alt),
+          image_uploaded_at: now,
+          status: normalizeText(post.status),
+          featured: post.featured ? "true" : "false",
+          published_at: normalizeText(post.published_at),
+          seo_title: normalizeText(post.seo_title),
+          seo_description: normalizeText(post.seo_description),
+          created_at: normalizeText(post.created_at),
+          updated_at: normalizeText(post.updated_at),
         },
       },
       { status: 201 }
     );
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "An unexpected error occurred while creating the blog post.",
-      },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error
+        ? error.message
+        : "An unexpected error occurred while creating the blog post."
     );
   }
 }

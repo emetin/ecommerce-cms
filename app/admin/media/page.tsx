@@ -54,38 +54,8 @@ function formatDate(value: string) {
   });
 }
 
-function extractDriveFileId(url: string) {
-  if (!url) return "";
-
-  const patterns = [/\/file\/d\/([^/]+)/, /id=([^&]+)/, /\/d\/([^/]+)/];
-
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-
-    if (match?.[1]) {
-      return match[1];
-    }
-  }
-
-  return "";
-}
-
-function formatFrontendDriveUrl(url: string, size = "w1600") {
-  const fileId = extractDriveFileId(url);
-
-  if (!fileId) return url;
-
-  return `https://drive.google.com/thumbnail?id=${fileId}&sz=${size}`;
-}
-
 function getPreviewUrl(item: MediaItem) {
-  const fileId = item.file_id || extractDriveFileId(item.image_url);
-
-  if (fileId) {
-    return `https://drive.google.com/thumbnail?id=${fileId}&sz=w300`;
-  }
-
-  return item.image_url || "";
+  return item.preview_url || item.image_url || "";
 }
 
 function getFileExtension(item: MediaItem) {
@@ -227,6 +197,7 @@ export default function AdminMediaPage() {
         body: JSON.stringify({
           id: item.id,
           file_id: item.file_id,
+          image_url: item.image_url,
         }),
       });
 
@@ -473,11 +444,8 @@ export default function AdminMediaPage() {
 
   async function handleCopy(url: string) {
     try {
-      const formattedUrl = formatFrontendDriveUrl(url, "w1600");
-
-      await navigator.clipboard.writeText(formattedUrl);
-
-      setSuccessMessage("Frontend-ready image URL copied.");
+      await navigator.clipboard.writeText(url);
+      setSuccessMessage("Image URL copied.");
     } catch {
       setErrorMessage("Could not copy URL. Please copy it manually.");
     }
@@ -485,7 +453,7 @@ export default function AdminMediaPage() {
 
   async function handleDelete(item: MediaItem) {
     const confirmed = window.confirm(
-      "Are you sure you want to delete this image from Google Drive and Media Library?"
+      "Are you sure you want to delete this image from the Media Library?"
     );
 
     if (!confirmed) return;
@@ -520,8 +488,8 @@ export default function AdminMediaPage() {
         <div>
           <h1 style={titleStyle}>Media Library</h1>
           <p style={subtitleStyle}>
-            Select images and they will be uploaded automatically to Google
-            Drive.
+            Select images and they will be uploaded automatically to the local
+            media library.
           </p>
         </div>
 
@@ -676,19 +644,8 @@ export default function AdminMediaPage() {
                                 }
                                 style={thumbStyle}
                                 loading="lazy"
-                                referrerPolicy="no-referrer"
                                 onError={(event) => {
-                                  const target = event.currentTarget;
-                                  const fileId =
-                                    item.file_id ||
-                                    extractDriveFileId(item.image_url);
-
-                                  if (fileId && target.src !== item.image_url) {
-                                    target.src = `https://drive.google.com/uc?export=view&id=${fileId}`;
-                                    return;
-                                  }
-
-                                  target.style.display = "none";
+                                  event.currentTarget.style.display = "none";
                                 }}
                               />
                             ) : (

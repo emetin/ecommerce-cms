@@ -446,7 +446,7 @@ export default function AdminProductImagesPage({
     }
   }
 
-  async function handleFixMissingAltTexts() {
+    async function handleFixMissingAltTexts() {
     try {
       setFixingAltTexts(true);
       setResultMessage("");
@@ -458,6 +458,7 @@ export default function AdminProductImagesPage({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          product_slug: slug,
           mode: "overwrite_weak",
         }),
       });
